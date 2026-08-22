@@ -9,6 +9,8 @@ public protocol ProjectsAPIClient: Sendable {
     func createProject(name: String) async throws -> Project
     func updateProject(id: UUID, name: String) async throws -> Project
     func deleteProject(id: UUID) async throws
+    /// Attaches, changes, or removes (`dueDate: nil`) a Project's Deadline.
+    func setProjectDeadline(id: UUID, dueDate: Date?) async throws -> Project
 }
 
 public enum ProjectsAPIClientError: Error {
@@ -30,7 +32,12 @@ public struct URLSessionProjectsAPIClient: ProjectsAPIClient {
         self.bearerToken = bearerToken
         self.session = session
         self.decoder = JSONDecoder()
+        // Matches the backend's `ContentConfiguration` (Vapor's default),
+        // which encodes/decodes `Date` as an ISO 8601 string rather than
+        // `JSONDecoder`'s own default of seconds-since-1970.
+        self.decoder.dateDecodingStrategy = .iso8601
         self.encoder = JSONEncoder()
+        self.encoder.dateEncodingStrategy = .iso8601
     }
 
     public func listProjects() async throws -> [Project] {
@@ -56,8 +63,18 @@ public struct URLSessionProjectsAPIClient: ProjectsAPIClient {
         try Self.checkStatus(response)
     }
 
+    public func setProjectDeadline(id: UUID, dueDate: Date?) async throws -> Project {
+        var request = try makeRequest(path: "v1/projects/\(id)/deadline", method: "PUT")
+        try attach(SetProjectDeadlinePayload(dueDate: dueDate), to: &request)
+        return try await send(request)
+    }
+
     private struct SaveProjectPayload: Encodable {
         let name: String
+    }
+
+    private struct SetProjectDeadlinePayload: Encodable {
+        let dueDate: Date?
     }
 
     private func attach<Body: Encodable>(_ body: Body, to request: inout URLRequest) throws {

@@ -4,15 +4,23 @@ import Vapor
 struct ProjectResponse: Content {
     let id: UUID
     let name: String
+    let dueDate: Date?
 
     init(_ project: Project) throws {
         self.id = try project.requireID()
         self.name = project.name
+        self.dueDate = project.dueDate
     }
 }
 
 struct SaveProjectRequest: Content {
     let name: String
+}
+
+/// `dueDate: nil` (or the key omitted entirely) clears the Project's
+/// Deadline — same "missing means null" shape as `SetTaskDeadlineRequest`.
+struct SetProjectDeadlineRequest: Content {
+    let dueDate: Date?
 }
 
 struct ProjectController: RouteCollection {
@@ -23,6 +31,7 @@ struct ProjectController: RouteCollection {
         projects.group(":projectID") { project in
             project.put(use: update)
             project.delete(use: delete)
+            project.put("deadline", use: setDeadline)
         }
     }
 
@@ -65,6 +74,18 @@ struct ProjectController: RouteCollection {
         }
         try await project.delete(on: req.db)
         return .noContent
+    }
+
+    /// Attach, change, or remove (`dueDate: null`) a Project's Deadline —
+    /// all three ACs are the same write, mirroring `TaskController.setDeadline`.
+    func setDeadline(req: Request) async throws -> ProjectResponse {
+        guard let project = try await findProject(req: req) else {
+            throw Abort(.notFound)
+        }
+        let payload = try req.content.decode(SetProjectDeadlineRequest.self)
+        project.dueDate = payload.dueDate
+        try await project.save(on: req.db)
+        return try ProjectResponse(project)
     }
 
     private func findProject(req: Request) async throws -> Project? {
