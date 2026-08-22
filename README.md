@@ -51,26 +51,34 @@ All routes require `Authorization: Bearer <token>` and are versioned under `/v1`
 | `PUT` | `/v1/tasks/:taskID/complete` | Mark a Task complete |
 | `PUT` | `/v1/tasks/:taskID/incomplete` | Mark a Task incomplete |
 | `PUT` | `/v1/tasks/:taskID/project` | Assign/move/remove a Task's Project (`{ "projectID": "..."? }`, omit or `null` to remove) |
+| `PUT` | `/v1/tasks/:taskID/deadline` | Attach/change/remove a Task's Deadline (`{ "dueDate": "<ISO 8601>"? }`, omit or `null` to remove) |
+| `PUT` | `/v1/projects/:projectID/deadline` | Attach/change/remove a Project's Deadline (`{ "dueDate": "<ISO 8601>"? }`, omit or `null` to remove) |
+| `GET` | `/v1/deadlines` | Every Task and Project together, ordered by Deadline proximity (undated items included, sorted last) |
 
 Deleting a Project doesn't delete its Tasks — they become Project-less.
 
 ## Client (Mac/iOS)
 
 `Sources/PCCUI` is a shared SwiftUI library for the Projects screen
-(`ProjectsView` + `ProjectsViewModel` + `URLSessionProjectsAPIClient`) and the
+(`ProjectsView` + `ProjectsViewModel` + `URLSessionProjectsAPIClient`), the
 Tasks screen (`TasksView` + `TasksViewModel` + `URLSessionTasksAPIClient`),
-built as a plain SPM target with no Vapor/Fluent dependency. It isn't wrapped
-in an Xcode app target yet — no Xcode is set up in this environment. To use
-it:
+and the read-only Deadlines screen (`DeadlinesView` + `DeadlinesViewModel` +
+`URLSessionDeadlinesAPIClient`), built as a plain SPM target with no
+Vapor/Fluent dependency. It isn't wrapped in an Xcode app target yet — no
+Xcode is set up in this environment. To use it:
 
 1. Create the Mac and/or iOS App targets in Xcode (`File > New > Project`).
 2. Add this repository as a local Swift package dependency and link `PCCUI`.
-3. From each app's entry point, construct a `URLSessionProjectsAPIClient` and
-   `URLSessionTasksAPIClient` with the backend's base URL and the device's
-   bearer token. Wrap the former in a `ProjectsViewModel` to show
-   `ProjectsView(viewModel:)`; wrap both in a `TasksViewModel` (pass
-   `scopedProjectID` to scope the screen to one Project, or omit it to list
-   every Task) to show `TasksView(viewModel:)`.
+3. From each app's entry point, construct a `URLSessionProjectsAPIClient`,
+   `URLSessionTasksAPIClient`, and `URLSessionDeadlinesAPIClient` with the
+   backend's base URL and the device's bearer token. Wrap the first in a
+   `ProjectsViewModel` to show `ProjectsView(viewModel:)`; wrap the second in
+   a `TasksViewModel` (pass `scopedProjectID` to scope the screen to one
+   Project, or omit it to list every Task) to show `TasksView(viewModel:)`;
+   wrap the third in a `DeadlinesViewModel` to show
+   `DeadlinesView(viewModel:)`. A Task or Project's Deadline is set/cleared
+   from its own create/edit form in `TasksView`/`ProjectsView` — the
+   Deadlines screen is a read-only sorted view of both.
 
 The backend's `PCCTask` model and the client's `PCCTask` struct are named
 `PCCTask` in Swift, not `Task` — that would shadow `_Concurrency.Task`

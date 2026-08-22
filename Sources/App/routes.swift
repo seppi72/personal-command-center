@@ -5,4 +5,5 @@ func routes(_ app: Application) throws {
     try v1.register(collection: HealthController())
     try v1.register(collection: ProjectController())
     try v1.register(collection: TaskController())
+    try v1.register(collection: DeadlineController())
 }

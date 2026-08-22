@@ -7,6 +7,7 @@ struct TaskResponse: Content {
     let notes: String?
     let isComplete: Bool
     let projectID: UUID?
+    let dueDate: Date?
 
     init(_ task: PCCTask) throws {
         self.id = try task.requireID()
@@ -14,6 +15,7 @@ struct TaskResponse: Content {
         self.notes = task.notes
         self.isComplete = task.isComplete
         self.projectID = task.$project.id
+        self.dueDate = task.dueDate
     }
 }
 
@@ -29,6 +31,12 @@ struct AssignTaskProjectRequest: Content {
     let projectID: UUID?
 }
 
+/// `dueDate: nil` (or the key omitted entirely) clears the Task's Deadline —
+/// same "missing means null" shape as `AssignTaskProjectRequest`.
+struct SetTaskDeadlineRequest: Content {
+    let dueDate: Date?
+}
+
 struct TaskController: RouteCollection {
     func boot(routes: any RoutesBuilder) throws {
         let tasks = routes.grouped("tasks")
@@ -40,6 +48,7 @@ struct TaskController: RouteCollection {
             task.put("complete", use: markComplete)
             task.put("incomplete", use: markIncomplete)
             task.put("project", use: assignProject)
+            task.put("deadline", use: setDeadline)
         }
     }
 
@@ -117,6 +126,18 @@ struct TaskController: RouteCollection {
             }
         }
         task.$project.id = payload.projectID
+        try await task.save(on: req.db)
+        return try TaskResponse(task)
+    }
+
+    /// Attach, change, or remove (`dueDate: null`) a Task's Deadline — all
+    /// three ACs are the same write, mirroring `assignProject`.
+    func setDeadline(req: Request) async throws -> TaskResponse {
+        guard let task = try await findTask(req: req) else {
+            throw Abort(.notFound)
+        }
+        let payload = try req.content.decode(SetTaskDeadlineRequest.self)
+        task.dueDate = payload.dueDate
         try await task.save(on: req.db)
         return try TaskResponse(task)
     }

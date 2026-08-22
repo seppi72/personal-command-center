@@ -1,9 +1,10 @@
 import Fluent
 import Vapor
 
-/// A container of related Tasks with its own lifecycle (`CONTEXT.md`).
-/// This slice (ticket #3) only tracks the name — Deadline and Client
-/// references land in later tickets once those domains exist.
+/// A container of related Tasks with its own lifecycle (`CONTEXT.md`). May
+/// carry a Deadline (ticket #5) — modeled as a plain nullable field, same
+/// tradeoff as `PCCTask.dueDate`. Client references land in a later ticket
+/// once that domain exists.
 final class Project: Model, @unchecked Sendable {
     static let schema = "projects"
 
@@ -13,10 +14,14 @@ final class Project: Model, @unchecked Sendable {
     @Field(key: "name")
     var name: String
 
+    @OptionalField(key: "due_date")
+    var dueDate: Date?
+
     init() {}
 
-    init(id: UUID? = nil, name: String) {
+    init(id: UUID? = nil, name: String, dueDate: Date? = nil) {
         self.id = id
         self.name = name
+        self.dueDate = dueDate
     }
 }

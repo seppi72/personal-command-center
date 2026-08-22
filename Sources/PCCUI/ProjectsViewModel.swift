@@ -27,15 +27,28 @@ public final class ProjectsViewModel: ObservableObject {
         }
     }
 
-    public func createProject(name: String) async {
+    /// Creates a Project and, if `values.dueDate` is given, attaches it in a
+    /// follow-up call — a Project is always created undated on the backend
+    /// (`ProjectController.create`), so a Deadline is a separate write.
+    public func createProject(_ values: ProjectFormValues) async {
         await run(verb: "create") {
-            projects.append(try await client.createProject(name: name))
+            var created = try await client.createProject(name: values.name)
+            if let dueDate = values.dueDate {
+                created = try await client.setProjectDeadline(id: created.id, dueDate: dueDate)
+            }
+            projects.append(created)
         }
     }
 
-    public func renameProject(_ project: Project, to name: String) async {
-        await run(verb: "rename") {
-            let updated = try await client.updateProject(id: project.id, name: name)
+    /// Renames a Project and, only if `values.dueDate` differs from
+    /// `project`'s current one, updates its Deadline as a follow-up write —
+    /// the same "write, then maybe update the rest" shape as `createProject`.
+    public func updateProject(_ project: Project, with values: ProjectFormValues) async {
+        await run(verb: "update") {
+            var updated = try await client.updateProject(id: project.id, name: values.name)
+            if values.dueDate != project.dueDate {
+                updated = try await client.setProjectDeadline(id: project.id, dueDate: values.dueDate)
+            }
             if let index = projects.firstIndex(where: { $0.id == updated.id }) {
                 projects[index] = updated
             }

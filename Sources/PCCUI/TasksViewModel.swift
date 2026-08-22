@@ -38,14 +38,18 @@ public final class TasksViewModel: ObservableObject {
         }
     }
 
-    /// Creates a Task and, if `values.projectID` is given, assigns it in a
-    /// second call — a Task is always created Project-less on the backend
-    /// (`TaskController.create`), so assignment is a follow-up write.
+    /// Creates a Task and, if `values.projectID`/`values.dueDate` is given,
+    /// assigns/attaches it in a follow-up call — a Task is always created
+    /// Project-less and undated on the backend (`TaskController.create`), so
+    /// both are separate writes.
     public func createTask(_ values: TaskFormValues) async {
         await run(verb: "create") {
             var created = try await tasksClient.createTask(title: values.title, notes: values.notes)
             if let projectID = values.projectID {
                 created = try await tasksClient.assignTaskProject(id: created.id, projectID: projectID)
+            }
+            if let dueDate = values.dueDate {
+                created = try await tasksClient.setTaskDeadline(id: created.id, dueDate: dueDate)
             }
             if scopedProjectID == nil || created.projectID == scopedProjectID {
                 tasks.append(created)
@@ -53,15 +57,19 @@ public final class TasksViewModel: ObservableObject {
         }
     }
 
-    /// Edits a Task's title/notes and, only if `values.projectID` differs
-    /// from `task`'s current one, reassigns its Project as a second write —
-    /// the same "write, then maybe reassign" shape as `createTask`, kept
-    /// here rather than left for the caller to decide.
+    /// Edits a Task's title/notes and, only where `values.projectID`/
+    /// `values.dueDate` differs from `task`'s current one, reassigns its
+    /// Project and/or Deadline as follow-up writes — the same "write, then
+    /// maybe update the rest" shape as `createTask`, kept here rather than
+    /// left for the caller to decide.
     public func updateTask(_ task: PCCTask, with values: TaskFormValues) async {
         await run(verb: "update") {
             var updated = try await tasksClient.updateTask(id: task.id, title: values.title, notes: values.notes)
             if values.projectID != task.projectID {
                 updated = try await tasksClient.assignTaskProject(id: task.id, projectID: values.projectID)
+            }
+            if values.dueDate != task.dueDate {
+                updated = try await tasksClient.setTaskDeadline(id: task.id, dueDate: values.dueDate)
             }
             replace(updated)
         }

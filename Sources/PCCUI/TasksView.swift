@@ -2,10 +2,10 @@ import SwiftUI
 
 /// Minimal Mac/iOS screen for ticket #4: lists Tasks (optionally scoped to
 /// one Project via `TasksViewModel`'s `scopedProjectID`), and supports
-/// creating, editing, deleting, completing/uncompleting, and reassigning a
-/// Task's Project. One shared SwiftUI view for both platforms — no
-/// platform-specific chrome, per the ticket's "minimal" scope (mirrors
-/// `ProjectsView`).
+/// creating, editing, deleting, completing/uncompleting, reassigning a
+/// Task's Project, and setting/clearing its Deadline (ticket #5). One shared
+/// SwiftUI view for both platforms — no platform-specific chrome, per the
+/// ticket's "minimal" scope (mirrors `ProjectsView`).
 public struct TasksView: View {
     @ObservedObject private var viewModel: TasksViewModel
     @State private var isPresentingNewTaskSheet = false
@@ -47,6 +47,7 @@ public struct TasksView: View {
                     initialTitle: "",
                     initialNotes: "",
                     initialProjectID: nil,
+                    initialDueDate: nil,
                     projects: viewModel.projects
                 ) { values in
                     await viewModel.createTask(values)
@@ -58,6 +59,7 @@ public struct TasksView: View {
                     initialTitle: task.title,
                     initialNotes: task.notes ?? "",
                     initialProjectID: task.projectID,
+                    initialDueDate: task.dueDate,
                     projects: viewModel.projects
                 ) { values in
                     await viewModel.updateTask(task, with: values)
@@ -90,6 +92,11 @@ public struct TasksView: View {
                             if let notes = task.notes {
                                 Text(notes)
                                     .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if let dueDate = task.dueDate {
+                                Text(dueDate, style: .date)
+                                    .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
                         }
@@ -130,8 +137,8 @@ public struct TasksView: View {
 }
 
 /// Shared create/edit form: the same sheet serves "New Task" and "Edit
-/// Task" — a title, optional notes, and a Project picker (mirrors
-/// `ProjectFormSheet`).
+/// Task" — a title, optional notes, a Project picker, and a Deadline toggle
+/// (mirrors `ProjectFormSheet`).
 struct TaskFormSheet: View {
     let title: String
     let projects: [Project]
@@ -140,6 +147,8 @@ struct TaskFormSheet: View {
     @State private var taskTitle: String
     @State private var notes: String
     @State private var projectID: UUID?
+    @State private var hasDeadline: Bool
+    @State private var dueDate: Date
     @Environment(\.dismiss) private var dismiss
 
     init(
@@ -147,6 +156,7 @@ struct TaskFormSheet: View {
         initialTitle: String,
         initialNotes: String,
         initialProjectID: UUID?,
+        initialDueDate: Date?,
         projects: [Project],
         onSave: @escaping (TaskFormValues) async -> Void
     ) {
@@ -156,6 +166,8 @@ struct TaskFormSheet: View {
         self._taskTitle = State(initialValue: initialTitle)
         self._notes = State(initialValue: initialNotes)
         self._projectID = State(initialValue: initialProjectID)
+        self._hasDeadline = State(initialValue: initialDueDate != nil)
+        self._dueDate = State(initialValue: initialDueDate ?? Date())
     }
 
     private var trimmedTitle: String {
@@ -165,6 +177,12 @@ struct TaskFormSheet: View {
     private var trimmedNotes: String? {
         let trimmed = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// `nil` unless the "Has deadline" toggle is on — SwiftUI's `DatePicker`
+    /// has no built-in optional-date mode, so the toggle stands in for one.
+    private var selectedDueDate: Date? {
+        hasDeadline ? dueDate : nil
     }
 
     var body: some View {
@@ -178,6 +196,12 @@ struct TaskFormSheet: View {
                         Text(project.name).tag(UUID?.some(project.id))
                     }
                 }
+                Section("Deadline") {
+                    Toggle("Has deadline", isOn: $hasDeadline)
+                    if hasDeadline {
+                        DatePicker("Due", selection: $dueDate, displayedComponents: .date)
+                    }
+                }
             }
             .navigationTitle(title)
             .toolbar {
@@ -186,7 +210,12 @@ struct TaskFormSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        let values = TaskFormValues(title: trimmedTitle, notes: trimmedNotes, projectID: projectID)
+                        let values = TaskFormValues(
+                            title: trimmedTitle,
+                            notes: trimmedNotes,
+                            projectID: projectID,
+                            dueDate: selectedDueDate
+                        )
                         Task {
                             await onSave(values)
                             dismiss()

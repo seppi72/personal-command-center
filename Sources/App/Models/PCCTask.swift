@@ -3,7 +3,10 @@ import Vapor
 
 /// The atomic unit of work (`CONTEXT.md`). May belong to a Project — the
 /// foreign key is optional and Project-less is a valid, ordinary state, not
-/// an error case — and may carry a Deadline once that domain exists.
+/// an error case — and may carry a Deadline: a due-date concept (`CONTEXT.md`)
+/// modeled here as a plain nullable field rather than its own entity, since
+/// nothing about it needs an identity independent of the Task it's attached
+/// to.
 ///
 /// Named `PCCTask` in Swift only: an unqualified `Task` here would shadow
 /// `_Concurrency.Task` for this whole target (and `PCCUI`, which already
@@ -28,13 +31,24 @@ final class PCCTask: Model, @unchecked Sendable {
     @OptionalParent(key: "project_id")
     var project: Project?
 
+    @OptionalField(key: "due_date")
+    var dueDate: Date?
+
     init() {}
 
-    init(id: UUID? = nil, title: String, notes: String? = nil, isComplete: Bool = false, projectID: UUID? = nil) {
+    init(
+        id: UUID? = nil,
+        title: String,
+        notes: String? = nil,
+        isComplete: Bool = false,
+        projectID: UUID? = nil,
+        dueDate: Date? = nil
+    ) {
         self.id = id
         self.title = title
         self.notes = notes
         self.isComplete = isComplete
         self.$project.id = projectID
+        self.dueDate = dueDate
     }
 }

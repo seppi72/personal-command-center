@@ -14,12 +14,21 @@ public struct PCCTask: Codable, Identifiable, Equatable, Sendable {
     public var notes: String?
     public var isComplete: Bool
     public var projectID: UUID?
+    public var dueDate: Date?
 
-    public init(id: UUID, title: String, notes: String? = nil, isComplete: Bool = false, projectID: UUID? = nil) {
+    public init(
+        id: UUID,
+        title: String,
+        notes: String? = nil,
+        isComplete: Bool = false,
+        projectID: UUID? = nil,
+        dueDate: Date? = nil
+    ) {
         self.id = id
         self.title = title
         self.notes = notes
         self.isComplete = isComplete
         self.projectID = projectID
+        self.dueDate = dueDate
     }
 }

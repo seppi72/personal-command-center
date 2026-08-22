@@ -14,6 +14,8 @@ public protocol TasksAPIClient: Sendable {
     func setTaskCompletion(id: UUID, isComplete: Bool) async throws -> PCCTask
     /// Assigns, moves, or removes (`projectID: nil`) a Task's Project.
     func assignTaskProject(id: UUID, projectID: UUID?) async throws -> PCCTask
+    /// Attaches, changes, or removes (`dueDate: nil`) a Task's Deadline.
+    func setTaskDeadline(id: UUID, dueDate: Date?) async throws -> PCCTask
 }
 
 public enum TasksAPIClientError: Error {
@@ -35,7 +37,12 @@ public struct URLSessionTasksAPIClient: TasksAPIClient {
         self.bearerToken = bearerToken
         self.session = session
         self.decoder = JSONDecoder()
+        // Matches the backend's `ContentConfiguration` (Vapor's default),
+        // which encodes/decodes `Date` as an ISO 8601 string rather than
+        // `JSONDecoder`'s own default of seconds-since-1970.
+        self.decoder.dateDecodingStrategy = .iso8601
         self.encoder = JSONEncoder()
+        self.encoder.dateEncodingStrategy = .iso8601
     }
 
     public func listTasks(projectID: UUID?) async throws -> [PCCTask] {
@@ -84,6 +91,12 @@ public struct URLSessionTasksAPIClient: TasksAPIClient {
         return try await send(request)
     }
 
+    public func setTaskDeadline(id: UUID, dueDate: Date?) async throws -> PCCTask {
+        var request = makeRequest(path: "v1/tasks/\(id)/deadline", method: "PUT")
+        try attach(SetTaskDeadlinePayload(dueDate: dueDate), to: &request)
+        return try await send(request)
+    }
+
     private struct SaveTaskPayload: Encodable {
         let title: String
         let notes: String?
@@ -91,6 +104,10 @@ public struct URLSessionTasksAPIClient: TasksAPIClient {
 
     private struct AssignTaskProjectPayload: Encodable {
         let projectID: UUID?
+    }
+
+    private struct SetTaskDeadlinePayload: Encodable {
+        let dueDate: Date?
     }
 
     private func attach<Body: Encodable>(_ body: Body, to request: inout URLRequest) throws {
