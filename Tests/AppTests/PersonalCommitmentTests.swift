@@ -1,0 +1,367 @@
+import Foundation
+import Testing
+import VaporTesting
+
+@testable import App
+
+/// Same seam as `ProjectTests`/`TaskTests`/`DeadlineTests`: real HTTP
+/// requests against a running Vapor app, backed by a real (test) Postgres
+/// database. The one exception, per spec #1's testing decision, is the
+/// outbound CalDAV call itself — `FakeCalDAVClient` stands in for a live
+/// iCloud account.
+// Serialized: every test hits the same real Postgres test database (no
+// per-test isolation), so concurrent runs would race on each other's rows.
+extension AppTestSuite {
+    @Suite("Personal Commitments", .serialized)
+    struct PersonalCommitmentTests {
+        @discardableResult
+        private func withCommitmentsApp<T>(
+            caldav: FakeCalDAVClient = FakeCalDAVClient(),
+            _ test: (Application, FakeCalDAVClient) async throws -> T
+        ) async throws -> T {
+            try await withApp(configure: { app in
+                setenv("AUTH_TOKENS", "test-token-one", 1)
+                app.calDAVClient = caldav
+                try await configure(app)
+            }) { app in
+                let result = try await test(app, caldav)
+                try await AutomationLog.query(on: app.db).delete()
+                try await PersonalCommitment.query(on: app.db).delete()
+                return result
+            }
+        }
+
+        private func authHeaders() -> HTTPHeaders {
+            ["Authorization": "Bearer test-token-one"]
+        }
+
+        private func logs(on app: Application, subjectID: UUID) async throws -> [AutomationLog] {
+            try await AutomationLog.query(on: app.db).all().filter { $0.subjectID == subjectID }
+        }
+
+        @Test("rejects requests without a bearer token")
+        func commitmentsWithoutTokenAreRejected() async throws {
+            try await withCommitmentsApp { app, _ in
+                try await app.testing().test(.GET, "/v1/personal-commitments", afterResponse: { res async in
+                    #expect(res.status == .unauthorized)
+                })
+            }
+        }
+
+        @Test("creates a Personal Commitment and pushes it to CalDAV")
+        func createsACommitment() async throws {
+            try await withCommitmentsApp { app, caldav in
+                let start = Date(timeIntervalSince1970: 1_800_000_000)
+                let end = Date(timeIntervalSince1970: 1_800_003_600)
+
+                try await app.testing().test(
+                    .POST, "/v1/personal-commitments",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(SavePersonalCommitmentRequest(
+                            title: "Dentist",
+                            startDate: start,
+                            endDate: end,
+                            recurrenceRule: nil
+                        ))
+                    },
+                    afterResponse: { res async throws in
+                        #expect(res.status == .ok)
+                        let body = try res.content.decode(PersonalCommitmentResponse.self)
+                        #expect(body.title == "Dentist")
+                        #expect(body.startDate == start)
+                        #expect(body.endDate == end)
+                        #expect(body.syncStatus == "synced")
+                    }
+                )
+
+                let stored = try await PersonalCommitment.query(on: app.db).all()
+                #expect(stored.count == 1)
+                #expect(stored.first?.syncStatus == .synced)
+
+                let calls = await caldav.calls
+                #expect(calls.count == 1)
+                if case let .upsert(event) = calls.first {
+                    #expect(event.title == "Dentist")
+                    #expect(event.uid == stored.first?.externalEventID)
+                } else {
+                    Issue.record("expected an upsert call")
+                }
+
+                let entries = try await logs(on: app, subjectID: try stored.first!.requireID())
+                #expect(entries.count == 1)
+                #expect(entries.first?.actionType == "personal_commitment.create")
+                #expect(entries.first?.outcome == .success)
+            }
+        }
+
+        @Test("rejects creating a Commitment with an empty or whitespace-only title")
+        func rejectsEmptyCommitmentTitle() async throws {
+            try await withCommitmentsApp { app, _ in
+                try await app.testing().test(
+                    .POST, "/v1/personal-commitments",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(SavePersonalCommitmentRequest(
+                            title: "   ",
+                            startDate: Date(),
+                            endDate: Date().addingTimeInterval(3600),
+                            recurrenceRule: nil
+                        ))
+                    },
+                    afterResponse: { res async in
+                        #expect(res.status == .badRequest)
+                    }
+                )
+
+                let stored = try await PersonalCommitment.query(on: app.db).all()
+                #expect(stored.isEmpty)
+            }
+        }
+
+        @Test("rejects creating a Commitment whose end time isn't after its start time")
+        func rejectsNonPositiveDuration() async throws {
+            try await withCommitmentsApp { app, _ in
+                let sameInstant = Date(timeIntervalSince1970: 1_800_000_000)
+                try await app.testing().test(
+                    .POST, "/v1/personal-commitments",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(SavePersonalCommitmentRequest(
+                            title: "Backwards",
+                            startDate: sameInstant,
+                            endDate: sameInstant,
+                            recurrenceRule: nil
+                        ))
+                    },
+                    afterResponse: { res async in
+                        #expect(res.status == .badRequest)
+                    }
+                )
+            }
+        }
+
+        @Test("edits a Commitment and re-pushes it to CalDAV under the same UID")
+        func editsACommitment() async throws {
+            try await withCommitmentsApp { app, caldav in
+                let commitment = PersonalCommitment(
+                    title: "Original",
+                    startDate: Date(timeIntervalSince1970: 1_800_000_000),
+                    endDate: Date(timeIntervalSince1970: 1_800_003_600)
+                )
+                try await commitment.save(on: app.db)
+                let id = try commitment.requireID()
+                let originalUID = commitment.externalEventID
+                let newStart = Date(timeIntervalSince1970: 1_900_000_000)
+                let newEnd = Date(timeIntervalSince1970: 1_900_003_600)
+
+                try await app.testing().test(
+                    .PUT, "/v1/personal-commitments/\(id)",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(SavePersonalCommitmentRequest(
+                            title: "Renamed",
+                            startDate: newStart,
+                            endDate: newEnd,
+                            recurrenceRule: "FREQ=WEEKLY"
+                        ))
+                    },
+                    afterResponse: { res async throws in
+                        #expect(res.status == .ok)
+                        let body = try res.content.decode(PersonalCommitmentResponse.self)
+                        #expect(body.title == "Renamed")
+                        #expect(body.recurrenceRule == "FREQ=WEEKLY")
+                        #expect(body.syncStatus == "synced")
+                    }
+                )
+
+                let stored = try await PersonalCommitment.find(id, on: app.db)
+                #expect(stored?.title == "Renamed")
+                #expect(stored?.externalEventID == originalUID)
+
+                let calls = await caldav.calls
+                #expect(calls.count == 1)
+                if case let .upsert(event) = calls.first {
+                    #expect(event.uid == originalUID)
+                    #expect(event.title == "Renamed")
+                } else {
+                    Issue.record("expected an upsert call")
+                }
+            }
+        }
+
+        @Test("editing a Commitment that doesn't exist 404s")
+        func editingMissingCommitmentFails() async throws {
+            try await withCommitmentsApp { app, _ in
+                try await app.testing().test(
+                    .PUT, "/v1/personal-commitments/\(UUID())",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(SavePersonalCommitmentRequest(
+                            title: "Doesn't matter",
+                            startDate: Date(),
+                            endDate: Date().addingTimeInterval(3600),
+                            recurrenceRule: nil
+                        ))
+                    },
+                    afterResponse: { res async in
+                        #expect(res.status == .notFound)
+                    }
+                )
+            }
+        }
+
+        @Test("deletes a Commitment and removes its CalDAV event")
+        func deletesACommitment() async throws {
+            try await withCommitmentsApp { app, caldav in
+                let commitment = PersonalCommitment(
+                    title: "Throwaway",
+                    startDate: Date(timeIntervalSince1970: 1_800_000_000),
+                    endDate: Date(timeIntervalSince1970: 1_800_003_600)
+                )
+                try await commitment.save(on: app.db)
+                let id = try commitment.requireID()
+                let uid = commitment.externalEventID
+
+                try await app.testing().test(
+                    .DELETE, "/v1/personal-commitments/\(id)",
+                    headers: authHeaders(),
+                    afterResponse: { res async in
+                        #expect(res.status == .noContent)
+                    }
+                )
+
+                let stored = try await PersonalCommitment.find(id, on: app.db)
+                #expect(stored == nil)
+
+                let calls = await caldav.calls
+                #expect(calls == [.delete(uid: uid)])
+
+                let entries = try await logs(on: app, subjectID: id)
+                #expect(entries.count == 1)
+                #expect(entries.first?.actionType == "personal_commitment.delete")
+                #expect(entries.first?.outcome == .success)
+            }
+        }
+
+        @Test(
+            "a CalDAV delete failure still removes the Commitment locally and logs the failure"
+        )
+        func caldavDeleteFailureIsLoggedNotFatal() async throws {
+            let caldav = FakeCalDAVClient(failureToThrow: CalDAVClientError.serverError(status: 503))
+            try await withCommitmentsApp(caldav: caldav) { app, caldav in
+                let commitment = PersonalCommitment(
+                    title: "Won't delete cleanly",
+                    startDate: Date(timeIntervalSince1970: 1_800_000_000),
+                    endDate: Date(timeIntervalSince1970: 1_800_003_600)
+                )
+                try await commitment.save(on: app.db)
+                let id = try commitment.requireID()
+                let uid = commitment.externalEventID
+
+                try await app.testing().test(
+                    .DELETE, "/v1/personal-commitments/\(id)",
+                    headers: authHeaders(),
+                    afterResponse: { res async in
+                        // The local, canonical row is still removed even
+                        // though the CalDAV delete failed — the failure is
+                        // a logged state (spec #1's "clear error state"
+                        // requirement), not a reason to keep a Commitment
+                        // around that the owner already asked to delete.
+                        #expect(res.status == .noContent)
+                    }
+                )
+
+                let stored = try await PersonalCommitment.find(id, on: app.db)
+                #expect(stored == nil)
+
+                let calls = await caldav.calls
+                #expect(calls == [.delete(uid: uid)])
+
+                let entries = try await logs(on: app, subjectID: id)
+                #expect(entries.count == 1)
+                #expect(entries.first?.actionType == "personal_commitment.delete")
+                #expect(entries.first?.outcome == .failure)
+                #expect(entries.first?.detail.contains("CalDAV delete failed") == true)
+            }
+        }
+
+        @Test("deleting a Commitment that doesn't exist 404s")
+        func deletingMissingCommitmentFails() async throws {
+            try await withCommitmentsApp { app, _ in
+                try await app.testing().test(
+                    .DELETE, "/v1/personal-commitments/\(UUID())",
+                    headers: authHeaders(),
+                    afterResponse: { res async in
+                        #expect(res.status == .notFound)
+                    }
+                )
+            }
+        }
+
+        @Test("lists all Personal Commitments")
+        func listsAllCommitments() async throws {
+            try await withCommitmentsApp { app, _ in
+                try await PersonalCommitment(
+                    title: "First",
+                    startDate: Date(timeIntervalSince1970: 1_800_000_000),
+                    endDate: Date(timeIntervalSince1970: 1_800_003_600)
+                ).save(on: app.db)
+                try await PersonalCommitment(
+                    title: "Second",
+                    startDate: Date(timeIntervalSince1970: 1_900_000_000),
+                    endDate: Date(timeIntervalSince1970: 1_900_003_600)
+                ).save(on: app.db)
+
+                try await app.testing().test(
+                    .GET, "/v1/personal-commitments",
+                    headers: authHeaders(),
+                    afterResponse: { res async throws in
+                        #expect(res.status == .ok)
+                        let body = try res.content.decode([PersonalCommitmentResponse].self)
+                        #expect(body.count == 2)
+                        #expect(Set(body.map(\.title)) == ["First", "Second"])
+                    }
+                )
+            }
+        }
+
+        @Test(
+            "a CalDAV push failure still saves the Commitment locally, marks it failed, and logs the failure"
+        )
+        func caldavFailureIsLoggedNotFatal() async throws {
+            let caldav = FakeCalDAVClient(failureToThrow: CalDAVClientError.serverError(status: 503))
+            try await withCommitmentsApp(caldav: caldav) { app, caldav in
+                try await app.testing().test(
+                    .POST, "/v1/personal-commitments",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(SavePersonalCommitmentRequest(
+                            title: "Will fail to sync",
+                            startDate: Date(timeIntervalSince1970: 1_800_000_000),
+                            endDate: Date(timeIntervalSince1970: 1_800_003_600),
+                            recurrenceRule: nil
+                        ))
+                    },
+                    afterResponse: { res async throws in
+                        // The canonical write still succeeds — a sync
+                        // failure is a visible, logged state, not an API
+                        // error (spec #1's "clear error state" requirement).
+                        #expect(res.status == .ok)
+                        let body = try res.content.decode(PersonalCommitmentResponse.self)
+                        #expect(body.syncStatus == "failed")
+                    }
+                )
+
+                let stored = try await PersonalCommitment.query(on: app.db).all()
+                #expect(stored.count == 1)
+                #expect(stored.first?.syncStatus == .failed)
+
+                let entries = try await logs(on: app, subjectID: try stored.first!.requireID())
+                #expect(entries.count == 1)
+                #expect(entries.first?.outcome == .failure)
+                #expect(entries.first?.detail.contains("CalDAV push failed") == true)
+            }
+        }
+    }
+}
