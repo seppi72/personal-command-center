@@ -30,4 +30,9 @@ protocol CalDAVClient: Sendable {
     /// operation from the client's point of view.
     func upsertEvent(_ event: CalDAVEvent) async throws
     func deleteEvent(uid: String) async throws
+
+    /// Every event currently on the configured calendar collection — the
+    /// "pull" half of ticket #7's sync (`CalendarSyncService.pull`), which
+    /// upserts each one into the read-only `MirroredCalendarEvent` cache.
+    func fetchEvents() async throws -> [CalDAVEvent]
 }

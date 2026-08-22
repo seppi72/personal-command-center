@@ -35,6 +35,7 @@ Requires Swift 6.0+ (matching `Package.swift`'s `swift-tools-version`) and a loc
 | `CALDAV_CALENDAR_URL` | `https://caldav.icloud.com/unconfigured/` | The target iCloud CalDAV calendar collection's own URL — see "CalDAV setup" below |
 | `CALDAV_USERNAME` | _(none)_ | The iCloud Apple ID for the calendar above |
 | `CALDAV_APP_SPECIFIC_PASSWORD` | _(none)_ | An [app-specific password](https://support.apple.com/en-us/102654) for that Apple ID — never a real account password |
+| `CALENDAR_SYNC_INTERVAL_SECONDS` | `300` | How often the recurring background sync job (ticket #7) pulls external Calendar events and retries not-yet-synced Commitment pushes. Not read/used when `swift test` runs — see "Calendar sync" below |
 
 ### CalDAV setup
 
@@ -67,12 +68,24 @@ All routes require `Authorization: Bearer <token>` and are versioned under `/v1`
 | `POST` | `/v1/personal-commitments` | Create a Personal Commitment (`{ "title": "...", "startDate": "<ISO 8601>", "endDate": "<ISO 8601>", "recurrenceRule": "..."? }`) and push it to CalDAV |
 | `PUT` | `/v1/personal-commitments/:commitmentID` | Edit a Personal Commitment (same body as create) and re-push it to CalDAV |
 | `DELETE` | `/v1/personal-commitments/:commitmentID` | Delete a Personal Commitment and remove its CalDAV event |
+| `GET` | `/v1/calendar-events` | List every mirrored external Calendar event (read-only — no create/update/delete; see "Calendar sync" below) |
 
 Deleting a Project doesn't delete its Tasks — they become Project-less.
 
 ### Personal Commitments
 
-A Personal Commitment (`CONTEXT.md`) is canonical — the Command Center owns it, not the external Calendar — so create/edit/delete always succeed locally regardless of whether the CalDAV push succeeds. Each push (or removal) is attempted synchronously in the same request, and its outcome is written to `AutomationLog` and reflected in the Commitment's `syncStatus` (`pending` → `synced` or `failed`) in the response, rather than failing the request. Retrying a failed push and pulling external events *in* are ticket #7's job; browsing `AutomationLog` itself is ticket #8's.
+A Personal Commitment (`CONTEXT.md`) is canonical — the Command Center owns it, not the external Calendar — so create/edit/delete always succeed locally regardless of whether the CalDAV push succeeds. Each push (or removal) is attempted synchronously in the same request, and its outcome is written to `AutomationLog` and reflected in the Commitment's `syncStatus` (`pending` → `synced` or `failed`) in the response, rather than failing the request. The recurring sync job (below) is what retries a failed push later; browsing `AutomationLog` itself is ticket #8's.
+
+### Calendar sync (ticket #7)
+
+`CalendarSyncService.runScheduledSync` runs inside the Vapor process on a recurring interval (`CALENDAR_SYNC_INTERVAL_SECONDS`, default every 5 minutes), independent of whether the Mac or iOS app is open (spec #1, user story 23), and does two things each time:
+
+1. **Pull**: fetches every event on the configured CalDAV calendar and upserts it (by external event id) into the read-only `MirroredCalendarEvent` cache, exposed at `GET /v1/calendar-events`. A repeated pull converges to whatever the external Calendar currently has rather than growing the cache forever.
+2. **Push retry**: re-attempts the CalDAV push for every Personal Commitment not currently `synced` (i.e. `pending` or `failed`) — a safety net for a push that failed transiently, since `PersonalCommitmentController` already pushes synchronously on every create/edit and a Commitment stuck at `failed` would otherwise have no owner action to retry it.
+
+Each run writes at least one `AutomationLog` entry (`actionType: "calendar.pull"`, one per run rather than one per pulled event — the audited action is the pull as a whole) plus one `personal_commitment.scheduled_sync` entry per Commitment it retries. The job doesn't run when `swift test` runs (`app.environment == .testing`) — tests instead call `CalendarSyncService.pull()`/`pushPendingCommitments()`/`runScheduledSync()` directly against a `FakeCalDAVClient` and the real test database (`Tests/AppTests/CalendarSyncServiceTests.swift`), the same testing seam as `PersonalCommitmentTests`.
+
+`ICloudCalDAVClient.fetchEvents()` (the pull's outbound call) issues a CalDAV `calendar-query` `REPORT` and hand-parses the multistatus XML response and each event's `.ics` body — same "hand-rolling event serialization/parsing" trade-off ADR-0002 accepted for the push side. Like `upsertEvent`/`deleteEvent`, it isn't itself covered by an automated test — only `CalendarSyncService`'s use of the `CalDAVClient` protocol is, via the fake.
 
 ## Client (Mac/iOS)
 
@@ -80,26 +93,41 @@ A Personal Commitment (`CONTEXT.md`) is canonical — the Command Center owns it
 (`ProjectsView` + `ProjectsViewModel` + `URLSessionProjectsAPIClient`), the
 Tasks screen (`TasksView` + `TasksViewModel` + `URLSessionTasksAPIClient`),
 the read-only Deadlines screen (`DeadlinesView` + `DeadlinesViewModel` +
-`URLSessionDeadlinesAPIClient`), and the Personal Commitments screen
+`URLSessionDeadlinesAPIClient`), the Personal Commitments screen
 (`PersonalCommitmentsView` + `PersonalCommitmentsViewModel` +
-`URLSessionPersonalCommitmentsAPIClient`), built as a plain SPM target with
-no Vapor/Fluent dependency. It isn't wrapped in an Xcode app target yet — no
-Xcode is set up in this environment. To use it:
+`URLSessionPersonalCommitmentsAPIClient`), and the combined Calendar screen
+(`CalendarView` + `CalendarViewModel` +
+`URLSessionPersonalCommitmentsAPIClient` +
+`URLSessionMirroredCalendarEventsAPIClient`, ticket #7), built as a plain
+SPM target with no Vapor/Fluent dependency. It isn't wrapped in an Xcode app
+target yet — no Xcode is set up in this environment. To use it:
 
 1. Create the Mac and/or iOS App targets in Xcode (`File > New > Project`).
 2. Add this repository as a local Swift package dependency and link `PCCUI`.
 3. From each app's entry point, construct a `URLSessionProjectsAPIClient`,
-   `URLSessionTasksAPIClient`, `URLSessionDeadlinesAPIClient`, and
-   `URLSessionPersonalCommitmentsAPIClient` with the backend's base URL and
-   the device's bearer token. Wrap each in its matching view model to show
-   `ProjectsView(viewModel:)`, `TasksView(viewModel:)` (pass
+   `URLSessionTasksAPIClient`, `URLSessionDeadlinesAPIClient`,
+   `URLSessionPersonalCommitmentsAPIClient`, and
+   `URLSessionMirroredCalendarEventsAPIClient` with the backend's base URL
+   and the device's bearer token. Wrap each in its matching view model to
+   show `ProjectsView(viewModel:)`, `TasksView(viewModel:)` (pass
    `scopedProjectID` to scope the screen to one Project, or omit it to list
-   every Task), `DeadlinesView(viewModel:)`, and
-   `PersonalCommitmentsView(viewModel:)`. A Task or Project's Deadline is
+   every Task), `DeadlinesView(viewModel:)`, `PersonalCommitmentsView(viewModel:)`,
+   and `CalendarView(viewModel:)`. A Task or Project's Deadline is
    set/cleared from its own create/edit form in `TasksView`/`ProjectsView` —
    the Deadlines screen is a read-only sorted view of both. Each
    Commitment's sync status (pushed to CalDAV, or failed — see "CalDAV
-   setup" above) shows as a badge on its row in `PersonalCommitmentsView`.
+   setup" above) shows as a badge on its row in both
+   `PersonalCommitmentsView` and `CalendarView`.
+4. `CalendarView` merges Personal Commitments and mirrored external Calendar
+   events (populated by the backend's recurring sync job — see "Calendar
+   sync" above) into one chronological list. A mirrored event shows a lock
+   glyph and can't be tapped into — it's read-only through the Command
+   Center (spec #1, user story 22); a Commitment keeps the same tap-to-edit
+   and sync-status badge `PersonalCommitmentsView` has, and `CalendarView`
+   can create/edit/delete Commitments the same way that screen does.
+   `PersonalCommitmentsView` still exists as the Commitment-only screen —
+   `CalendarView` is the "everything on my calendar" view on top of it, not
+   a replacement.
 
 The backend's `PCCTask` model and the client's `PCCTask` struct are named
 `PCCTask` in Swift, not `Task` — that would shadow `_Concurrency.Task`
