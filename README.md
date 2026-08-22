@@ -6,7 +6,7 @@ tasks, projects, calendar, and more. See `CONTEXT.md` for domain vocabulary and
 
 ## Local setup
 
-Requires Swift 5.9+ and a local PostgreSQL server.
+Requires Swift 6.0+ (matching `Package.swift`'s `swift-tools-version`) and a local PostgreSQL server.
 
 1. Install and start Postgres (e.g. `brew install postgresql@16 && brew services start postgresql@16`).
 2. Create the dev and test roles/databases:
