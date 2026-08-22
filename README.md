@@ -44,19 +44,38 @@ All routes require `Authorization: Bearer <token>` and are versioned under `/v1`
 | `POST` | `/v1/projects` | Create a Project (`{ "name": "..." }`) |
 | `PUT` | `/v1/projects/:projectID` | Rename a Project (`{ "name": "..." }`) |
 | `DELETE` | `/v1/projects/:projectID` | Delete a Project |
+| `GET` | `/v1/tasks` | List all Tasks; add `?projectID=` to scope to one Project |
+| `POST` | `/v1/tasks` | Create a Task, Project-less (`{ "title": "...", "notes": "..."? }`) |
+| `PUT` | `/v1/tasks/:taskID` | Edit a Task's title/notes (`{ "title": "...", "notes": "..."? }`) |
+| `DELETE` | `/v1/tasks/:taskID` | Delete a Task |
+| `PUT` | `/v1/tasks/:taskID/complete` | Mark a Task complete |
+| `PUT` | `/v1/tasks/:taskID/incomplete` | Mark a Task incomplete |
+| `PUT` | `/v1/tasks/:taskID/project` | Assign/move/remove a Task's Project (`{ "projectID": "..."? }`, omit or `null` to remove) |
+
+Deleting a Project doesn't delete its Tasks — they become Project-less.
 
 ## Client (Mac/iOS)
 
-`Sources/PCCUI` is a shared SwiftUI library (`ProjectsView` + `ProjectsViewModel` +
-`URLSessionProjectsAPIClient`) for the Projects screen, built as a plain SPM
-target with no Vapor/Fluent dependency. It isn't wrapped in an Xcode app target
-yet — no Xcode is set up in this environment. To use it:
+`Sources/PCCUI` is a shared SwiftUI library for the Projects screen
+(`ProjectsView` + `ProjectsViewModel` + `URLSessionProjectsAPIClient`) and the
+Tasks screen (`TasksView` + `TasksViewModel` + `URLSessionTasksAPIClient`),
+built as a plain SPM target with no Vapor/Fluent dependency. It isn't wrapped
+in an Xcode app target yet — no Xcode is set up in this environment. To use
+it:
 
 1. Create the Mac and/or iOS App targets in Xcode (`File > New > Project`).
 2. Add this repository as a local Swift package dependency and link `PCCUI`.
-3. From each app's entry point, construct a `URLSessionProjectsAPIClient` with
-   the backend's base URL and the device's bearer token, wrap it in a
-   `ProjectsViewModel`, and show `ProjectsView(viewModel:)`.
+3. From each app's entry point, construct a `URLSessionProjectsAPIClient` and
+   `URLSessionTasksAPIClient` with the backend's base URL and the device's
+   bearer token. Wrap the former in a `ProjectsViewModel` to show
+   `ProjectsView(viewModel:)`; wrap both in a `TasksViewModel` (pass
+   `scopedProjectID` to scope the screen to one Project, or omit it to list
+   every Task) to show `TasksView(viewModel:)`.
+
+The backend's `PCCTask` model and the client's `PCCTask` struct are named
+`PCCTask` in Swift, not `Task` — that would shadow `_Concurrency.Task`
+throughout their targets. The domain term "Task" is what appears in the API
+paths/JSON and the UI text.
 
 It has been verified with `swift build --target PCCUI` (type-checks and links)
 but not run in a simulator or on-device.

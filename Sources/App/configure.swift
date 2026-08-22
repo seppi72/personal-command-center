@@ -33,6 +33,7 @@ public func configure(_ app: Application) async throws {
 
     app.migrations.add(CreateHealthPing())
     app.migrations.add(CreateProject())
+    app.migrations.add(CreatePCCTask())
     try await app.autoMigrate()
 
     let validTokens = Set(
