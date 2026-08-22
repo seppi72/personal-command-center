@@ -4,7 +4,8 @@ import PackageDescription
 let package = Package(
     name: "personal-command-center",
     platforms: [
-        .macOS(.v13)
+        .macOS(.v13),
+        .iOS(.v16),
     ],
     dependencies: [
         .package(url: "https://github.com/vapor/vapor.git", from: "4.99.0"),
@@ -28,6 +29,16 @@ let package = Package(
                 .target(name: "App"),
                 .product(name: "VaporTesting", package: "vapor"),
             ]
+        ),
+        // Shared SwiftUI client code for the Mac and iOS apps (ticket #3).
+        // No Vapor/Fluent dependency — this is a plain client of the `App`
+        // backend's HTTP API, not a server-side target. Not yet wrapped in
+        // an Xcode app target; see README for how to drop it into one.
+        // No tests here: the v1 spec (#1) defers SwiftUI view-level tests
+        // until there's a stable API to build against and calls for manual
+        // verification instead — the API itself is what's integration-tested.
+        .target(
+            name: "PCCUI"
         ),
     ]
 )

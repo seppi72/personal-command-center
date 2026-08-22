@@ -32,3 +32,31 @@ Requires Swift 6.0+ (matching `Package.swift`'s `swift-tools-version`) and a loc
 | `DATABASE_PASSWORD` | `pcc_password` | Postgres role password |
 | `DATABASE_NAME` | `pcc_dev` (`pcc_test` when `swift test` runs) | Database name |
 | `AUTH_TOKENS` | _(none — all requests rejected)_ | Comma-separated bearer tokens accepted by every route |
+
+## API
+
+All routes require `Authorization: Bearer <token>` and are versioned under `/v1`.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/v1/health` | Liveness check (see `docs/adr/0001-self-hosted-backend-over-cloudkit.md`) |
+| `GET` | `/v1/projects` | List all Projects |
+| `POST` | `/v1/projects` | Create a Project (`{ "name": "..." }`) |
+| `PUT` | `/v1/projects/:projectID` | Rename a Project (`{ "name": "..." }`) |
+| `DELETE` | `/v1/projects/:projectID` | Delete a Project |
+
+## Client (Mac/iOS)
+
+`Sources/PCCUI` is a shared SwiftUI library (`ProjectsView` + `ProjectsViewModel` +
+`URLSessionProjectsAPIClient`) for the Projects screen, built as a plain SPM
+target with no Vapor/Fluent dependency. It isn't wrapped in an Xcode app target
+yet — no Xcode is set up in this environment. To use it:
+
+1. Create the Mac and/or iOS App targets in Xcode (`File > New > Project`).
+2. Add this repository as a local Swift package dependency and link `PCCUI`.
+3. From each app's entry point, construct a `URLSessionProjectsAPIClient` with
+   the backend's base URL and the device's bearer token, wrap it in a
+   `ProjectsViewModel`, and show `ProjectsView(viewModel:)`.
+
+It has been verified with `swift build --target PCCUI` (type-checks and links)
+but not run in a simulator or on-device.
