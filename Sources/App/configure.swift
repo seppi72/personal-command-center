@@ -36,6 +36,8 @@ public func configure(_ app: Application) async throws {
     app.migrations.add(CreatePCCTask())
     app.migrations.add(AddDeadlineToProject())
     app.migrations.add(AddDeadlineToPCCTask())
+    app.migrations.add(CreatePersonalCommitment())
+    app.migrations.add(CreateAutomationLog())
     try await app.autoMigrate()
 
     let validTokens = Set(
@@ -48,6 +50,28 @@ public func configure(_ app: Application) async throws {
         app.logger.warning("No AUTH_TOKENS configured — every request will be rejected with 401.")
     }
     app.middleware.use(BearerTokenAuthMiddleware(validTokens: validTokens))
+
+    // Only install the real CalDAV client if nothing has been injected
+    // already — tests set `app.calDAVClient` to a `FakeCalDAVClient` before
+    // calling `configure(_:)` (see `Application+CalDAVClient.swift`).
+    if !app.hasCalDAVClient {
+        let calendarURLString = Environment.get("CALDAV_CALENDAR_URL") ?? "https://caldav.icloud.com/unconfigured/"
+        guard let calendarURL = URL(string: calendarURLString) else {
+            fatalError("CALDAV_CALENDAR_URL is not a valid URL: \(calendarURLString)")
+        }
+        let caldavUsername = Environment.get("CALDAV_USERNAME") ?? ""
+        let caldavPassword = Environment.get("CALDAV_APP_SPECIFIC_PASSWORD") ?? ""
+        if caldavUsername.isEmpty || caldavPassword.isEmpty {
+            app.logger.warning(
+                "No CALDAV_USERNAME/CALDAV_APP_SPECIFIC_PASSWORD configured — Personal Commitment CalDAV pushes will fail and be logged to AutomationLog rather than silently no-op."
+            )
+        }
+        app.calDAVClient = ICloudCalDAVClient(
+            calendarURL: calendarURL,
+            username: caldavUsername,
+            appSpecificPassword: caldavPassword
+        )
+    }
 
     try routes(app)
 }
