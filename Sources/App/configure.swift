@@ -32,6 +32,7 @@ public func configure(_ app: Application) async throws {
     app.databases.use(.postgres(configuration: postgresConfiguration), as: .psql)
 
     app.migrations.add(CreateHealthPing())
+    app.migrations.add(CreateProject())
     try await app.autoMigrate()
 
     let validTokens = Set(
