@@ -11,43 +11,49 @@ public enum CalendarEntry: Identifiable, Equatable, Sendable {
     case commitment(PersonalCommitment)
     case mirroredEvent(MirroredCalendarEvent)
 
-    /// Prefixed per case so a Commitment and a mirrored event that
-    /// (implausibly) share a raw UUID never collide as the same row.
-    public var id: String {
+    /// What every row displays, regardless of which case it came from —
+    /// computed once per switch in `fields`, so `id`/`title`/`startDate`/
+    /// `endDate`/`isEditable` each read off it instead of re-switching over
+    /// `self`.
+    private struct Fields {
+        let idSuffix: String
+        let title: String
+        let startDate: Date
+        let endDate: Date
+        let isEditable: Bool
+    }
+
+    private var fields: Fields {
         switch self {
         case .commitment(let commitment):
-            return "commitment-\(commitment.id)"
+            return Fields(
+                idSuffix: "commitment-\(commitment.id)",
+                title: commitment.title,
+                startDate: commitment.startDate,
+                endDate: commitment.endDate,
+                isEditable: true
+            )
         case .mirroredEvent(let event):
-            return "mirrored-\(event.id)"
+            return Fields(
+                idSuffix: "mirrored-\(event.id)",
+                title: event.title,
+                startDate: event.startDate,
+                endDate: event.endDate,
+                isEditable: false
+            )
         }
     }
 
-    public var title: String {
-        switch self {
-        case .commitment(let commitment): return commitment.title
-        case .mirroredEvent(let event): return event.title
-        }
-    }
-
-    public var startDate: Date {
-        switch self {
-        case .commitment(let commitment): return commitment.startDate
-        case .mirroredEvent(let event): return event.startDate
-        }
-    }
-
-    public var endDate: Date {
-        switch self {
-        case .commitment(let commitment): return commitment.endDate
-        case .mirroredEvent(let event): return event.endDate
-        }
-    }
+    /// Prefixed per case (via `fields.idSuffix`) so a Commitment and a
+    /// mirrored event that (implausibly) share a raw UUID never collide as
+    /// the same row.
+    public var id: String { fields.idSuffix }
+    public var title: String { fields.title }
+    public var startDate: Date { fields.startDate }
+    public var endDate: Date { fields.endDate }
 
     /// Whether this row can be edited through the Command Center — true
     /// for an owner-created Personal Commitment, false for a mirrored
     /// external Calendar event (spec #1, user story 22).
-    public var isEditable: Bool {
-        if case .commitment = self { return true }
-        return false
-    }
+    public var isEditable: Bool { fields.isEditable }
 }

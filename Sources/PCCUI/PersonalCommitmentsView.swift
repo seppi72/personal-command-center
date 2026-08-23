@@ -36,29 +36,13 @@ public struct PersonalCommitmentsView: View {
             }
             .task { await viewModel.load() }
             .refreshable { await viewModel.load() }
-            .alert("Error", isPresented: isShowingError, presenting: viewModel.errorMessage) { _ in
-                Button("OK", role: .cancel) {}
-            } message: { message in
-                Text(message)
-            }
-            .sheet(isPresented: $isPresentingNewCommitmentSheet) {
-                PersonalCommitmentFormSheet(title: "New Commitment", initialValues: nil) { values in
-                    await viewModel.createCommitment(values)
-                }
-            }
-            .sheet(item: $editingCommitment) { commitment in
-                PersonalCommitmentFormSheet(
-                    title: "Edit Commitment",
-                    initialValues: PersonalCommitmentFormValues(
-                        title: commitment.title,
-                        startDate: commitment.startDate,
-                        endDate: commitment.endDate,
-                        recurrenceRule: commitment.recurrenceRule
-                    )
-                ) { values in
-                    await viewModel.updateCommitment(commitment, with: values)
-                }
-            }
+            .errorAlert($viewModel.errorMessage)
+            .commitmentEditingSheets(
+                isPresentingNewCommitmentSheet: $isPresentingNewCommitmentSheet,
+                editingCommitment: $editingCommitment,
+                onCreate: { values in await viewModel.createCommitment(values) },
+                onUpdate: { commitment, values in await viewModel.updateCommitment(commitment, with: values) }
+            )
         }
     }
 
@@ -72,7 +56,7 @@ public struct PersonalCommitmentsView: View {
                         HStack {
                             Text(commitment.title)
                             Spacer()
-                            syncStatusBadge(for: commitment.syncStatus)
+                            SyncStatusBadge(syncStatus: commitment.syncStatus)
                         }
                         Text(commitment.startDate, style: .date)
                             .font(.subheadline)
@@ -99,25 +83,6 @@ public struct PersonalCommitmentsView: View {
         }
     }
 
-    /// A failed push (spec #1's "clear, visible error state" requirement)
-    /// is shown right on the row it belongs to — the full Automation Log
-    /// itself is ticket #8's screen, not this one's.
-    @ViewBuilder
-    private func syncStatusBadge(for syncStatus: PersonalCommitment.SyncStatus) -> some View {
-        switch syncStatus {
-        case .synced:
-            EmptyView()
-        case .failed:
-            Label("Sync failed", systemImage: "exclamationmark.triangle.fill")
-                .labelStyle(.iconOnly)
-                .foregroundStyle(.red)
-        case .pending:
-            Label("Syncing", systemImage: "arrow.triangle.2.circlepath")
-                .labelStyle(.iconOnly)
-                .foregroundStyle(.secondary)
-        }
-    }
-
     private var emptyState: some View {
         VStack(spacing: 8) {
             Text("No Personal Commitments")
@@ -127,13 +92,6 @@ public struct PersonalCommitmentsView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var isShowingError: Binding<Bool> {
-        Binding(
-            get: { viewModel.errorMessage != nil },
-            set: { isShowing in if !isShowing { viewModel.errorMessage = nil } }
-        )
     }
 }
 

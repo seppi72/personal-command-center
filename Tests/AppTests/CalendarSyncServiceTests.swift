@@ -39,13 +39,13 @@ extension AppTestSuite {
             CalendarSyncService(calDAVClient: caldav, db: app.db, logger: app.logger)
         }
 
-        private func syncLogs(on app: Application) async throws -> [AutomationLog] {
-            try await AutomationLog.query(on: app.db).all().filter { $0.subjectType == "CalendarSync" }
+        private func logs(on app: Application, subjectType: String) async throws -> [AutomationLog] {
+            try await AutomationLog.query(on: app.db).all().filter { $0.subjectType == subjectType }
         }
 
         // MARK: - pull
 
-        @Test("pulls external Calendar events into the mirrored-event cache and logs one entry")
+        @Test("pulls a new external Calendar event into the mirrored-event cache and logs it against that row's own id")
         func pullsExternalEvents() async throws {
             let start = Date(timeIntervalSince1970: 1_800_000_000)
             let end = Date(timeIntervalSince1970: 1_800_003_600)
@@ -62,11 +62,17 @@ extension AppTestSuite {
                 #expect(mirrored.first?.startDate == start)
                 #expect(mirrored.first?.endDate == end)
 
-                let entries = try await syncLogs(on: app)
+                // "Same as push actions" (ticket #7's AC): the log entry's
+                // subjectID points at the real MirroredCalendarEvent row it
+                // affected, exactly like a push's subjectID points at the
+                // real Commitment it affected — not a synthetic id nothing
+                // else references.
+                let entries = try await logs(on: app, subjectType: "MirroredCalendarEvent")
                 #expect(entries.count == 1)
                 #expect(entries.first?.actionType == "calendar.pull")
                 #expect(entries.first?.outcome == .success)
-                #expect(entries.first?.detail.contains("1 event") == true)
+                #expect(entries.first?.subjectID == mirrored.first?.id)
+                #expect(entries.first?.detail.contains("new event") == true)
 
                 let calls = await caldav.calls
                 #expect(calls == [.fetch])
@@ -101,12 +107,51 @@ extension AppTestSuite {
                 #expect(mirrored.first?.startDate == newStart)
                 #expect(mirrored.first?.endDate == newEnd)
 
-                let entries = try await syncLogs(on: app)
+                // One entry for the initial pull ("new event"), one for the
+                // second pull's actual change ("updated") — both against
+                // the same row's id, since it's the same mirrored event
+                // throughout.
+                let entries = try await logs(on: app, subjectType: "MirroredCalendarEvent")
                 #expect(entries.count == 2)
+                #expect(entries.allSatisfy { $0.subjectID == mirrored.first?.id })
+                #expect(entries.contains { $0.detail.contains("new event") })
+                #expect(entries.contains { $0.detail.contains("Updated") })
             }
         }
 
-        @Test("a CalDAV pull failure stores no mirrored events and logs the failure")
+        @Test("re-pulling an unchanged external event doesn't write another log entry")
+        func pullSkipsLoggingUnchangedEvents() async throws {
+            let event = CalDAVEvent(
+                uid: "ext-1",
+                title: "Steady",
+                start: Date(timeIntervalSince1970: 1_800_000_000),
+                end: Date(timeIntervalSince1970: 1_800_003_600),
+                recurrenceRule: nil
+            )
+            let caldav = FakeCalDAVClient(eventsToReturn: [event])
+            try await withSyncApp(caldav: caldav) { app, caldav in
+                let service = syncService(app, caldav: caldav)
+                await service.pull()
+
+                let justBeforeSecondPull = Date()
+                await service.pull()
+
+                let mirrored = try await MirroredCalendarEvent.query(on: app.db).all()
+                #expect(mirrored.count == 1)
+
+                // Only the first pull's "new event" entry — the second
+                // pull found nothing changed, so it wrote nothing more
+                // (avoids flooding the log every interval with entries for
+                // events that haven't moved). `lastSyncedAt` is still
+                // touched on every pull regardless, which is what proves
+                // the second, quiet pull actually ran.
+                let entries = try await logs(on: app, subjectType: "MirroredCalendarEvent")
+                #expect(entries.count == 1)
+                #expect((mirrored.first?.lastSyncedAt ?? .distantPast) >= justBeforeSecondPull)
+            }
+        }
+
+        @Test("a CalDAV pull failure stores no mirrored events and logs the failure against a synthetic subject")
         func pullFailureIsLoggedNotFatal() async throws {
             let caldav = FakeCalDAVClient(failureToThrow: CalDAVClientError.serverError(status: 503))
             try await withSyncApp(caldav: caldav) { app, caldav in
@@ -115,7 +160,11 @@ extension AppTestSuite {
                 let mirrored = try await MirroredCalendarEvent.query(on: app.db).all()
                 #expect(mirrored.isEmpty)
 
-                let entries = try await syncLogs(on: app)
+                // No affected MirroredCalendarEvent row exists for this
+                // failure to point at (the fetch itself failed, before any
+                // event was seen) — the one case where the log entry falls
+                // back to a synthetic subject.
+                let entries = try await logs(on: app, subjectType: "CalendarSync")
                 #expect(entries.count == 1)
                 #expect(entries.first?.actionType == "calendar.pull")
                 #expect(entries.first?.outcome == .failure)

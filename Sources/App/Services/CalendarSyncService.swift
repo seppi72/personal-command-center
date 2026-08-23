@@ -79,42 +79,68 @@ struct CalendarSyncService {
     /// rationale as `push`/`remove`: a failed pull is a logged, visible
     /// state, not a reason to interrupt whatever's driving the schedule.
     ///
-    /// Writes exactly one `AutomationLog` entry per call, not one per
-    /// pulled event — the audited "action" here is the pull as a whole
-    /// (`CONTEXT.md`'s own example of an Automation Log entry is "a data
-    /// pull"), and logging every unchanged event on every interval would
-    /// flood the log without giving the owner anything new to act on.
+    /// Logs "the same as push actions" — one `AutomationLog` entry per
+    /// affected `MirroredCalendarEvent`, `subjectID` pointing at that row's
+    /// own id, exactly like `push` points `subjectID` at the Commitment it
+    /// touched — rather than one entry per whole run against a synthetic
+    /// id nothing else references. An event whose fields didn't change
+    /// since the last pull is skipped, the same way `pushPendingCommitments`
+    /// only calls `push` for a Commitment that actually needs it: most
+    /// pulls, most of the time, touch nothing, and logging every unchanged
+    /// event on every interval would flood the log without giving the
+    /// owner anything new to act on. `lastSyncedAt` on every row (visible
+    /// via `GET /v1/calendar-events`) is what confirms the pull itself
+    /// keeps running even during a quiet stretch with nothing to log.
+    ///
+    /// The one exception is a pull that fails before fetching any events at
+    /// all (`calDAVClient.fetchEvents()` itself throwing) — there's no
+    /// affected row to hang that failure on, so that path alone logs
+    /// against a freshly-minted id.
     func pull(action: String = "calendar.pull") async {
         let events: [CalDAVEvent]
         do {
             events = try await calDAVClient.fetchEvents()
         } catch {
             logger.warning("CalDAV pull failed: \(error)")
-            await logSync(action: action, outcome: .failure, detail: "CalDAV pull failed: \(error)")
+            await log(action: action, subjectType: "CalendarSync", subjectID: UUID(), outcome: .failure, detail: "CalDAV pull failed: \(error)")
             return
         }
 
-        do {
-            for event in events {
-                let mirrored = try await MirroredCalendarEvent.query(on: db)
-                    .filter(\.$externalEventID == event.uid)
-                    .first() ?? MirroredCalendarEvent(
-                        externalEventID: event.uid,
-                        title: event.title,
-                        startDate: event.start,
-                        endDate: event.end
-                    )
-                mirrored.title = event.title
-                mirrored.startDate = event.start
-                mirrored.endDate = event.end
-                mirrored.lastSyncedAt = Date()
-                try await mirrored.save(on: db)
+        for event in events {
+            do {
+                try await upsertMirroredEvent(event, action: action)
+            } catch {
+                logger.warning("Failed to store pulled Calendar event \(event.uid): \(error)")
             }
-            await logSync(action: action, outcome: .success, detail: "Pulled \(events.count) event(s) from CalDAV")
-        } catch {
-            logger.warning("Failed to store pulled Calendar events: \(error)")
-            await logSync(action: action, outcome: .failure, detail: "Failed to store pulled events: \(error)")
         }
+    }
+
+    /// Upserts one pulled event and, only if it's new or its fields
+    /// actually changed, writes the `AutomationLog` entry for it.
+    private func upsertMirroredEvent(_ event: CalDAVEvent, action: String) async throws {
+        let existing = try await MirroredCalendarEvent.query(on: db)
+            .filter(\.$externalEventID == event.uid)
+            .first()
+        let mirrored = existing ?? MirroredCalendarEvent(
+            externalEventID: event.uid,
+            title: event.title,
+            startDate: event.start,
+            endDate: event.end
+        )
+        let isUnchanged = existing != nil
+            && mirrored.title == event.title
+            && mirrored.startDate == event.start
+            && mirrored.endDate == event.end
+        mirrored.title = event.title
+        mirrored.startDate = event.start
+        mirrored.endDate = event.end
+        mirrored.lastSyncedAt = Date()
+        try await mirrored.save(on: db)
+
+        guard !isUnchanged else { return }
+        let subjectID = try mirrored.requireID()
+        let detail = existing == nil ? "Pulled new event from CalDAV" : "Updated mirrored event from CalDAV"
+        await log(action: action, subjectType: "MirroredCalendarEvent", subjectID: subjectID, outcome: .success, detail: detail)
     }
 
     /// Re-attempts the CalDAV push for every Commitment not currently
@@ -154,14 +180,6 @@ struct CalendarSyncService {
     private func logCommitment(action: String, commitment: PersonalCommitment, outcome: AutomationLog.Outcome, detail: String) async {
         guard let subjectID = try? commitment.requireID() else { return }
         await log(action: action, subjectType: "PersonalCommitment", subjectID: subjectID, outcome: outcome, detail: detail)
-    }
-
-    /// `pull` has no single existing row to hang its `AutomationLog` entry
-    /// off of the way a Commitment push does — it's one action describing a
-    /// whole pull run, not an edit to one record — so it logs against a
-    /// freshly-minted id representing that run instead.
-    private func logSync(action: String, outcome: AutomationLog.Outcome, detail: String) async {
-        await log(action: action, subjectType: "CalendarSync", subjectID: UUID(), outcome: outcome, detail: detail)
     }
 
     private func log(action: String, subjectType: String, subjectID: UUID, outcome: AutomationLog.Outcome, detail: String) async {

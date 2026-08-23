@@ -42,29 +42,13 @@ public struct CalendarView: View {
             }
             .task { await viewModel.load() }
             .refreshable { await viewModel.load() }
-            .alert("Error", isPresented: isShowingError, presenting: viewModel.errorMessage) { _ in
-                Button("OK", role: .cancel) {}
-            } message: { message in
-                Text(message)
-            }
-            .sheet(isPresented: $isPresentingNewCommitmentSheet) {
-                PersonalCommitmentFormSheet(title: "New Commitment", initialValues: nil) { values in
-                    await viewModel.createCommitment(values)
-                }
-            }
-            .sheet(item: $editingCommitment) { commitment in
-                PersonalCommitmentFormSheet(
-                    title: "Edit Commitment",
-                    initialValues: PersonalCommitmentFormValues(
-                        title: commitment.title,
-                        startDate: commitment.startDate,
-                        endDate: commitment.endDate,
-                        recurrenceRule: commitment.recurrenceRule
-                    )
-                ) { values in
-                    await viewModel.updateCommitment(commitment, with: values)
-                }
-            }
+            .errorAlert($viewModel.errorMessage)
+            .commitmentEditingSheets(
+                isPresentingNewCommitmentSheet: $isPresentingNewCommitmentSheet,
+                editingCommitment: $editingCommitment,
+                onCreate: { values in await viewModel.createCommitment(values) },
+                onUpdate: { commitment, values in await viewModel.updateCommitment(commitment, with: values) }
+            )
         }
     }
 
@@ -109,16 +93,15 @@ public struct CalendarView: View {
 
     /// One row's content, shared by both cases so an editable Commitment
     /// and a read-only mirrored event line up visually and differ only in
-    /// the trailing badge — the sync-status badge from
-    /// `PersonalCommitmentsView` for a Commitment, a lock glyph for a
-    /// mirrored event.
+    /// the trailing badge — a `SyncStatusBadge` for a Commitment, a lock
+    /// glyph for a mirrored event.
     private func rowContent(for entry: CalendarEntry, commitment: PersonalCommitment?) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
                 Text(entry.title)
                 Spacer()
                 if let commitment {
-                    syncStatusBadge(for: commitment.syncStatus)
+                    SyncStatusBadge(syncStatus: commitment.syncStatus)
                 } else {
                     Label("Read-only", systemImage: "lock.fill")
                         .labelStyle(.iconOnly)
@@ -133,27 +116,6 @@ public struct CalendarView: View {
         .foregroundStyle(entry.isEditable ? .primary : .secondary)
     }
 
-    /// Same badge as `PersonalCommitmentsView.syncStatusBadge` — kept as a
-    /// private copy rather than shared, since factoring out one two-line
-    /// `switch` isn't worth a new file, and the two views may still diverge
-    /// on this later (e.g. text vs. icon-only) without a cross-file coupling
-    /// to manage.
-    @ViewBuilder
-    private func syncStatusBadge(for syncStatus: PersonalCommitment.SyncStatus) -> some View {
-        switch syncStatus {
-        case .synced:
-            EmptyView()
-        case .failed:
-            Label("Sync failed", systemImage: "exclamationmark.triangle.fill")
-                .labelStyle(.iconOnly)
-                .foregroundStyle(.red)
-        case .pending:
-            Label("Syncing", systemImage: "arrow.triangle.2.circlepath")
-                .labelStyle(.iconOnly)
-                .foregroundStyle(.secondary)
-        }
-    }
-
     private var emptyState: some View {
         VStack(spacing: 8) {
             Text("Nothing on your Calendar")
@@ -163,12 +125,5 @@ public struct CalendarView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var isShowingError: Binding<Bool> {
-        Binding(
-            get: { viewModel.errorMessage != nil },
-            set: { isShowing in if !isShowing { viewModel.errorMessage = nil } }
-        )
     }
 }

@@ -38,12 +38,11 @@ public struct URLSessionMirroredCalendarEventsAPIClient: MirroredCalendarEventsA
         request.httpMethod = "GET"
         request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MirroredCalendarEventsAPIClientError.unexpectedResponse
-        }
-        guard (200...299).contains(http.statusCode) else {
-            throw MirroredCalendarEventsAPIClientError.serverError(status: http.statusCode)
-        }
+        try HTTPResponseValidation.checkStatus(
+            response,
+            unexpectedResponse: MirroredCalendarEventsAPIClientError.unexpectedResponse,
+            serverError: MirroredCalendarEventsAPIClientError.serverError
+        )
         return try decoder.decode([MirroredCalendarEvent].self, from: data)
     }
 }

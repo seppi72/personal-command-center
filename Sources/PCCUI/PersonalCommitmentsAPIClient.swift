@@ -96,11 +96,10 @@ public struct URLSessionPersonalCommitmentsAPIClient: PersonalCommitmentsAPIClie
     }
 
     private static func checkStatus(_ response: URLResponse) throws {
-        guard let http = response as? HTTPURLResponse else {
-            throw PersonalCommitmentsAPIClientError.unexpectedResponse
-        }
-        guard (200...299).contains(http.statusCode) else {
-            throw PersonalCommitmentsAPIClientError.serverError(status: http.statusCode)
-        }
+        try HTTPResponseValidation.checkStatus(
+            response,
+            unexpectedResponse: PersonalCommitmentsAPIClientError.unexpectedResponse,
+            serverError: PersonalCommitmentsAPIClientError.serverError
+        )
     }
 }
