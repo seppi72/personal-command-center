@@ -13,6 +13,7 @@ actor FakeCalDAVClient: CalDAVClient {
     enum Call: Equatable {
         case upsert(CalDAVEvent)
         case delete(uid: String)
+        case fetch
     }
 
     private(set) var calls: [Call] = []
@@ -23,8 +24,14 @@ actor FakeCalDAVClient: CalDAVClient {
     /// network failure.
     var failureToThrow: (any Error)?
 
-    init(failureToThrow: (any Error)? = nil) {
+    /// What `fetchEvents()` returns — how tests exercise
+    /// `CalendarSyncService.pull`'s success path without a real iCloud
+    /// account. Empty until a test sets it.
+    var eventsToReturn: [CalDAVEvent] = []
+
+    init(failureToThrow: (any Error)? = nil, eventsToReturn: [CalDAVEvent] = []) {
         self.failureToThrow = failureToThrow
+        self.eventsToReturn = eventsToReturn
     }
 
     func upsertEvent(_ event: CalDAVEvent) async throws {
@@ -37,7 +44,17 @@ actor FakeCalDAVClient: CalDAVClient {
         if let failureToThrow { throw failureToThrow }
     }
 
+    func fetchEvents() async throws -> [CalDAVEvent] {
+        calls.append(.fetch)
+        if let failureToThrow { throw failureToThrow }
+        return eventsToReturn
+    }
+
     func setFailureToThrow(_ error: (any Error)?) {
         failureToThrow = error
+    }
+
+    func setEventsToReturn(_ events: [CalDAVEvent]) {
+        eventsToReturn = events
     }
 }

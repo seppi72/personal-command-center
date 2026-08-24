@@ -38,6 +38,7 @@ public func configure(_ app: Application) async throws {
     app.migrations.add(AddDeadlineToPCCTask())
     app.migrations.add(CreatePersonalCommitment())
     app.migrations.add(CreateAutomationLog())
+    app.migrations.add(CreateMirroredCalendarEvent())
     try await app.autoMigrate()
 
     let validTokens = Set(
@@ -71,6 +72,13 @@ public func configure(_ app: Application) async throws {
             username: caldavUsername,
             appSpecificPassword: caldavPassword
         )
+    }
+
+    // The recurring background sync job (ticket #7) doesn't run during
+    // tests — see `startCalendarSyncSchedule`'s doc comment for why.
+    if app.environment != .testing {
+        let intervalSeconds = Environment.get("CALENDAR_SYNC_INTERVAL_SECONDS").flatMap(Int.init) ?? 300
+        startCalendarSyncSchedule(app, interval: .seconds(intervalSeconds))
     }
 
     try routes(app)

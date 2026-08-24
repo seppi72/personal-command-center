@@ -7,4 +7,5 @@ func routes(_ app: Application) throws {
     try v1.register(collection: TaskController())
     try v1.register(collection: DeadlineController())
     try v1.register(collection: PersonalCommitmentController())
+    try v1.register(collection: MirroredCalendarEventController())
 }
