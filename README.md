@@ -69,6 +69,7 @@ All routes require `Authorization: Bearer <token>` and are versioned under `/v1`
 | `PUT` | `/v1/personal-commitments/:commitmentID` | Edit a Personal Commitment (same body as create) and re-push it to CalDAV |
 | `DELETE` | `/v1/personal-commitments/:commitmentID` | Delete a Personal Commitment and remove its CalDAV event |
 | `GET` | `/v1/calendar-events` | List every mirrored external Calendar event (read-only — no create/update/delete; see "Calendar sync" below) |
+| `GET` | `/v1/automation-logs` | Recent `AutomationLog` entries, most recent first, plus the most recent sync failure (if any) singled out (read-only; see "Automation Log" below) |
 
 Deleting a Project doesn't delete its Tasks — they become Project-less.
 
@@ -87,6 +88,10 @@ A pull writes one `AutomationLog` entry (`actionType: "calendar.pull"`) per `Mir
 
 `ICloudCalDAVClient.fetchEvents()` (the pull's outbound call) issues a CalDAV `calendar-query` `REPORT` and hand-parses the multistatus XML response and each event's `.ics` body — same "hand-rolling event serialization/parsing" trade-off ADR-0002 accepted for the push side. Like `upsertEvent`/`deleteEvent`, it isn't itself covered by an automated test — only `CalendarSyncService`'s use of the `CalDAVClient` protocol is, via the fake.
 
+### Automation Log (ticket #8)
+
+`GET /v1/automation-logs` is the owner-facing read of `AutomationLog` (`CONTEXT.md`): every automated action's outcome, written by `CalendarSyncService`'s `push`/`remove`/`pull` today and whatever automation lands next. The response has two parts — `entries`, the 100 most recent log rows (most recent first), and `mostRecentFailure`, the single most recent entry with `outcome: "failure"` across the *entire* log, not just whichever of it happens to fall inside `entries`. Computing it separately is what keeps a failure from going unnoticed just because enough successes have piled up since to push it out of the recent list — the visible, singled-out failure state spec #1 asks for rather than one that silently scrolls out of view. `AutomationLogController` is read-only, same as `MirroredCalendarEventController` — no create/update/delete routes.
+
 ## Client (Mac/iOS)
 
 `Sources/PCCUI` is a shared SwiftUI library for the Projects screen
@@ -98,25 +103,28 @@ the read-only Deadlines screen (`DeadlinesView` + `DeadlinesViewModel` +
 `URLSessionPersonalCommitmentsAPIClient`), and the combined Calendar screen
 (`CalendarView` + `CalendarViewModel` +
 `URLSessionPersonalCommitmentsAPIClient` +
-`URLSessionMirroredCalendarEventsAPIClient`, ticket #7), built as a plain
-SPM target with no Vapor/Fluent dependency. It isn't wrapped in an Xcode app
-target yet — no Xcode is set up in this environment. To use it:
+`URLSessionMirroredCalendarEventsAPIClient`, ticket #7), and the Automation
+Log screen (`AutomationLogView` + `AutomationLogViewModel` +
+`URLSessionAutomationLogsAPIClient`, ticket #8), built as a plain SPM target
+with no Vapor/Fluent dependency. It isn't wrapped in an Xcode app target
+yet — no Xcode is set up in this environment. To use it:
 
 1. Create the Mac and/or iOS App targets in Xcode (`File > New > Project`).
 2. Add this repository as a local Swift package dependency and link `PCCUI`.
 3. From each app's entry point, construct a `URLSessionProjectsAPIClient`,
    `URLSessionTasksAPIClient`, `URLSessionDeadlinesAPIClient`,
-   `URLSessionPersonalCommitmentsAPIClient`, and
-   `URLSessionMirroredCalendarEventsAPIClient` with the backend's base URL
-   and the device's bearer token. Wrap each in its matching view model to
-   show `ProjectsView(viewModel:)`, `TasksView(viewModel:)` (pass
+   `URLSessionPersonalCommitmentsAPIClient`,
+   `URLSessionMirroredCalendarEventsAPIClient`, and
+   `URLSessionAutomationLogsAPIClient` with the backend's base URL and the
+   device's bearer token. Wrap each in its matching view model to show
+   `ProjectsView(viewModel:)`, `TasksView(viewModel:)` (pass
    `scopedProjectID` to scope the screen to one Project, or omit it to list
    every Task), `DeadlinesView(viewModel:)`, `PersonalCommitmentsView(viewModel:)`,
-   and `CalendarView(viewModel:)`. A Task or Project's Deadline is
-   set/cleared from its own create/edit form in `TasksView`/`ProjectsView` —
-   the Deadlines screen is a read-only sorted view of both. Each
-   Commitment's sync status (pushed to CalDAV, or failed — see "CalDAV
-   setup" above) shows as a badge on its row in both
+   `CalendarView(viewModel:)`, and `AutomationLogView(viewModel:)`. A Task
+   or Project's Deadline is set/cleared from its own create/edit form in
+   `TasksView`/`ProjectsView` — the Deadlines screen is a read-only sorted
+   view of both. Each Commitment's sync status (pushed to CalDAV, or
+   failed — see "CalDAV setup" above) shows as a badge on its row in both
    `PersonalCommitmentsView` and `CalendarView`.
 4. `CalendarView` merges Personal Commitments and mirrored external Calendar
    events (populated by the backend's recurring sync job — see "Calendar
@@ -128,6 +136,11 @@ target yet — no Xcode is set up in this environment. To use it:
    `PersonalCommitmentsView` still exists as the Commitment-only screen —
    `CalendarView` is the "everything on my calendar" view on top of it, not
    a replacement.
+5. `AutomationLogView` (ticket #8) is read-only, like `DeadlinesView`: recent
+   `AutomationLog` entries, most recent first, with the most recent sync
+   failure (if any) shown as a banner at the top of the screen rather than
+   only visible if it's still recent enough to also appear further down the
+   list — see "Automation Log" above.
 
 The backend's `PCCTask` model and the client's `PCCTask` struct are named
 `PCCTask` in Swift, not `Task` — that would shadow `_Concurrency.Task`
