@@ -46,6 +46,17 @@ final class AutomationLog: Model, @unchecked Sendable {
     @Timestamp(key: "occurred_at", on: .create)
     var occurredAt: Date?
 
+    /// `occurredAt` is nil only before a row is first saved
+    /// (`@Timestamp(on: .create)`) — by the time a row round-trips through
+    /// Fluent it's always set, so `.distantPast` here is unreachable in
+    /// practice rather than a real fallback. One place for that coalescing
+    /// (ticket #8's `AutomationLogController`, which both sorts by this and
+    /// echoes it into `AutomationLogResponse`, needs it twice over) instead
+    /// of repeating `?? .distantPast` at each call site.
+    var occurredAtOrDistantPast: Date {
+        occurredAt ?? .distantPast
+    }
+
     init() {}
 
     init(id: UUID? = nil, actionType: String, subjectType: String, subjectID: UUID, detail: String, outcome: Outcome) {
