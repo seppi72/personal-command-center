@@ -64,6 +64,11 @@ public struct ProjectsView: View {
                 } label: {
                     VStack(alignment: .leading) {
                         Text(project.name)
+                        if let clientName = viewModel.clientName(for: project) {
+                            Text(clientName)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                         if let dueDate = project.dueDate {
                             Text(dueDate, style: .date)
                                 .font(.caption)

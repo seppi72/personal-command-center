@@ -36,6 +36,8 @@ public func configure(_ app: Application) async throws {
     app.migrations.add(CreatePCCTask())
     app.migrations.add(AddDeadlineToProject())
     app.migrations.add(AddDeadlineToPCCTask())
+    app.migrations.add(CreatePCCClient())
+    app.migrations.add(AddClientToProject())
     app.migrations.add(CreatePersonalCommitment())
     app.migrations.add(CreateAutomationLog())
     app.migrations.add(CreateMirroredCalendarEvent())
