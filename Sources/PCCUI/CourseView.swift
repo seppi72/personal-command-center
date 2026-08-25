@@ -1,13 +1,16 @@
 import SwiftUI
 
-/// Minimal Mac/iOS screen for ticket #19: lists Courses, and supports
-/// creating, editing (name, Term, setting/clearing a Deadline), and deleting
-/// one. One shared SwiftUI view for both platforms — no platform-specific
-/// chrome, per the ticket's "minimal" scope (mirrors `ProjectsView`).
+/// Minimal Mac/iOS screen for ticket #19, extended by ticket #20: lists
+/// Courses, and supports creating and deleting one. One shared SwiftUI view
+/// for both platforms — no platform-specific chrome, per the ticket's
+/// "minimal" scope (mirrors `ProjectsView`). Tapping a row navigates into
+/// `CourseDetailView` (ticket #20) rather than opening the edit sheet
+/// directly — editing moved to that screen's own toolbar, the same
+/// evolution `ProjectsView` went through in ticket #18 once it needed to
+/// show a Project's Sprints.
 public struct CourseView: View {
     @ObservedObject private var viewModel: CoursesViewModel
     @State private var isPresentingNewCourseSheet = false
-    @State private var editingCourse: Course?
 
     public init(viewModel: CoursesViewModel) {
         self.viewModel = viewModel
@@ -50,25 +53,18 @@ public struct CourseView: View {
                     await viewModel.createCourse(values)
                 }
             }
-            .sheet(item: $editingCourse) { course in
-                CourseFormSheet(
-                    title: "Edit Course",
-                    initialName: course.name,
-                    initialTermMonth: course.termMonth,
-                    initialTermYear: course.termYear,
-                    initialDueDate: course.dueDate
-                ) { values in
-                    await viewModel.updateCourse(course, with: values)
-                }
-            }
         }
     }
 
     private var courseList: some View {
         List {
             ForEach(viewModel.courses) { course in
-                Button {
-                    editingCourse = course
+                NavigationLink {
+                    CourseDetailView(
+                        course: course,
+                        viewModel: viewModel,
+                        tasksViewModel: viewModel.makeTasksViewModel(for: course)
+                    )
                 } label: {
                     VStack(alignment: .leading) {
                         Text(course.name)
@@ -82,9 +78,6 @@ public struct CourseView: View {
                         }
                     }
                 }
-                #if os(macOS)
-                .buttonStyle(.plain)
-                #endif
             }
             .onDelete { offsets in
                 let toDelete = offsets.map { viewModel.courses[$0] }
@@ -212,5 +205,159 @@ struct CourseFormSheet: View {
                 }
             }
         }
+    }
+}
+
+/// A Course's detail screen (ticket #20): the Course's name/Term/due date
+/// read-only at the top (editing moved here from the list row, via the
+/// toolbar's "Edit" button — same `CourseFormSheet`/`onSave` wiring as
+/// before), plus a "Tasks" section listing the Course's Tasks with
+/// add/edit/complete/delete — the Course-scoped counterpart to
+/// `ProjectDetailView`'s "Sprints" section, backed by the same
+/// `TasksViewModel`/`TaskFormSheet` the top-level Tasks screen uses (just
+/// scoped to this Course via `CoursesViewModel.makeTasksViewModel(for:)`)
+/// rather than a separate, duplicated row/form implementation.
+struct CourseDetailView: View {
+    let course: Course
+    @ObservedObject var viewModel: CoursesViewModel
+    @ObservedObject var tasksViewModel: TasksViewModel
+
+    @State private var isPresentingEditSheet = false
+    @State private var isPresentingNewTaskSheet = false
+    @State private var editingTask: PCCTask?
+
+    /// The freshest known copy of `course` — falls back to the value passed
+    /// in if `viewModel.courses` hasn't (yet) reflected an edit.
+    private var currentCourse: Course {
+        viewModel.courses.first(where: { $0.id == course.id }) ?? course
+    }
+
+    var body: some View {
+        List {
+            Section {
+                Text(currentCourse.name)
+                    .font(.title3)
+                Text(CourseView.termLabel(month: currentCourse.termMonth, year: currentCourse.termYear))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                if let dueDate = currentCourse.dueDate {
+                    Text(dueDate, style: .date)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Section("Tasks") {
+                if tasksViewModel.tasks.isEmpty {
+                    Text("No Tasks yet.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(tasksViewModel.tasks) { task in
+                        HStack {
+                            Button {
+                                Task {
+                                    await tasksViewModel.setCompletion(task, isComplete: !task.isComplete)
+                                }
+                            } label: {
+                                Image(systemName: task.isComplete ? "checkmark.circle.fill" : "circle")
+                            }
+                            #if os(macOS)
+                            .buttonStyle(.plain)
+                            #endif
+
+                            Button {
+                                editingTask = task
+                            } label: {
+                                VStack(alignment: .leading) {
+                                    Text(task.title)
+                                        .strikethrough(task.isComplete)
+                                    if let dueDate = task.dueDate {
+                                        Text(dueDate, style: .date)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                            #if os(macOS)
+                            .buttonStyle(.plain)
+                            #endif
+                        }
+                    }
+                    .onDelete { offsets in
+                        let toDelete = offsets.map { tasksViewModel.tasks[$0] }
+                        Task {
+                            for task in toDelete {
+                                await tasksViewModel.deleteTask(task)
+                            }
+                        }
+                    }
+                }
+                Button {
+                    isPresentingNewTaskSheet = true
+                } label: {
+                    Label("Add Task", systemImage: "plus")
+                }
+            }
+        }
+        .navigationTitle(currentCourse.name)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Edit") {
+                    isPresentingEditSheet = true
+                }
+            }
+        }
+        .task { await tasksViewModel.load() }
+        .refreshable { await tasksViewModel.load() }
+        .alert("Error", isPresented: isShowingTasksError, presenting: tasksViewModel.errorMessage) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { message in
+            Text(message)
+        }
+        .sheet(isPresented: $isPresentingEditSheet) {
+            CourseFormSheet(
+                title: "Edit Course",
+                initialName: currentCourse.name,
+                initialTermMonth: currentCourse.termMonth,
+                initialTermYear: currentCourse.termYear,
+                initialDueDate: currentCourse.dueDate
+            ) { values in
+                await viewModel.updateCourse(currentCourse, with: values)
+            }
+        }
+        .sheet(isPresented: $isPresentingNewTaskSheet) {
+            TaskFormSheet(
+                title: "New Task",
+                initialTitle: "",
+                initialNotes: "",
+                initialProjectID: nil,
+                initialCourseID: currentCourse.id,
+                initialDueDate: nil,
+                projects: tasksViewModel.projects,
+                courses: tasksViewModel.courses
+            ) { values in
+                await tasksViewModel.createTask(values)
+            }
+        }
+        .sheet(item: $editingTask) { task in
+            TaskFormSheet(
+                title: "Edit Task",
+                initialTitle: task.title,
+                initialNotes: task.notes ?? "",
+                initialProjectID: task.projectID,
+                initialCourseID: task.courseID,
+                initialDueDate: task.dueDate,
+                projects: tasksViewModel.projects,
+                courses: tasksViewModel.courses
+            ) { values in
+                await tasksViewModel.updateTask(task, with: values)
+            }
+        }
+    }
+
+    private var isShowingTasksError: Binding<Bool> {
+        Binding(
+            get: { tasksViewModel.errorMessage != nil },
+            set: { isShowing in if !isShowing { tasksViewModel.errorMessage = nil } }
+        )
     }
 }

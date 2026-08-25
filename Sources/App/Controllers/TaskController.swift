@@ -9,6 +9,7 @@ struct TaskResponse: Content {
     let projectID: UUID?
     let dueDate: Date?
     let sprintID: UUID?
+    let courseID: UUID?
 
     init(_ task: PCCTask) throws {
         self.id = try task.requireID()
@@ -18,6 +19,7 @@ struct TaskResponse: Content {
         self.projectID = task.$project.id
         self.dueDate = task.dueDate
         self.sprintID = task.$sprint.id
+        self.courseID = task.$course.id
     }
 }
 
@@ -45,6 +47,12 @@ struct AssignTaskSprintRequest: Content {
     let sprintID: UUID?
 }
 
+/// `courseID: nil` (or the key omitted entirely) both mean "make this Task
+/// Course-less" — same shape as `AssignTaskProjectRequest`.
+struct AssignTaskCourseRequest: Content {
+    let courseID: UUID?
+}
+
 struct TaskController: RouteCollection {
     func boot(routes: any RoutesBuilder) throws {
         let tasks = routes.grouped("tasks")
@@ -58,13 +66,18 @@ struct TaskController: RouteCollection {
             task.put("project", use: assignProject)
             task.put("deadline", use: setDeadline)
             task.put("sprint", use: assignSprint)
+            task.put("course", use: assignCourse)
         }
     }
 
-    /// Lists every Task, or Tasks scoped to one Project and/or one Sprint
-    /// when `?projectID=`/`?sprintID=` are given — the ticket's listings as
-    /// one endpoint rather than separate routes, since they're the same
-    /// query with independent, combinable optional filters.
+    /// Lists every Task, or Tasks scoped to one Project, one Sprint, and/or
+    /// one Course when `?projectID=`/`?sprintID=`/`?courseID=` are given —
+    /// the ticket's listings as one endpoint rather than separate routes,
+    /// since they're the same query with independent, combinable optional
+    /// filters. `?projectID=` and `?courseID=` are combinable in principle
+    /// the same way every other pair here is, even though ADR-0003 means a
+    /// Task never matches both at once — passing both together is simply an
+    /// empty result, not a special case this needs to guard against.
     func index(req: Request) async throws -> [TaskResponse] {
         var query = PCCTask.query(on: req.db)
         if let projectID = req.query[UUID.self, at: "projectID"] {
@@ -73,12 +86,16 @@ struct TaskController: RouteCollection {
         if let sprintID = req.query[UUID.self, at: "sprintID"] {
             query = query.filter(\.$sprint.$id == sprintID)
         }
+        if let courseID = req.query[UUID.self, at: "courseID"] {
+            query = query.filter(\.$course.$id == courseID)
+        }
         return try await query.all().map(TaskResponse.init)
     }
 
-    /// A Task is created "Project-less" — assignment is its own endpoint
-    /// (`assignProject`), matching the AC's separate "assign a Task to a
-    /// Project" criterion.
+    /// A Task is created Project-less *and* Course-less — assignment is its
+    /// own endpoint (`assignProject`/`assignCourse`), matching the ACs'
+    /// separate "assign a Task to a Project"/"assign a Task to a Course"
+    /// criteria rather than folding either into `SaveTaskRequest`.
     func create(req: Request) async throws -> TaskResponse {
         let payload = try req.content.decode(SaveTaskRequest.self)
         let task = PCCTask(
@@ -131,7 +148,12 @@ struct TaskController: RouteCollection {
     /// Task's current one also clears its Sprint (ticket #18): a Sprint is
     /// scoped to the Project it was created in for its lifetime, so a Sprint
     /// that belonged to the old Project no longer applies. Leaving the
-    /// `projectID` unchanged leaves the Sprint alone.
+    /// `projectID` unchanged leaves the Sprint alone. Setting a non-nil
+    /// `projectID` also clears the Task's Course (ADR-0003, ticket #20): a
+    /// Task belongs to at most one of {Project, Course}, so assigning one
+    /// displaces the other; removing the Project (`projectID: null`) leaves
+    /// the Course alone since a Task with a Course never has a Project to
+    /// begin with.
     func assignProject(req: Request) async throws -> TaskResponse {
         guard let task = try await findTask(req: req) else {
             throw Abort(.notFound)
@@ -146,6 +168,35 @@ struct TaskController: RouteCollection {
             task.$sprint.id = nil
         }
         task.$project.id = payload.projectID
+        if payload.projectID != nil {
+            task.$course.id = nil
+        }
+        try await task.save(on: req.db)
+        return try TaskResponse(task)
+    }
+
+    /// Assign, move, or remove (`courseID: null`) a Task's Course — mirrors
+    /// `assignProject`. Setting a non-nil `courseID` also clears the Task's
+    /// Project and, transitively, its Sprint (ADR-0003, ticket #20): a Sprint
+    /// is scoped to a Project, so a Project-less Task can't reference one
+    /// either. Removing the Course (`courseID: null`) leaves the Project/
+    /// Sprint alone since a Task with a Project never has a Course to begin
+    /// with.
+    func assignCourse(req: Request) async throws -> TaskResponse {
+        guard let task = try await findTask(req: req) else {
+            throw Abort(.notFound)
+        }
+        let payload = try req.content.decode(AssignTaskCourseRequest.self)
+        if let courseID = payload.courseID {
+            guard try await Course.find(courseID, on: req.db) != nil else {
+                throw Abort(.badRequest, reason: "no such Course")
+            }
+        }
+        task.$course.id = payload.courseID
+        if payload.courseID != nil {
+            task.$project.id = nil
+            task.$sprint.id = nil
+        }
         try await task.save(on: req.db)
         return try TaskResponse(task)
     }

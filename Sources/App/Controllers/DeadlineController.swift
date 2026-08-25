@@ -1,13 +1,17 @@
 import Fluent
 import Vapor
 
-/// One Task or Project, flattened to just what the sorted Deadline view
-/// needs. `isComplete` is `nil` for a Project — there's no such concept at
-/// that level — rather than forcing a `false` that would read as "not done".
+/// One Task, Project, or Course, flattened to just what the sorted Deadline
+/// view needs. `isComplete` is `nil` for a Project/Course — there's no such
+/// concept at that level — rather than forcing a `false` that would read as
+/// "not done". A Course-scoped Task is still just a `.task` here: `kind`
+/// distinguishes the three *containers* a Deadline can live on, not which
+/// container (if any) a Task currently belongs to.
 struct DeadlineItemResponse: Content {
     enum Kind: String, Codable, Equatable {
         case task
         case project
+        case course
     }
 
     let kind: Kind
@@ -31,24 +35,38 @@ struct DeadlineItemResponse: Content {
         self.dueDate = project.dueDate
         self.isComplete = nil
     }
+
+    init(_ course: Course) throws {
+        self.kind = .course
+        self.id = try course.requireID()
+        self.title = course.name
+        self.dueDate = course.dueDate
+        self.isComplete = nil
+    }
 }
 
-/// The ticket #5 "sorted view": every Task and Project together, ordered by
-/// Deadline proximity, with undated items still present rather than filtered
-/// out.
+/// The ticket #5 "sorted view", extended by ticket #20: every Task, Project,
+/// and Course together, ordered by Deadline proximity, with undated items
+/// still present rather than filtered out. Course-scoped Tasks need no
+/// special handling here — `PCCTask.query(on:).all()` already returns every
+/// Task regardless of which container (if any) it belongs to — so the only
+/// addition is Courses' own Deadlines, the same way Projects' own Deadlines
+/// already sit alongside Tasks'.
 struct DeadlineController: RouteCollection {
     func boot(routes: any RoutesBuilder) throws {
         routes.get("deadlines", use: index)
     }
 
-    /// Fluent has no cross-model UNION here, so both tables are fetched and
-    /// merged in memory — a fine tradeoff at this system's single-user scale
-    /// (`CONTEXT.md`).
+    /// Fluent has no cross-model UNION here, so all three tables are fetched
+    /// and merged in memory — a fine tradeoff at this system's single-user
+    /// scale (`CONTEXT.md`).
     func index(req: Request) async throws -> [DeadlineItemResponse] {
         async let taskModels = PCCTask.query(on: req.db).all()
         async let projectModels = Project.query(on: req.db).all()
+        async let courseModels = Course.query(on: req.db).all()
         let items = try await taskModels.map(DeadlineItemResponse.init)
             + (try await projectModels.map(DeadlineItemResponse.init))
+            + (try await courseModels.map(DeadlineItemResponse.init))
         return items.sorted(by: Self.areInProximityOrder)
     }
 

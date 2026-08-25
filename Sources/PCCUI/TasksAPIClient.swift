@@ -5,9 +5,9 @@ import Foundation
 /// model can be exercised against a fake in previews/manual testing without
 /// a running backend.
 public protocol TasksAPIClient: Sendable {
-    /// Lists every Task, or Tasks scoped to one Project when `projectID` is
-    /// given.
-    func listTasks(projectID: UUID?) async throws -> [PCCTask]
+    /// Lists every Task, or Tasks scoped to one Project and/or one Course
+    /// when `projectID`/`courseID` are given.
+    func listTasks(projectID: UUID?, courseID: UUID?) async throws -> [PCCTask]
     func createTask(title: String, notes: String?) async throws -> PCCTask
     func updateTask(id: UUID, title: String, notes: String?) async throws -> PCCTask
     func deleteTask(id: UUID) async throws
@@ -16,6 +16,8 @@ public protocol TasksAPIClient: Sendable {
     func assignTaskProject(id: UUID, projectID: UUID?) async throws -> PCCTask
     /// Attaches, changes, or removes (`dueDate: nil`) a Task's Deadline.
     func setTaskDeadline(id: UUID, dueDate: Date?) async throws -> PCCTask
+    /// Assigns, moves, or removes (`courseID: nil`) a Task's Course.
+    func assignTaskCourse(id: UUID, courseID: UUID?) async throws -> PCCTask
 }
 
 public enum TasksAPIClientError: Error {
@@ -45,15 +47,22 @@ public struct URLSessionTasksAPIClient: TasksAPIClient {
         self.encoder.dateEncodingStrategy = .iso8601
     }
 
-    public func listTasks(projectID: UUID?) async throws -> [PCCTask] {
+    public func listTasks(projectID: UUID?, courseID: UUID?) async throws -> [PCCTask] {
         // `appendingPathComponent` (used by `makeRequest`) percent-escapes
         // "?", so a query string needs `URLComponents` instead.
         var components = URLComponents(
             url: baseURL.appendingPathComponent("v1/tasks"),
             resolvingAgainstBaseURL: false
         )
+        var queryItems: [URLQueryItem] = []
         if let projectID {
-            components?.queryItems = [URLQueryItem(name: "projectID", value: projectID.uuidString)]
+            queryItems.append(URLQueryItem(name: "projectID", value: projectID.uuidString))
+        }
+        if let courseID {
+            queryItems.append(URLQueryItem(name: "courseID", value: courseID.uuidString))
+        }
+        if !queryItems.isEmpty {
+            components?.queryItems = queryItems
         }
         guard let url = components?.url else {
             throw TasksAPIClientError.unexpectedResponse
@@ -97,6 +106,12 @@ public struct URLSessionTasksAPIClient: TasksAPIClient {
         return try await send(request)
     }
 
+    public func assignTaskCourse(id: UUID, courseID: UUID?) async throws -> PCCTask {
+        var request = makeRequest(path: "v1/tasks/\(id)/course", method: "PUT")
+        try attach(AssignTaskCoursePayload(courseID: courseID), to: &request)
+        return try await send(request)
+    }
+
     private struct SaveTaskPayload: Encodable {
         let title: String
         let notes: String?
@@ -108,6 +123,10 @@ public struct URLSessionTasksAPIClient: TasksAPIClient {
 
     private struct SetTaskDeadlinePayload: Encodable {
         let dueDate: Date?
+    }
+
+    private struct AssignTaskCoursePayload: Encodable {
+        let courseID: UUID?
     }
 
     private func attach<Body: Encodable>(_ body: Body, to request: inout URLRequest) throws {

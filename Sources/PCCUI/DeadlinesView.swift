@@ -35,7 +35,7 @@ public struct DeadlinesView: View {
     private var itemList: some View {
         List(viewModel.items) { item in
             HStack {
-                Image(systemName: item.kind == .task ? "checkmark.circle" : "folder")
+                Image(systemName: Self.symbolName(for: item.kind))
                     .foregroundStyle(.secondary)
                 VStack(alignment: .leading) {
                     Text(item.title)
@@ -70,5 +70,16 @@ public struct DeadlinesView: View {
             get: { viewModel.errorMessage != nil },
             set: { isShowing in if !isShowing { viewModel.errorMessage = nil } }
         )
+    }
+
+    /// Each `DeadlineItem.Kind`'s row glyph — a Course reuses neither the
+    /// Task nor the Project glyph, since it's a third, distinct kind of
+    /// container (ticket #20).
+    private static func symbolName(for kind: DeadlineItem.Kind) -> String {
+        switch kind {
+        case .task: return "checkmark.circle"
+        case .project: return "folder"
+        case .course: return "graduationcap"
+        }
     }
 }
