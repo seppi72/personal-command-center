@@ -18,10 +18,21 @@ public final class ProjectsViewModel: ObservableObject {
 
     private let client: ProjectsAPIClient
     private let clientsClient: ClientsAPIClient
+    private let sprintsClient: SprintsAPIClient
 
-    public init(client: ProjectsAPIClient, clientsClient: ClientsAPIClient) {
+    public init(client: ProjectsAPIClient, clientsClient: ClientsAPIClient, sprintsClient: SprintsAPIClient) {
         self.client = client
         self.clientsClient = clientsClient
+        self.sprintsClient = sprintsClient
+    }
+
+    /// Builds the `SprintsViewModel` for one Project's detail screen,
+    /// scoped to that Project's id — `ProjectDetailView` needs a
+    /// `SprintsAPIClient` and a `projectID`, and this is where both are
+    /// available together (mirrors `TasksViewModel`'s `scopedProjectID`
+    /// shape, one level up).
+    public func makeSprintsViewModel(for project: Project) -> SprintsViewModel {
+        SprintsViewModel(client: sprintsClient, projectID: project.id)
     }
 
     /// The name of `project`'s Client, or `nil` if it's Client-less — what

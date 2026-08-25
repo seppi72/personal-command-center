@@ -59,14 +59,19 @@ All routes require `Authorization: Bearer <token>` and are versioned under `/v1`
 | `POST` | `/v1/clients` | Create a Client (`{ "name": "..." }`) |
 | `PUT` | `/v1/clients/:clientID` | Rename a Client (`{ "name": "..." }`) |
 | `DELETE` | `/v1/clients/:clientID` | Delete a Client |
-| `GET` | `/v1/tasks` | List all Tasks; add `?projectID=` to scope to one Project |
+| `GET` | `/v1/tasks` | List all Tasks; add `?projectID=` to scope to one Project and/or `?sprintID=` to scope to one Sprint |
 | `POST` | `/v1/tasks` | Create a Task, Project-less (`{ "title": "...", "notes": "..."? }`) |
 | `PUT` | `/v1/tasks/:taskID` | Edit a Task's title/notes (`{ "title": "...", "notes": "..."? }`) |
 | `DELETE` | `/v1/tasks/:taskID` | Delete a Task |
 | `PUT` | `/v1/tasks/:taskID/complete` | Mark a Task complete |
 | `PUT` | `/v1/tasks/:taskID/incomplete` | Mark a Task incomplete |
-| `PUT` | `/v1/tasks/:taskID/project` | Assign/move/remove a Task's Project (`{ "projectID": "..."? }`, omit or `null` to remove) |
+| `PUT` | `/v1/tasks/:taskID/project` | Assign/move/remove a Task's Project (`{ "projectID": "..."? }`, omit or `null` to remove) — clears the Task's Sprint if it moves to a different Project |
 | `PUT` | `/v1/tasks/:taskID/deadline` | Attach/change/remove a Task's Deadline (`{ "dueDate": "<ISO 8601>"? }`, omit or `null` to remove) |
+| `PUT` | `/v1/tasks/:taskID/sprint` | Assign/move/remove a Task's Sprint (`{ "sprintID": "..."? }`, omit or `null` to remove) — rejects a Sprint that doesn't belong to the Task's current Project |
+| `GET` | `/v1/sprints` | List a Project's Sprints — `?projectID=` is required |
+| `POST` | `/v1/sprints` | Create a Sprint within a Project (`{ "projectID": "...", "name": "...", "startDate": "<ISO 8601>", "endDate": "<ISO 8601>" }`) |
+| `PUT` | `/v1/sprints/:sprintID` | Edit a Sprint's name/dates (`{ "name": "...", "startDate": "<ISO 8601>", "endDate": "<ISO 8601>" }`) |
+| `DELETE` | `/v1/sprints/:sprintID` | Delete a Sprint |
 | `PUT` | `/v1/projects/:projectID/deadline` | Attach/change/remove a Project's Deadline (`{ "dueDate": "<ISO 8601>"? }`, omit or `null` to remove) |
 | `GET` | `/v1/deadlines` | Every Task and Project together, ordered by Deadline proximity (undated items included, sorted last) |
 | `GET` | `/v1/personal-commitments` | List all Personal Commitments |
@@ -88,6 +93,14 @@ Deleting a Project doesn't delete its Tasks — they become Project-less. Deleti
 A Client (`CONTEXT.md`) sits above Project, not beside it — created directly by the owner, since there's no external source of "you have a new client" to auto-detect one from. `ClientController` is a plain CRUD surface, same shape as `ProjectController`'s name-only create/edit. `ProjectController.setClient` (`PUT /v1/projects/:projectID/client`) assigns, moves, or removes a Project's Client — the same "one write handles all three ACs" shape `TaskController.assignProject` already has for a Task's Project.
 
 Both the backend model and the client-side struct are named `PCCClient` in Swift, not `Client` — that would collide with Vapor's own `Client` protocol (`app.client`/`req.client`) server-side, the same problem `PCCTask` sidesteps for `_Concurrency.Task`. For the same reason, the backend's Client JSON response type is `PCCClientResponse`, not `ClientResponse` — Vapor already declares its own `ClientResponse` (the response type of `app.client`'s HTTP calls), so the unqualified name is ambiguous even though only one is ever in scope for a JSON body. The domain term "Client" is what shows up everywhere that matters — the `schema`, the JSON API, docs, and UI text.
+
+### Sprints (ticket #18)
+
+A Sprint (`CONTEXT.md`) is a time-boxed iteration within one Project that Tasks can be grouped into. A Project's use of Sprints is optional, but a Sprint itself is scoped to the Project it was created in for its lifetime — it doesn't move to a different Project, so `SprintController` never exposes a way to reassign a Sprint's Project (`UpdateSprintRequest` carries only `name`/`startDate`/`endDate`, not `projectID`). Because a Sprint has no meaning outside a Project, `GET /v1/sprints` requires `?projectID=` — unlike `GET /v1/clients` or `GET /v1/projects`, there's no "list all Sprints" story.
+
+`Sprint.project` is a non-optional `@Parent`, not an `@OptionalParent` like `PCCTask.project` — a Sprint cannot exist without exactly one owning Project. That's why `CreateSprint`'s `project_id` foreign key uses `.cascade`, not `.setNull`: deleting a Project deletes its Sprints along with it, the opposite tradeoff from `AddClientToProject`'s `.setNull` (where the child, Project, *can* exist without the parent). A Task's relationship to its Sprint is the usual optional one, though — `AddSprintToPCCTask`'s `sprint_id` is nullable with `.setNull`, so deleting a Sprint makes its Tasks Sprint-less rather than deleting them, the same orphaning shape `CreatePCCTask`'s `project_id` already has for a deleted Project.
+
+`TaskController.assignSprint` (`PUT /v1/tasks/:taskID/sprint`) rejects a Sprint that doesn't belong to the Task's *current* Project — checked by comparing `sprint.$project.id` against `task.$project.id`, which also correctly rejects any Sprint for a currently Project-less Task, since no Sprint's `project.id` can equal `nil`. `TaskController.assignProject` (`PUT /v1/tasks/:taskID/project`) clears the Task's Sprint whenever the incoming `projectID` differs from its current one (including moving to Project-less) — a Sprint that belonged to the old Project no longer applies once the Task moves. Moving a Task to the Project it's already in leaves its Sprint untouched.
 
 ### Courses (ticket #19)
 
@@ -131,7 +144,9 @@ the read-only Deadlines screen (`DeadlinesView` + `DeadlinesViewModel` +
 Log screen (`AutomationLogView` + `AutomationLogViewModel` +
 `URLSessionAutomationLogsAPIClient`, ticket #8), the Clients screen
 (`ClientsView` + `ClientsViewModel` + `URLSessionClientsAPIClient`,
-ticket #17), and the Courses screen (`CourseView` + `CoursesViewModel` +
+ticket #17), a Sprints section within the Project detail flow
+(`ProjectDetailView` + `SprintsViewModel` + `URLSessionSprintsAPIClient`,
+ticket #18), and the Courses screen (`CourseView` + `CoursesViewModel` +
 `URLSessionCoursesAPIClient`, ticket #19), built as a plain SPM target with
 no Vapor/Fluent dependency.
 It isn't wrapped in an Xcode app target yet — no Xcode is set up in this
@@ -143,8 +158,8 @@ environment. To use it:
    `URLSessionTasksAPIClient`, `URLSessionDeadlinesAPIClient`,
    `URLSessionPersonalCommitmentsAPIClient`,
    `URLSessionMirroredCalendarEventsAPIClient`,
-   `URLSessionAutomationLogsAPIClient`, `URLSessionClientsAPIClient`, and
-   `URLSessionCoursesAPIClient` with
+   `URLSessionAutomationLogsAPIClient`, `URLSessionClientsAPIClient`,
+   `URLSessionSprintsAPIClient`, and `URLSessionCoursesAPIClient` with
    the backend's base URL and the device's bearer token. Wrap each in its
    matching view model to show `ProjectsView(viewModel:)`,
    `TasksView(viewModel:)` (pass `scopedProjectID` to scope the screen to
@@ -161,7 +176,20 @@ environment. To use it:
    Project has one — assigning/moving/removing a Project's Client itself is
    API-only for now (`PUT /v1/projects/:projectID/client`); ticket #17's
    Mac/iOS scope is the indicator plus a standalone `ClientsView` for
-   Client CRUD, not a Client picker inside `ProjectFormSheet`. `CourseView`
+   Client CRUD, not a Client picker inside `ProjectFormSheet`.
+   `ProjectsViewModel` now also takes a `sprintsClient: SprintsAPIClient` in
+   its `init`, used by its `makeSprintsViewModel(for:)` factory. Tapping a
+   Project row navigates into `ProjectDetailView` (ticket #18) instead of
+   opening the edit sheet directly — that sheet moved to
+   `ProjectDetailView`'s own toolbar "Edit" button, with the same
+   `ProjectFormSheet` wiring as before. `ProjectDetailView` shows the
+   Project's name/due date read-only above a "Sprints" section: each
+   Sprint's name and date range, with add/edit/delete via `SprintFormSheet`
+   (name field plus start/end `DatePicker`s). A Sprint's own Project isn't
+   editable from that sheet — it's set at creation and never reassigned.
+   Assigning/moving/removing a *Task's* Sprint is API-only for now (`PUT
+   /v1/tasks/:taskID/sprint`), the same "list plus API-only assignment"
+   scope ticket #17 drew around Project-Client assignment. `CourseView`
    is a standalone screen mirroring `ClientsView`'s list/create/edit/delete
    shape, with a name field, Term (month/year) fields, and a Deadline
    toggle in its create/edit form (mirroring `ProjectFormSheet`'s Deadline
@@ -187,6 +215,6 @@ The backend's `PCCTask` model and the client's `PCCTask` struct are named
 throughout their targets. The domain term "Task" is what appears in the API
 paths/JSON and the UI text.
 
-It has been verified with `swift build --target PCCUI` (type-checks and
-links), including the new Course screen, but not run in a simulator or
-on-device.
+It has been verified with `swift build --target PCCUI` (type-checks and links,
+including the ticket #18 Sprint UI, the `ProjectsView` navigation change
+above, and the new Course screen) but not run in a simulator or on-device.
