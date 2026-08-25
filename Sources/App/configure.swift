@@ -41,6 +41,8 @@ public func configure(_ app: Application) async throws {
     app.migrations.add(CreatePersonalCommitment())
     app.migrations.add(CreateAutomationLog())
     app.migrations.add(CreateMirroredCalendarEvent())
+    app.migrations.add(CreateSprint())
+    app.migrations.add(AddSprintToPCCTask())
     try await app.autoMigrate()
 
     let validTokens = Set(

@@ -34,6 +34,14 @@ final class PCCTask: Model, @unchecked Sendable {
     @OptionalField(key: "due_date")
     var dueDate: Date?
 
+    /// The Sprint (`CONTEXT.md`) this Task is grouped into, if any — optional
+    /// since a Project's use of Sprints is optional and a Task can be listed
+    /// unscoped within its Project. Cleared automatically when the Task
+    /// moves to a different Project than the one its Sprint belongs to
+    /// (`TaskController.assignProject`).
+    @OptionalParent(key: "sprint_id")
+    var sprint: Sprint?
+
     init() {}
 
     init(
@@ -42,7 +50,8 @@ final class PCCTask: Model, @unchecked Sendable {
         notes: String? = nil,
         isComplete: Bool = false,
         projectID: UUID? = nil,
-        dueDate: Date? = nil
+        dueDate: Date? = nil,
+        sprintID: UUID? = nil
     ) {
         self.id = id
         self.title = title
@@ -50,5 +59,6 @@ final class PCCTask: Model, @unchecked Sendable {
         self.isComplete = isComplete
         self.$project.id = projectID
         self.dueDate = dueDate
+        self.$sprint.id = sprintID
     }
 }

@@ -3,11 +3,12 @@ import SwiftUI
 /// Minimal Mac/iOS screen for ticket #3: lists Projects, and supports
 /// creating, editing (renaming, setting/clearing a Deadline — ticket #5),
 /// and deleting one. One shared SwiftUI view for both platforms — no
-/// platform-specific chrome, per the ticket's "minimal" scope.
+/// platform-specific chrome, per the ticket's "minimal" scope. Tapping a row
+/// navigates into `ProjectDetailView` (ticket #18) rather than opening the
+/// edit sheet directly — editing moved to that screen's own toolbar.
 public struct ProjectsView: View {
     @ObservedObject private var viewModel: ProjectsViewModel
     @State private var isPresentingNewProjectSheet = false
-    @State private var editingProject: Project?
 
     public init(viewModel: ProjectsViewModel) {
         self.viewModel = viewModel
@@ -44,23 +45,18 @@ public struct ProjectsView: View {
                     await viewModel.createProject(values)
                 }
             }
-            .sheet(item: $editingProject) { project in
-                ProjectFormSheet(
-                    title: "Edit Project",
-                    initialName: project.name,
-                    initialDueDate: project.dueDate
-                ) { values in
-                    await viewModel.updateProject(project, with: values)
-                }
-            }
         }
     }
 
     private var projectList: some View {
         List {
             ForEach(viewModel.projects) { project in
-                Button {
-                    editingProject = project
+                NavigationLink {
+                    ProjectDetailView(
+                        project: project,
+                        viewModel: viewModel,
+                        sprintsViewModel: viewModel.makeSprintsViewModel(for: project)
+                    )
                 } label: {
                     VStack(alignment: .leading) {
                         Text(project.name)
@@ -76,9 +72,6 @@ public struct ProjectsView: View {
                         }
                     }
                 }
-                #if os(macOS)
-                .buttonStyle(.plain)
-                #endif
             }
             .onDelete { offsets in
                 let toDelete = offsets.map { viewModel.projects[$0] }
@@ -164,6 +157,184 @@ struct ProjectFormSheet: View {
                         }
                     }
                     .disabled(trimmedName.isEmpty)
+                }
+            }
+        }
+    }
+}
+
+/// A Project's detail screen (ticket #18): the Project's name/due date
+/// read-only at the top (editing moved here from the list row, via the
+/// toolbar's "Edit" button — same `ProjectFormSheet`/`onSave` wiring as
+/// before), plus a "Sprints" section listing the Project's Sprints with
+/// add/edit/delete.
+struct ProjectDetailView: View {
+    let project: Project
+    @ObservedObject var viewModel: ProjectsViewModel
+    @ObservedObject var sprintsViewModel: SprintsViewModel
+
+    @State private var isPresentingEditSheet = false
+    @State private var isPresentingNewSprintSheet = false
+    @State private var editingSprint: Sprint?
+
+    /// The freshest known copy of `project` — falls back to the value
+    /// passed in if `viewModel.projects` hasn't (yet) reflected an edit.
+    private var currentProject: Project {
+        viewModel.projects.first(where: { $0.id == project.id }) ?? project
+    }
+
+    var body: some View {
+        List {
+            Section {
+                Text(currentProject.name)
+                    .font(.title3)
+                if let dueDate = currentProject.dueDate {
+                    Text(dueDate, style: .date)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Section("Sprints") {
+                if sprintsViewModel.sprints.isEmpty {
+                    Text("No Sprints yet.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(sprintsViewModel.sprints) { sprint in
+                        Button {
+                            editingSprint = sprint
+                        } label: {
+                            VStack(alignment: .leading) {
+                                Text(sprint.name)
+                                Text("\(sprint.startDate, style: .date) – \(sprint.endDate, style: .date)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        #if os(macOS)
+                        .buttonStyle(.plain)
+                        #endif
+                    }
+                    .onDelete { offsets in
+                        let toDelete = offsets.map { sprintsViewModel.sprints[$0] }
+                        Task {
+                            for sprint in toDelete {
+                                await sprintsViewModel.deleteSprint(sprint)
+                            }
+                        }
+                    }
+                }
+                Button {
+                    isPresentingNewSprintSheet = true
+                } label: {
+                    Label("Add Sprint", systemImage: "plus")
+                }
+            }
+        }
+        .navigationTitle(currentProject.name)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Edit") {
+                    isPresentingEditSheet = true
+                }
+            }
+        }
+        .task { await sprintsViewModel.load() }
+        .refreshable { await sprintsViewModel.load() }
+        .alert("Error", isPresented: isShowingSprintsError, presenting: sprintsViewModel.errorMessage) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { message in
+            Text(message)
+        }
+        .sheet(isPresented: $isPresentingEditSheet) {
+            ProjectFormSheet(
+                title: "Edit Project",
+                initialName: currentProject.name,
+                initialDueDate: currentProject.dueDate
+            ) { values in
+                await viewModel.updateProject(currentProject, with: values)
+            }
+        }
+        .sheet(isPresented: $isPresentingNewSprintSheet) {
+            SprintFormSheet(title: "New Sprint", initialName: "", initialStartDate: Date(), initialEndDate: Date()) { name, startDate, endDate in
+                await sprintsViewModel.createSprint(name: name, startDate: startDate, endDate: endDate)
+            }
+        }
+        .sheet(item: $editingSprint) { sprint in
+            SprintFormSheet(
+                title: "Edit Sprint",
+                initialName: sprint.name,
+                initialStartDate: sprint.startDate,
+                initialEndDate: sprint.endDate
+            ) { name, startDate, endDate in
+                await sprintsViewModel.updateSprint(sprint, name: name, startDate: startDate, endDate: endDate)
+            }
+        }
+    }
+
+    private var isShowingSprintsError: Binding<Bool> {
+        Binding(
+            get: { sprintsViewModel.errorMessage != nil },
+            set: { isShowing in if !isShowing { sprintsViewModel.errorMessage = nil } }
+        )
+    }
+}
+
+/// Shared create/edit form: the same sheet serves "New Sprint" and "Edit
+/// Sprint" — a name field and start/end `DatePicker`s (mirrors
+/// `ProjectFormSheet`). A Sprint's Project isn't editable here — it's set at
+/// creation and never reassigned (`CONTEXT.md`).
+struct SprintFormSheet: View {
+    let title: String
+    let onSave: (String, Date, Date) async -> Void
+
+    @State private var name: String
+    @State private var startDate: Date
+    @State private var endDate: Date
+    @Environment(\.dismiss) private var dismiss
+
+    init(
+        title: String,
+        initialName: String,
+        initialStartDate: Date,
+        initialEndDate: Date,
+        onSave: @escaping (String, Date, Date) async -> Void
+    ) {
+        self.title = title
+        self.onSave = onSave
+        self._name = State(initialValue: initialName)
+        self._startDate = State(initialValue: initialStartDate)
+        self._endDate = State(initialValue: initialEndDate)
+    }
+
+    private var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var isValid: Bool {
+        !trimmedName.isEmpty && endDate >= startDate
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("Name", text: $name)
+                DatePicker("Start", selection: $startDate, displayedComponents: .date)
+                DatePicker("End", selection: $endDate, displayedComponents: .date)
+            }
+            .navigationTitle(title)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        let name = trimmedName
+                        Task {
+                            await onSave(name, startDate, endDate)
+                            dismiss()
+                        }
+                    }
+                    .disabled(!isValid)
                 }
             }
         }
