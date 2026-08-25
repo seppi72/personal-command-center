@@ -73,4 +73,41 @@ final class PCCTask: Model, @unchecked Sendable {
         self.$sprint.id = sprintID
         self.$course.id = courseID
     }
+
+    /// `project`/`course` read together as one `TaskContainer` — see its
+    /// doc comment for why they're bundled.
+    var container: TaskContainer {
+        if let projectID = $project.id { return .project(projectID) }
+        if let courseID = $course.id { return .course(courseID) }
+        return .none
+    }
+
+    /// Moves this Task to `container`, clearing whichever of Project/Course
+    /// isn't the new one (ADR-0003's exclusivity) — the single place
+    /// `TaskController.assignProject`/`assignCourse` both funnel through,
+    /// replacing what used to be the same "clear the other side" logic
+    /// written out twice. Also clears the Sprint whenever the Project
+    /// changes (ticket #18: a Sprint is scoped to the Project it was
+    /// created in for its lifetime), including when the Project is cleared
+    /// by a Course assignment — `container`'s cases are mutually exclusive
+    /// by construction, so there's no separate "did the Course change"
+    /// check to make: a Task's Project only ever changes here by going to
+    /// its new value, `nil`, or displaced by a Course.
+    func setContainer(_ container: TaskContainer) {
+        let previousProjectID = $project.id
+        switch container {
+        case .project(let id):
+            $project.id = id
+            $course.id = nil
+        case .course(let id):
+            $project.id = nil
+            $course.id = id
+        case .none:
+            $project.id = nil
+            $course.id = nil
+        }
+        if $project.id != previousProjectID {
+            $sprint.id = nil
+        }
+    }
 }
