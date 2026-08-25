@@ -47,8 +47,10 @@ public struct TasksView: View {
                     initialTitle: "",
                     initialNotes: "",
                     initialProjectID: nil,
+                    initialCourseID: nil,
                     initialDueDate: nil,
-                    projects: viewModel.projects
+                    projects: viewModel.projects,
+                    courses: viewModel.courses
                 ) { values in
                     await viewModel.createTask(values)
                 }
@@ -59,8 +61,10 @@ public struct TasksView: View {
                     initialTitle: task.title,
                     initialNotes: task.notes ?? "",
                     initialProjectID: task.projectID,
+                    initialCourseID: task.courseID,
                     initialDueDate: task.dueDate,
-                    projects: viewModel.projects
+                    projects: viewModel.projects,
+                    courses: viewModel.courses
                 ) { values in
                     await viewModel.updateTask(task, with: values)
                 }
@@ -137,16 +141,18 @@ public struct TasksView: View {
 }
 
 /// Shared create/edit form: the same sheet serves "New Task" and "Edit
-/// Task" — a title, optional notes, a Project picker, and a Deadline toggle
-/// (mirrors `ProjectFormSheet`).
+/// Task" — a title, optional notes, a Project *or* Course picker (never
+/// both — ADR-0003), and a Deadline toggle (mirrors `ProjectFormSheet`).
 struct TaskFormSheet: View {
     let title: String
     let projects: [Project]
+    let courses: [Course]
     let onSave: (TaskFormValues) async -> Void
 
     @State private var taskTitle: String
     @State private var notes: String
     @State private var projectID: UUID?
+    @State private var courseID: UUID?
     @State private var hasDeadline: Bool
     @State private var dueDate: Date
     @Environment(\.dismiss) private var dismiss
@@ -156,16 +162,20 @@ struct TaskFormSheet: View {
         initialTitle: String,
         initialNotes: String,
         initialProjectID: UUID?,
+        initialCourseID: UUID?,
         initialDueDate: Date?,
         projects: [Project],
+        courses: [Course],
         onSave: @escaping (TaskFormValues) async -> Void
     ) {
         self.title = title
         self.projects = projects
+        self.courses = courses
         self.onSave = onSave
         self._taskTitle = State(initialValue: initialTitle)
         self._notes = State(initialValue: initialNotes)
         self._projectID = State(initialValue: initialProjectID)
+        self._courseID = State(initialValue: initialCourseID)
         self._hasDeadline = State(initialValue: initialDueDate != nil)
         self._dueDate = State(initialValue: initialDueDate ?? Date())
     }
@@ -190,11 +200,26 @@ struct TaskFormSheet: View {
             Form {
                 TextField("Title", text: $taskTitle)
                 TextField("Notes", text: $notes)
+                // A Task belongs to at most one of {Project, Course}
+                // (ADR-0003) — picking one clears the other rather than
+                // leaving both pickers free to disagree.
                 Picker("Project", selection: $projectID) {
                     Text("None").tag(UUID?.none)
                     ForEach(projects) { project in
                         Text(project.name).tag(UUID?.some(project.id))
                     }
+                }
+                .onChange(of: projectID) { newValue in
+                    if newValue != nil { courseID = nil }
+                }
+                Picker("Course", selection: $courseID) {
+                    Text("None").tag(UUID?.none)
+                    ForEach(courses) { course in
+                        Text(course.name).tag(UUID?.some(course.id))
+                    }
+                }
+                .onChange(of: courseID) { newValue in
+                    if newValue != nil { projectID = nil }
                 }
                 Section("Deadline") {
                     Toggle("Has deadline", isOn: $hasDeadline)
@@ -214,6 +239,7 @@ struct TaskFormSheet: View {
                             title: trimmedTitle,
                             notes: trimmedNotes,
                             projectID: projectID,
+                            courseID: courseID,
                             dueDate: selectedDueDate
                         )
                         Task {

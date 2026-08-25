@@ -19,6 +19,7 @@ extension AppTestSuite {
                 let result = try await test(app)
                 try await PCCTask.query(on: app.db).delete()
                 try await Project.query(on: app.db).delete()
+                try await Course.query(on: app.db).delete()
                 return result
             }
         }
@@ -393,6 +394,103 @@ extension AppTestSuite {
                         let body = try res.content.decode([TaskResponse].self)
                         #expect(body.count == 1)
                         #expect(body.first?.title == "In Alpha")
+                    }
+                )
+            }
+        }
+
+        @Test("assigns a Task to a Course, moves it to another, then removes it (Course-less)")
+        func reassignsTaskCourse() async throws {
+            try await withTasksApp { app in
+                let courseA = Course(name: "CS 301", termMonth: 9, termYear: 2026)
+                let courseB = Course(name: "MATH 210", termMonth: 9, termYear: 2026)
+                try await courseA.save(on: app.db)
+                try await courseB.save(on: app.db)
+                let task = PCCTask(title: "Movable")
+                try await task.save(on: app.db)
+                let taskID = try task.requireID()
+
+                try await app.testing().test(
+                    .PUT, "/v1/tasks/\(taskID)/course",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(AssignTaskCourseRequest(courseID: try courseA.requireID()))
+                    },
+                    afterResponse: { res async throws in
+                        #expect(res.status == .ok)
+                        let body = try res.content.decode(TaskResponse.self)
+                        #expect(body.courseID == courseA.id)
+                    }
+                )
+
+                try await app.testing().test(
+                    .PUT, "/v1/tasks/\(taskID)/course",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(AssignTaskCourseRequest(courseID: try courseB.requireID()))
+                    },
+                    afterResponse: { res async throws in
+                        #expect(res.status == .ok)
+                        let body = try res.content.decode(TaskResponse.self)
+                        #expect(body.courseID == courseB.id)
+                    }
+                )
+
+                try await app.testing().test(
+                    .PUT, "/v1/tasks/\(taskID)/course",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(AssignTaskCourseRequest(courseID: nil))
+                    },
+                    afterResponse: { res async throws in
+                        #expect(res.status == .ok)
+                        let body = try res.content.decode(TaskResponse.self)
+                        #expect(body.courseID == nil)
+                    }
+                )
+            }
+        }
+
+        @Test("assigning a Task to a Course that doesn't exist fails")
+        func assigningMissingCourseFails() async throws {
+            try await withTasksApp { app in
+                let task = PCCTask(title: "Orphan candidate")
+                try await task.save(on: app.db)
+                let id = try task.requireID()
+
+                try await app.testing().test(
+                    .PUT, "/v1/tasks/\(id)/course",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(AssignTaskCourseRequest(courseID: UUID()))
+                    },
+                    afterResponse: { res async in
+                        #expect(res.status == .badRequest)
+                    }
+                )
+            }
+        }
+
+        @Test("lists Tasks scoped to one Course")
+        func listsTasksScopedToCourse() async throws {
+            try await withTasksApp { app in
+                let courseA = Course(name: "CS 301", termMonth: 9, termYear: 2026)
+                let courseB = Course(name: "MATH 210", termMonth: 9, termYear: 2026)
+                try await courseA.save(on: app.db)
+                try await courseB.save(on: app.db)
+                let courseAID = try courseA.requireID()
+                try await PCCTask(title: "In CS 301", courseID: courseAID).save(on: app.db)
+                try await PCCTask(title: "In MATH 210", courseID: try courseB.requireID()).save(on: app.db)
+                try await PCCTask(title: "Course-less").save(on: app.db)
+
+                try await app.testing().test(
+                    .GET, "/v1/tasks?courseID=\(courseAID)",
+                    headers: authHeaders(),
+                    afterResponse: { res async throws in
+                        #expect(res.status == .ok)
+                        let body = try res.content.decode([TaskResponse].self)
+                        #expect(body.count == 1)
+                        #expect(body.first?.title == "In CS 301")
                     }
                 )
             }

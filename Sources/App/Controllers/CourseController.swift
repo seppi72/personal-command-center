@@ -102,8 +102,10 @@ struct CourseController: RouteCollection {
         return termYear
     }
 
-    /// No Tasks reference Course yet (ticket #20 wires that up), so a
-    /// delete here has no orphaning concern to handle.
+    /// Deleting a Course doesn't delete its Tasks — `AddCourseToPCCTask`'s
+    /// `.setNull` foreign key makes them Course-less instead (ticket #20),
+    /// the same orphaning shape `SprintController.delete` already has for a
+    /// deleted Sprint's Tasks. No manual query needed here; the FK handles it.
     func delete(req: Request) async throws -> HTTPStatus {
         guard let course = try await findCourse(req: req) else {
             throw Abort(.notFound)

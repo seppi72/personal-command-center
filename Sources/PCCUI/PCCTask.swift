@@ -1,7 +1,8 @@
 import Foundation
 
 /// Client-side mirror of the backend's `TaskResponse` — the atomic unit of
-/// work (`CONTEXT.md`), optionally assigned to a Project.
+/// work (`CONTEXT.md`), optionally assigned to a Project or a Course (never
+/// both — ADR-0003).
 ///
 /// Named `PCCTask` in Swift only, to avoid shadowing `_Concurrency.Task`
 /// throughout this module (`ProjectsView` already relies on bare
@@ -15,6 +16,7 @@ public struct PCCTask: Codable, Identifiable, Equatable, Sendable {
     public var isComplete: Bool
     public var projectID: UUID?
     public var dueDate: Date?
+    public var courseID: UUID?
 
     public init(
         id: UUID,
@@ -22,7 +24,8 @@ public struct PCCTask: Codable, Identifiable, Equatable, Sendable {
         notes: String? = nil,
         isComplete: Bool = false,
         projectID: UUID? = nil,
-        dueDate: Date? = nil
+        dueDate: Date? = nil,
+        courseID: UUID? = nil
     ) {
         self.id = id
         self.title = title
@@ -30,5 +33,6 @@ public struct PCCTask: Codable, Identifiable, Equatable, Sendable {
         self.isComplete = isComplete
         self.projectID = projectID
         self.dueDate = dueDate
+        self.courseID = courseID
     }
 }

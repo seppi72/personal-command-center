@@ -1,12 +1,14 @@
 import Fluent
 import Vapor
 
-/// The atomic unit of work (`CONTEXT.md`). May belong to a Project — the
-/// foreign key is optional and Project-less is a valid, ordinary state, not
-/// an error case — and may carry a Deadline: a due-date concept (`CONTEXT.md`)
-/// modeled here as a plain nullable field rather than its own entity, since
-/// nothing about it needs an identity independent of the Task it's attached
-/// to.
+/// The atomic unit of work (`CONTEXT.md`). May belong to a Project or a
+/// Course — never both (ADR-0003): the two foreign keys are independently
+/// optional (Project-less/Course-less are both valid, ordinary states, not
+/// error cases), but `TaskController.assignProject`/`assignCourse` enforce
+/// the exclusivity at write time by clearing the other whenever one is set.
+/// May also carry a Deadline: a due-date concept (`CONTEXT.md`) modeled here
+/// as a plain nullable field rather than its own entity, since nothing about
+/// it needs an identity independent of the Task it's attached to.
 ///
 /// Named `PCCTask` in Swift only: an unqualified `Task` here would shadow
 /// `_Concurrency.Task` for this whole target (and `PCCUI`, which already
@@ -42,6 +44,14 @@ final class PCCTask: Model, @unchecked Sendable {
     @OptionalParent(key: "sprint_id")
     var sprint: Sprint?
 
+    /// The Course (`CONTEXT.md`) this Task belongs to, if any — the
+    /// alternate container to `project` (ADR-0003). Cleared automatically
+    /// whenever the Task is assigned a Project (`TaskController.assignProject`),
+    /// the same way `project`/`sprint` are cleared when the Task is assigned
+    /// a Course (`TaskController.assignCourse`).
+    @OptionalParent(key: "course_id")
+    var course: Course?
+
     init() {}
 
     init(
@@ -51,7 +61,8 @@ final class PCCTask: Model, @unchecked Sendable {
         isComplete: Bool = false,
         projectID: UUID? = nil,
         dueDate: Date? = nil,
-        sprintID: UUID? = nil
+        sprintID: UUID? = nil,
+        courseID: UUID? = nil
     ) {
         self.id = id
         self.title = title
@@ -60,5 +71,6 @@ final class PCCTask: Model, @unchecked Sendable {
         self.$project.id = projectID
         self.dueDate = dueDate
         self.$sprint.id = sprintID
+        self.$course.id = courseID
     }
 }

@@ -21,6 +21,7 @@ extension AppTestSuite {
                 let result = try await test(app)
                 try await PCCTask.query(on: app.db).delete()
                 try await Project.query(on: app.db).delete()
+                try await Course.query(on: app.db).delete()
                 return result
             }
         }
@@ -54,6 +55,36 @@ extension AppTestSuite {
 
                 let stored = try await PCCTask.find(id, on: app.db)
                 #expect(stored?.dueDate == dueDate)
+            }
+        }
+
+        @Test("attaches a Deadline to a Course-scoped Task, the same way as a Project-scoped Task")
+        func attachesDeadlineToCourseScopedTask() async throws {
+            try await withDeadlinesApp { app in
+                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026)
+                try await course.save(on: app.db)
+                let task = PCCTask(title: "Problem set", courseID: try course.requireID())
+                try await task.save(on: app.db)
+                let id = try task.requireID()
+                let dueDate = Date(timeIntervalSince1970: 1_800_000_000)
+
+                try await app.testing().test(
+                    .PUT, "/v1/tasks/\(id)/deadline",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(SetTaskDeadlineRequest(dueDate: dueDate))
+                    },
+                    afterResponse: { res async throws in
+                        #expect(res.status == .ok)
+                        let body = try res.content.decode(TaskResponse.self)
+                        #expect(body.dueDate == dueDate)
+                        #expect(body.courseID == course.id)
+                    }
+                )
+
+                let stored = try await PCCTask.find(id, on: app.db)
+                #expect(stored?.dueDate == dueDate)
+                #expect(stored?.$course.id == course.id)
             }
         }
 
@@ -235,6 +266,52 @@ extension AppTestSuite {
                         #expect(body.map(\.kind) == [.project, .project, .task, .project, .task])
                         #expect(body.last?.dueDate == nil)
                         #expect(body.first?.dueDate == soonest)
+                    }
+                )
+            }
+        }
+
+        // MARK: - Courses (ticket #20)
+
+        @Test("GET /v1/deadlines includes a Course's own Deadline")
+        func listsCourseDeadlines() async throws {
+            try await withDeadlinesApp { app in
+                let dueDate = Date(timeIntervalSince1970: 1_700_000_000)
+                try await Course(name: "CS 301", termMonth: 9, termYear: 2026, dueDate: dueDate).save(on: app.db)
+
+                try await app.testing().test(
+                    .GET, "/v1/deadlines",
+                    headers: authHeaders(),
+                    afterResponse: { res async throws in
+                        #expect(res.status == .ok)
+                        let body = try res.content.decode([DeadlineItemResponse].self)
+                        #expect(body.count == 1)
+                        #expect(body.first?.kind == .course)
+                        #expect(body.first?.title == "CS 301")
+                        #expect(body.first?.dueDate == dueDate)
+                        #expect(body.first?.isComplete == nil)
+                    }
+                )
+            }
+        }
+
+        @Test("GET /v1/deadlines includes a Course-scoped Task alongside the Course's own Deadline")
+        func listsCourseScopedTaskAlongsideCourseDeadline() async throws {
+            try await withDeadlinesApp { app in
+                let taskDue = Date(timeIntervalSince1970: 1_600_000_000)
+                let courseDue = Date(timeIntervalSince1970: 1_700_000_000)
+                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026, dueDate: courseDue)
+                try await course.save(on: app.db)
+                try await PCCTask(title: "Problem set", dueDate: taskDue, courseID: try course.requireID()).save(on: app.db)
+
+                try await app.testing().test(
+                    .GET, "/v1/deadlines",
+                    headers: authHeaders(),
+                    afterResponse: { res async throws in
+                        #expect(res.status == .ok)
+                        let body = try res.content.decode([DeadlineItemResponse].self)
+                        #expect(body.map(\.title) == ["Problem set", "CS 301"])
+                        #expect(body.map(\.kind) == [.task, .course])
                     }
                 )
             }

@@ -59,21 +59,22 @@ All routes require `Authorization: Bearer <token>` and are versioned under `/v1`
 | `POST` | `/v1/clients` | Create a Client (`{ "name": "..." }`) |
 | `PUT` | `/v1/clients/:clientID` | Rename a Client (`{ "name": "..." }`) |
 | `DELETE` | `/v1/clients/:clientID` | Delete a Client |
-| `GET` | `/v1/tasks` | List all Tasks; add `?projectID=` to scope to one Project and/or `?sprintID=` to scope to one Sprint |
-| `POST` | `/v1/tasks` | Create a Task, Project-less (`{ "title": "...", "notes": "..."? }`) |
+| `GET` | `/v1/tasks` | List all Tasks; add `?projectID=` to scope to one Project, `?sprintID=` to scope to one Sprint, and/or `?courseID=` to scope to one Course |
+| `POST` | `/v1/tasks` | Create a Task, Project-less and Course-less (`{ "title": "...", "notes": "..."? }`) |
 | `PUT` | `/v1/tasks/:taskID` | Edit a Task's title/notes (`{ "title": "...", "notes": "..."? }`) |
 | `DELETE` | `/v1/tasks/:taskID` | Delete a Task |
 | `PUT` | `/v1/tasks/:taskID/complete` | Mark a Task complete |
 | `PUT` | `/v1/tasks/:taskID/incomplete` | Mark a Task incomplete |
-| `PUT` | `/v1/tasks/:taskID/project` | Assign/move/remove a Task's Project (`{ "projectID": "..."? }`, omit or `null` to remove) — clears the Task's Sprint if it moves to a different Project |
+| `PUT` | `/v1/tasks/:taskID/project` | Assign/move/remove a Task's Project (`{ "projectID": "..."? }`, omit or `null` to remove) — clears the Task's Sprint if it moves to a different Project, and clears the Task's Course outright (a Task belongs to at most one of {Project, Course} — ADR-0003) |
 | `PUT` | `/v1/tasks/:taskID/deadline` | Attach/change/remove a Task's Deadline (`{ "dueDate": "<ISO 8601>"? }`, omit or `null` to remove) |
 | `PUT` | `/v1/tasks/:taskID/sprint` | Assign/move/remove a Task's Sprint (`{ "sprintID": "..."? }`, omit or `null` to remove) — rejects a Sprint that doesn't belong to the Task's current Project |
+| `PUT` | `/v1/tasks/:taskID/course` | Assign/move/remove a Task's Course (`{ "courseID": "..."? }`, omit or `null` to remove) — clears the Task's Project and Sprint outright, the mirror image of `.../project` (ADR-0003, ticket #20) |
 | `GET` | `/v1/sprints` | List a Project's Sprints — `?projectID=` is required |
 | `POST` | `/v1/sprints` | Create a Sprint within a Project (`{ "projectID": "...", "name": "...", "startDate": "<ISO 8601>", "endDate": "<ISO 8601>" }`) |
 | `PUT` | `/v1/sprints/:sprintID` | Edit a Sprint's name/dates (`{ "name": "...", "startDate": "<ISO 8601>", "endDate": "<ISO 8601>" }`) |
 | `DELETE` | `/v1/sprints/:sprintID` | Delete a Sprint |
 | `PUT` | `/v1/projects/:projectID/deadline` | Attach/change/remove a Project's Deadline (`{ "dueDate": "<ISO 8601>"? }`, omit or `null` to remove) |
-| `GET` | `/v1/deadlines` | Every Task and Project together, ordered by Deadline proximity (undated items included, sorted last) |
+| `GET` | `/v1/deadlines` | Every Task, Project, and Course together, ordered by Deadline proximity (undated items included, sorted last) |
 | `GET` | `/v1/personal-commitments` | List all Personal Commitments |
 | `POST` | `/v1/personal-commitments` | Create a Personal Commitment (`{ "title": "...", "startDate": "<ISO 8601>", "endDate": "<ISO 8601>", "recurrenceRule": "..."? }`) and push it to CalDAV |
 | `PUT` | `/v1/personal-commitments/:commitmentID` | Edit a Personal Commitment (same body as create) and re-push it to CalDAV |
@@ -108,7 +109,13 @@ A Course (`CONTEXT.md`) is a container of related Tasks/Deadlines for a single s
 
 Term (the month and year a Course belongs to, e.g. "September 2026") is modeled as two required integers, `termMonth`/`termYear`, rather than a `Date` — there's no real day-of-month in a Term, and fabricating one (e.g. the 1st) would misrepresent the domain. The JSON shape keeps `termMonth`/`termYear` flat on `SaveCourseRequest`/`CourseResponse` rather than a nested `{ "term": { ... } }` object, matching every other DTO in this codebase.
 
-Unlike `PCCClient`/`PCCTask`, `Course` collides with nothing in Vapor/the stdlib, so the model, response DTO, and PCCUI struct are all named plainly `Course`. Tasks don't reference Course yet — that cross-entity wiring (and `GET /v1/deadlines` picking up Course Deadlines) is ticket #20, out of scope here.
+Unlike `PCCClient`/`PCCTask`, `Course` collides with nothing in Vapor/the stdlib, so the model, response DTO, and PCCUI struct are all named plainly `Course`.
+
+### Task↔Course assignment + Project/Course exclusivity (ticket #20)
+
+A Task belongs to at most one of {Project, Course}, never both (`docs/adr/0003-task-belongs-to-project-xor-course.md`) — the two are alternate containers of the same kind, not orthogonal tags. `TaskController.assignProject`/`assignCourse` (`PUT /v1/tasks/:taskID/project`/`.../course`) enforce the exclusivity at write time: setting a non-nil `projectID` clears the Task's `courseID` outright, and setting a non-nil `courseID` clears both `projectID` and, transitively, `sprintID` (a Sprint is scoped to a Project, so a Project-less Task can't reference one — the same `.../project` already does when a Task moves to a *different* Project, ticket #18). *Removing* a Project or Course (`projectID`/`courseID: null`) leaves the other side untouched, since a Task with one never has the other to begin with. `AddCourseToPCCTask`'s `course_id` foreign key is `.setNull`, matching `project_id`/`sprint_id` — deleting a Course orphans its Tasks (Course-less) rather than deleting them. `GET /v1/tasks` accepts `?courseID=` alongside `?projectID=`/`?sprintID=`, and `GET /v1/deadlines` folds in Courses' own Deadlines (a third `DeadlineItemResponse.Kind` alongside `.task`/`.project`) — Course-scoped Tasks needed no special handling there, since the Task query was never scoped by container to begin with.
+
+Unlike `?projectID=`/`?sprintID=` on `GET /v1/tasks`, `POST /v1/tasks` does *not* gain a `courseID` field — a Task is created Project-less and Course-less either way, matching how it was already created Project-less before this ticket (assignment is `assignProject`'s own job, not `create`'s); `courseID`/`projectID` join the Task model's own initializer (used by tests and internal construction) the same way `projectID` already had.
 
 ### Personal Commitments
 
@@ -189,11 +196,27 @@ environment. To use it:
    editable from that sheet — it's set at creation and never reassigned.
    Assigning/moving/removing a *Task's* Sprint is API-only for now (`PUT
    /v1/tasks/:taskID/sprint`), the same "list plus API-only assignment"
-   scope ticket #17 drew around Project-Client assignment. `CourseView`
-   is a standalone screen mirroring `ClientsView`'s list/create/edit/delete
-   shape, with a name field, Term (month/year) fields, and a Deadline
-   toggle in its create/edit form (mirroring `ProjectFormSheet`'s Deadline
-   section) — ticket #19's Mac/iOS scope; a Task↔Course picker is ticket #20.
+   scope ticket #17 drew around Project-Client assignment. `TasksViewModel`
+   now also takes a `coursesClient: CoursesAPIClient` in its `init`
+   (alongside `projectsClient`) and an optional `scopedCourseID`, mirroring
+   `scopedProjectID` — the Course detail flow's counterpart (ticket #20).
+   `TaskFormSheet`'s single Project picker is now a Project picker *and* a
+   Course picker: picking one clears the other (ADR-0003), matching
+   `TaskController.assignProject`/`assignCourse`'s server-side exclusivity.
+   `CoursesViewModel` now also takes `tasksClient: TasksAPIClient` and
+   `projectsClient: ProjectsAPIClient` in its `init`, used by its
+   `makeTasksViewModel(for:)` factory (ticket #20, mirrors
+   `ProjectsViewModel.makeSprintsViewModel`). Tapping a Course row now
+   navigates into `CourseDetailView` instead of opening the edit sheet
+   directly — the same evolution `ProjectsView` went through in ticket #18 —
+   with editing moved to that screen's own toolbar "Edit" button.
+   `CourseDetailView` shows the Course's name/Term/due date read-only above a
+   "Tasks" section: each Task's completion toggle, title, and due date, with
+   add/edit/complete/delete via the same `TaskFormSheet`/`TasksViewModel`
+   the top-level Tasks screen uses (just scoped to that Course), rather than
+   a separate, duplicated implementation. `DeadlinesView`'s row glyph now has
+   a third case (`"graduationcap"`) for a Course's own Deadline, alongside
+   the existing Task/Project glyphs.
 4. `CalendarView` merges Personal Commitments and mirrored external Calendar
    events (populated by the backend's recurring sync job — see "Calendar
    sync" above) into one chronological list. A mirrored event shows a lock
@@ -216,5 +239,6 @@ throughout their targets. The domain term "Task" is what appears in the API
 paths/JSON and the UI text.
 
 It has been verified with `swift build --target PCCUI` (type-checks and links,
-including the ticket #18 Sprint UI, the `ProjectsView` navigation change
-above, and the new Course screen) but not run in a simulator or on-device.
+including the ticket #18 Sprint UI, the ticket #19 Course screen, and the
+ticket #20 Task↔Course picker plus `CourseDetailView`'s Tasks section) but
+not run in a simulator or on-device.
