@@ -60,7 +60,11 @@ public struct URLSessionCoursesAPIClient: CoursesAPIClient {
     public func deleteCourse(id: UUID) async throws {
         let request = makeRequest(path: "v1/courses/\(id)", method: "DELETE")
         let (_, response) = try await session.data(for: request)
-        try Self.checkStatus(response)
+        try HTTPResponseValidation.checkStatus(
+            response,
+            unexpectedResponse: CoursesAPIClientError.unexpectedResponse,
+            serverError: CoursesAPIClientError.serverError
+        )
     }
 
     public func setCourseDeadline(id: UUID, dueDate: Date?) async throws -> Course {
@@ -86,7 +90,11 @@ public struct URLSessionCoursesAPIClient: CoursesAPIClient {
 
     private func send<Response: Decodable>(_ request: URLRequest) async throws -> Response {
         let (data, response) = try await session.data(for: request)
-        try Self.checkStatus(response)
+        try HTTPResponseValidation.checkStatus(
+            response,
+            unexpectedResponse: CoursesAPIClientError.unexpectedResponse,
+            serverError: CoursesAPIClientError.serverError
+        )
         return try decoder.decode(Response.self, from: data)
     }
 
@@ -95,14 +103,5 @@ public struct URLSessionCoursesAPIClient: CoursesAPIClient {
         request.httpMethod = method
         request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
         return request
-    }
-
-    private static func checkStatus(_ response: URLResponse) throws {
-        guard let http = response as? HTTPURLResponse else {
-            throw CoursesAPIClientError.unexpectedResponse
-        }
-        guard (200...299).contains(http.statusCode) else {
-            throw CoursesAPIClientError.serverError(status: http.statusCode)
-        }
     }
 }

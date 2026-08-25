@@ -31,15 +31,27 @@ public final class SprintsViewModel: ObservableObject {
         }
     }
 
-    public func createSprint(name: String, startDate: Date, endDate: Date) async {
+    public func createSprint(_ values: SprintFormValues) async {
         await run(verb: "create") {
-            sprints.append(try await client.createSprint(projectID: projectID, name: name, startDate: startDate, endDate: endDate))
+            sprints.append(
+                try await client.createSprint(
+                    projectID: projectID,
+                    name: values.name,
+                    startDate: values.startDate,
+                    endDate: values.endDate
+                )
+            )
         }
     }
 
-    public func updateSprint(_ existing: Sprint, name: String, startDate: Date, endDate: Date) async {
+    public func updateSprint(_ existing: Sprint, with values: SprintFormValues) async {
         await run(verb: "update") {
-            let updated = try await client.updateSprint(id: existing.id, name: name, startDate: startDate, endDate: endDate)
+            let updated = try await client.updateSprint(
+                id: existing.id,
+                name: values.name,
+                startDate: values.startDate,
+                endDate: values.endDate
+            )
             if let index = sprints.firstIndex(where: { $0.id == updated.id }) {
                 sprints[index] = updated
             }

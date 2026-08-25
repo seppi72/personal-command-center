@@ -255,8 +255,8 @@ struct ProjectDetailView: View {
             }
         }
         .sheet(isPresented: $isPresentingNewSprintSheet) {
-            SprintFormSheet(title: "New Sprint", initialName: "", initialStartDate: Date(), initialEndDate: Date()) { name, startDate, endDate in
-                await sprintsViewModel.createSprint(name: name, startDate: startDate, endDate: endDate)
+            SprintFormSheet(title: "New Sprint", initialName: "", initialStartDate: Date(), initialEndDate: Date()) { values in
+                await sprintsViewModel.createSprint(values)
             }
         }
         .sheet(item: $editingSprint) { sprint in
@@ -265,8 +265,8 @@ struct ProjectDetailView: View {
                 initialName: sprint.name,
                 initialStartDate: sprint.startDate,
                 initialEndDate: sprint.endDate
-            ) { name, startDate, endDate in
-                await sprintsViewModel.updateSprint(sprint, name: name, startDate: startDate, endDate: endDate)
+            ) { values in
+                await sprintsViewModel.updateSprint(sprint, with: values)
             }
         }
     }
@@ -285,7 +285,7 @@ struct ProjectDetailView: View {
 /// creation and never reassigned (`CONTEXT.md`).
 struct SprintFormSheet: View {
     let title: String
-    let onSave: (String, Date, Date) async -> Void
+    let onSave: (SprintFormValues) async -> Void
 
     @State private var name: String
     @State private var startDate: Date
@@ -297,7 +297,7 @@ struct SprintFormSheet: View {
         initialName: String,
         initialStartDate: Date,
         initialEndDate: Date,
-        onSave: @escaping (String, Date, Date) async -> Void
+        onSave: @escaping (SprintFormValues) async -> Void
     ) {
         self.title = title
         self.onSave = onSave
@@ -328,9 +328,9 @@ struct SprintFormSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        let name = trimmedName
+                        let values = SprintFormValues(name: trimmedName, startDate: startDate, endDate: endDate)
                         Task {
-                            await onSave(name, startDate, endDate)
+                            await onSave(values)
                             dismiss()
                         }
                     }

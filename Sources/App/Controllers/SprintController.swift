@@ -80,8 +80,8 @@ struct SprintController: RouteCollection {
         }
         let payload = try req.content.decode(UpdateSprintRequest.self)
         sprint.name = try Self.validatedName(payload.name)
-        sprint.endDate = try Self.validatedEndDate(payload.endDate, after: payload.startDate)
         sprint.startDate = payload.startDate
+        sprint.endDate = try Self.validatedEndDate(payload.endDate, after: payload.startDate)
         try await sprint.save(on: req.db)
         return try SprintResponse(sprint)
     }
