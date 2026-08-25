@@ -5,11 +5,13 @@ struct ProjectResponse: Content {
     let id: UUID
     let name: String
     let dueDate: Date?
+    let clientID: UUID?
 
     init(_ project: Project) throws {
         self.id = try project.requireID()
         self.name = project.name
         self.dueDate = project.dueDate
+        self.clientID = project.$client.id
     }
 }
 
@@ -23,6 +25,14 @@ struct SetProjectDeadlineRequest: Content {
     let dueDate: Date?
 }
 
+/// `clientID: nil` (or the key omitted entirely — Codable's synthesized
+/// decoding treats a missing optional key the same as an explicit `null`)
+/// both mean "make this Project Client-less", mirroring
+/// `AssignTaskProjectRequest`.
+struct SetProjectClientRequest: Content {
+    let clientID: UUID?
+}
+
 struct ProjectController: RouteCollection {
     func boot(routes: any RoutesBuilder) throws {
         let projects = routes.grouped("projects")
@@ -32,13 +42,19 @@ struct ProjectController: RouteCollection {
             project.put(use: update)
             project.delete(use: delete)
             project.put("deadline", use: setDeadline)
+            project.put("client", use: setClient)
         }
     }
 
-    /// Lists every Project — there is no per-client local store (ADR-0001),
-    /// so this is the same list regardless of which device asks.
+    /// Lists every Project, or Projects scoped to one Client when
+    /// `?clientID=` is given — same shape as `TaskController.index`'s
+    /// optional `?projectID=` filter.
     func index(req: Request) async throws -> [ProjectResponse] {
-        try await Project.query(on: req.db).all().map(ProjectResponse.init)
+        var query = Project.query(on: req.db)
+        if let clientID = req.query[UUID.self, at: "clientID"] {
+            query = query.filter(\.$client.$id == clientID)
+        }
+        return try await query.all().map(ProjectResponse.init)
     }
 
     func create(req: Request) async throws -> ProjectResponse {
@@ -84,6 +100,24 @@ struct ProjectController: RouteCollection {
         }
         let payload = try req.content.decode(SetProjectDeadlineRequest.self)
         project.dueDate = payload.dueDate
+        try await project.save(on: req.db)
+        return try ProjectResponse(project)
+    }
+
+    /// Assign, move, or remove (`clientID: null`) a Project's Client — all
+    /// three ACs are the same write (set-or-clear the foreign key), mirroring
+    /// `TaskController.assignProject`.
+    func setClient(req: Request) async throws -> ProjectResponse {
+        guard let project = try await findProject(req: req) else {
+            throw Abort(.notFound)
+        }
+        let payload = try req.content.decode(SetProjectClientRequest.self)
+        if let clientID = payload.clientID {
+            guard try await PCCClient.find(clientID, on: req.db) != nil else {
+                throw Abort(.badRequest, reason: "no such Client")
+            }
+        }
+        project.$client.id = payload.clientID
         try await project.save(on: req.db)
         return try ProjectResponse(project)
     }

@@ -50,10 +50,15 @@ All routes require `Authorization: Bearer <token>` and are versioned under `/v1`
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/v1/health` | Liveness check (see `docs/adr/0001-self-hosted-backend-over-cloudkit.md`) |
-| `GET` | `/v1/projects` | List all Projects |
+| `GET` | `/v1/projects` | List all Projects; add `?clientID=` to scope to one Client |
 | `POST` | `/v1/projects` | Create a Project (`{ "name": "..." }`) |
 | `PUT` | `/v1/projects/:projectID` | Rename a Project (`{ "name": "..." }`) |
 | `DELETE` | `/v1/projects/:projectID` | Delete a Project |
+| `PUT` | `/v1/projects/:projectID/client` | Assign/move/remove a Project's Client (`{ "clientID": "..."? }`, omit or `null` to remove) |
+| `GET` | `/v1/clients` | List all Clients |
+| `POST` | `/v1/clients` | Create a Client (`{ "name": "..." }`) |
+| `PUT` | `/v1/clients/:clientID` | Rename a Client (`{ "name": "..." }`) |
+| `DELETE` | `/v1/clients/:clientID` | Delete a Client |
 | `GET` | `/v1/tasks` | List all Tasks; add `?projectID=` to scope to one Project |
 | `POST` | `/v1/tasks` | Create a Task, Project-less (`{ "title": "...", "notes": "..."? }`) |
 | `PUT` | `/v1/tasks/:taskID` | Edit a Task's title/notes (`{ "title": "...", "notes": "..."? }`) |
@@ -71,7 +76,13 @@ All routes require `Authorization: Bearer <token>` and are versioned under `/v1`
 | `GET` | `/v1/calendar-events` | List every mirrored external Calendar event (read-only — no create/update/delete; see "Calendar sync" below) |
 | `GET` | `/v1/automation-logs` | Recent `AutomationLog` entries, most recent first, plus the most recent sync failure (if any) singled out (read-only; see "Automation Log" below) |
 
-Deleting a Project doesn't delete its Tasks — they become Project-less.
+Deleting a Project doesn't delete its Tasks — they become Project-less. Deleting a Client doesn't delete its Projects — they become Client-less, the same orphaning shape.
+
+### Clients (ticket #17)
+
+A Client (`CONTEXT.md`) sits above Project, not beside it — created directly by the owner, since there's no external source of "you have a new client" to auto-detect one from. `ClientController` is a plain CRUD surface, same shape as `ProjectController`'s name-only create/edit. `ProjectController.setClient` (`PUT /v1/projects/:projectID/client`) assigns, moves, or removes a Project's Client — the same "one write handles all three ACs" shape `TaskController.assignProject` already has for a Task's Project.
+
+Both the backend model and the client-side struct are named `PCCClient` in Swift, not `Client` — that would collide with Vapor's own `Client` protocol (`app.client`/`req.client`) server-side, the same problem `PCCTask` sidesteps for `_Concurrency.Task`. For the same reason, the backend's Client JSON response type is `PCCClientResponse`, not `ClientResponse` — Vapor already declares its own `ClientResponse` (the response type of `app.client`'s HTTP calls), so the unqualified name is ambiguous even though only one is ever in scope for a JSON body. The domain term "Client" is what shows up everywhere that matters — the `schema`, the JSON API, docs, and UI text.
 
 ### Personal Commitments
 
@@ -92,7 +103,7 @@ A pull writes one `AutomationLog` entry (`actionType: "calendar.pull"`) per `Mir
 
 `GET /v1/automation-logs` is the owner-facing read of `AutomationLog` (`CONTEXT.md`): every automated action's outcome, written by `CalendarSyncService`'s `push`/`remove`/`pull` today and whatever automation lands next. The response has two parts — `entries`, the 100 most recent log rows (most recent first), and `mostRecentFailure`, the single most recent entry with `outcome: "failure"` across the *entire* log, not just whichever of it happens to fall inside `entries`. Computing it separately is what keeps a failure from going unnoticed just because enough successes have piled up since to push it out of the recent list — the visible, singled-out failure state spec #1 asks for rather than one that silently scrolls out of view. `AutomationLogController` is read-only, same as `MirroredCalendarEventController` — no create/update/delete routes.
 
-## Client (Mac/iOS)
+## Consumers (Mac/iOS)
 
 `Sources/PCCUI` is a shared SwiftUI library for the Projects screen
 (`ProjectsView` + `ProjectsViewModel` + `URLSessionProjectsAPIClient`), the
@@ -100,32 +111,40 @@ Tasks screen (`TasksView` + `TasksViewModel` + `URLSessionTasksAPIClient`),
 the read-only Deadlines screen (`DeadlinesView` + `DeadlinesViewModel` +
 `URLSessionDeadlinesAPIClient`), the Personal Commitments screen
 (`PersonalCommitmentsView` + `PersonalCommitmentsViewModel` +
-`URLSessionPersonalCommitmentsAPIClient`), and the combined Calendar screen
+`URLSessionPersonalCommitmentsAPIClient`), the combined Calendar screen
 (`CalendarView` + `CalendarViewModel` +
 `URLSessionPersonalCommitmentsAPIClient` +
-`URLSessionMirroredCalendarEventsAPIClient`, ticket #7), and the Automation
+`URLSessionMirroredCalendarEventsAPIClient`, ticket #7), the Automation
 Log screen (`AutomationLogView` + `AutomationLogViewModel` +
-`URLSessionAutomationLogsAPIClient`, ticket #8), built as a plain SPM target
-with no Vapor/Fluent dependency. It isn't wrapped in an Xcode app target
-yet — no Xcode is set up in this environment. To use it:
+`URLSessionAutomationLogsAPIClient`, ticket #8), and the Clients screen
+(`ClientsView` + `ClientsViewModel` + `URLSessionClientsAPIClient`,
+ticket #17), built as a plain SPM target with no Vapor/Fluent dependency.
+It isn't wrapped in an Xcode app target yet — no Xcode is set up in this
+environment. To use it:
 
 1. Create the Mac and/or iOS App targets in Xcode (`File > New > Project`).
 2. Add this repository as a local Swift package dependency and link `PCCUI`.
 3. From each app's entry point, construct a `URLSessionProjectsAPIClient`,
    `URLSessionTasksAPIClient`, `URLSessionDeadlinesAPIClient`,
    `URLSessionPersonalCommitmentsAPIClient`,
-   `URLSessionMirroredCalendarEventsAPIClient`, and
-   `URLSessionAutomationLogsAPIClient` with the backend's base URL and the
-   device's bearer token. Wrap each in its matching view model to show
-   `ProjectsView(viewModel:)`, `TasksView(viewModel:)` (pass
-   `scopedProjectID` to scope the screen to one Project, or omit it to list
-   every Task), `DeadlinesView(viewModel:)`, `PersonalCommitmentsView(viewModel:)`,
-   `CalendarView(viewModel:)`, and `AutomationLogView(viewModel:)`. A Task
+   `URLSessionMirroredCalendarEventsAPIClient`,
+   `URLSessionAutomationLogsAPIClient`, and `URLSessionClientsAPIClient` with
+   the backend's base URL and the device's bearer token. Wrap each in its
+   matching view model to show `ProjectsView(viewModel:)`,
+   `TasksView(viewModel:)` (pass `scopedProjectID` to scope the screen to
+   one Project, or omit it to list every Task), `DeadlinesView(viewModel:)`,
+   `PersonalCommitmentsView(viewModel:)`, `CalendarView(viewModel:)`,
+   `AutomationLogView(viewModel:)`, and `ClientsView(viewModel:)`. A Task
    or Project's Deadline is set/cleared from its own create/edit form in
    `TasksView`/`ProjectsView` — the Deadlines screen is a read-only sorted
    view of both. Each Commitment's sync status (pushed to CalDAV, or
    failed — see "CalDAV setup" above) shows as a badge on its row in both
-   `PersonalCommitmentsView` and `CalendarView`.
+   `PersonalCommitmentsView` and `CalendarView`. `ProjectsView` shows each
+   row's Client name (via `ProjectsViewModel.clientName(for:)`) when the
+   Project has one — assigning/moving/removing a Project's Client itself is
+   API-only for now (`PUT /v1/projects/:projectID/client`); ticket #17's
+   Mac/iOS scope is the indicator plus a standalone `ClientsView` for
+   Client CRUD, not a Client picker inside `ProjectFormSheet`.
 4. `CalendarView` merges Personal Commitments and mirrored external Calendar
    events (populated by the backend's recurring sync job — see "Calendar
    sync" above) into one chronological list. A mirrored event shows a lock

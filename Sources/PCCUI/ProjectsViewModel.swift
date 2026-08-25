@@ -1,29 +1,44 @@
 import Foundation
 
 /// Holds the Projects screen's state and talks to the backend through a
-/// `ProjectsAPIClient`. Kept separate from `ProjectsView` so the view stays
-/// a thin rendering of this state (mirrors the backend's
-/// Controller/Service split).
+/// `ProjectsAPIClient`, plus a `ClientsAPIClient` to resolve each Project's
+/// Client name for the row indicator (ticket #17) — same "load a second
+/// list to label the first" shape `TasksViewModel` uses for its Project
+/// picker. Kept separate from `ProjectsView` so the view stays a thin
+/// rendering of this state (mirrors the backend's Controller/Service split).
 ///
 /// `ObservableObject` rather than the newer `@Observable` macro, since that
 /// macro needs iOS 17/macOS 14 and this package targets iOS 16/macOS 13.
 @MainActor
 public final class ProjectsViewModel: ObservableObject {
     @Published public private(set) var projects: [Project] = []
+    @Published public private(set) var clients: [PCCClient] = []
     @Published public var errorMessage: String?
     @Published public private(set) var isLoading = false
 
     private let client: ProjectsAPIClient
+    private let clientsClient: ClientsAPIClient
 
-    public init(client: ProjectsAPIClient) {
+    public init(client: ProjectsAPIClient, clientsClient: ClientsAPIClient) {
         self.client = client
+        self.clientsClient = clientsClient
+    }
+
+    /// The name of `project`'s Client, or `nil` if it's Client-less — what
+    /// `ProjectsView` shows as each row's Client indicator.
+    public func clientName(for project: Project) -> String? {
+        guard let clientID = project.clientID else { return nil }
+        return clients.first(where: { $0.id == clientID })?.name
     }
 
     public func load() async {
         isLoading = true
         defer { isLoading = false }
         await run(verb: "load") {
-            projects = try await client.listProjects()
+            async let loadedProjects = client.listProjects()
+            async let loadedClients = clientsClient.listClients()
+            projects = try await loadedProjects
+            clients = try await loadedClients
         }
     }
 
