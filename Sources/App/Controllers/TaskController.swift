@@ -144,59 +144,58 @@ struct TaskController: RouteCollection {
 
     /// Assign, move, or remove (`projectID: null`) a Task's Project — all
     /// three ACs are the same write (set-or-clear the foreign key), not
-    /// three different operations. Moving to a *different* Project than the
-    /// Task's current one also clears its Sprint (ticket #18): a Sprint is
-    /// scoped to the Project it was created in for its lifetime, so a Sprint
-    /// that belonged to the old Project no longer applies. Leaving the
-    /// `projectID` unchanged leaves the Sprint alone. Setting a non-nil
-    /// `projectID` also clears the Task's Course (ADR-0003, ticket #20): a
-    /// Task belongs to at most one of {Project, Course}, so assigning one
-    /// displaces the other; removing the Project (`projectID: null`) leaves
-    /// the Course alone since a Task with a Course never has a Project to
-    /// begin with.
+    /// three different operations. Setting a non-nil `projectID` also clears
+    /// the Task's Course (ADR-0003, ticket #20); removing the Project
+    /// (`projectID: null`) preserves whatever Course the Task already has —
+    /// which, by that same exclusivity, is only ever non-nil when
+    /// `projectID` was already nil to begin with. `PCCTask.setContainer`
+    /// carries the Sprint-clearing this implies (ticket #18): moving to a
+    /// *different* Project, or off Project entirely, clears a Sprint scoped
+    /// to the old one; leaving `projectID` unchanged leaves the Sprint alone.
     func assignProject(req: Request) async throws -> TaskResponse {
         guard let task = try await findTask(req: req) else {
             throw Abort(.notFound)
         }
         let payload = try req.content.decode(AssignTaskProjectRequest.self)
+        let container: TaskContainer
         if let projectID = payload.projectID {
             guard try await Project.find(projectID, on: req.db) != nil else {
                 throw Abort(.badRequest, reason: "no such Project")
             }
+            container = .project(projectID)
+        } else if let courseID = task.$course.id {
+            container = .course(courseID)
+        } else {
+            container = .none
         }
-        if payload.projectID != task.$project.id {
-            task.$sprint.id = nil
-        }
-        task.$project.id = payload.projectID
-        if payload.projectID != nil {
-            task.$course.id = nil
-        }
+        task.setContainer(container)
         try await task.save(on: req.db)
         return try TaskResponse(task)
     }
 
     /// Assign, move, or remove (`courseID: null`) a Task's Course — mirrors
     /// `assignProject`. Setting a non-nil `courseID` also clears the Task's
-    /// Project and, transitively, its Sprint (ADR-0003, ticket #20): a Sprint
-    /// is scoped to a Project, so a Project-less Task can't reference one
-    /// either. Removing the Course (`courseID: null`) leaves the Project/
-    /// Sprint alone since a Task with a Project never has a Course to begin
-    /// with.
+    /// Project and, transitively via `PCCTask.setContainer`, its Sprint
+    /// (ADR-0003, ticket #20). Removing the Course (`courseID: null`)
+    /// preserves whatever Project the Task already has, the same way
+    /// `assignProject` preserves a Course when clearing.
     func assignCourse(req: Request) async throws -> TaskResponse {
         guard let task = try await findTask(req: req) else {
             throw Abort(.notFound)
         }
         let payload = try req.content.decode(AssignTaskCourseRequest.self)
+        let container: TaskContainer
         if let courseID = payload.courseID {
             guard try await Course.find(courseID, on: req.db) != nil else {
                 throw Abort(.badRequest, reason: "no such Course")
             }
+            container = .course(courseID)
+        } else if let projectID = task.$project.id {
+            container = .project(projectID)
+        } else {
+            container = .none
         }
-        task.$course.id = payload.courseID
-        if payload.courseID != nil {
-            task.$project.id = nil
-            task.$sprint.id = nil
-        }
+        task.setContainer(container)
         try await task.save(on: req.db)
         return try TaskResponse(task)
     }

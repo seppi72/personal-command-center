@@ -103,22 +103,24 @@ public final class TasksViewModel: ObservableObject {
     }
 
     /// Reconciles `task`'s Project/Course with `values`' desired ones and
-    /// returns the result — the new, non-nil target decides which endpoint to
-    /// call, since either one clears the other side already (ADR-0003);
-    /// clearing both back to Project-less/Course-less falls back to whichever
+    /// returns the result — the requested `TaskContainer` decides which
+    /// endpoint to call, since either one clears the other side already
+    /// (ADR-0003); requesting `.none` (both cleared) falls back to whichever
     /// one `task` actually had. Only called when `updateTask` has already
     /// confirmed one of the two changed.
     private func reassignContainer(of task: PCCTask, to values: TaskFormValues) async throws -> PCCTask {
-        if let courseID = values.courseID {
-            return try await tasksClient.assignTaskCourse(id: task.id, courseID: courseID)
+        let requested = TaskContainer(projectID: values.projectID, courseID: values.courseID)
+        let target = requested == .none
+            ? TaskContainer(projectID: task.projectID, courseID: task.courseID)
+            : requested
+        switch target {
+        case .course(let id):
+            return try await tasksClient.assignTaskCourse(id: task.id, courseID: id)
+        case .project(let id):
+            return try await tasksClient.assignTaskProject(id: task.id, projectID: id)
+        case .none:
+            return try await tasksClient.assignTaskProject(id: task.id, projectID: nil)
         }
-        if let projectID = values.projectID {
-            return try await tasksClient.assignTaskProject(id: task.id, projectID: projectID)
-        }
-        if task.courseID != nil {
-            return try await tasksClient.assignTaskCourse(id: task.id, courseID: nil)
-        }
-        return try await tasksClient.assignTaskProject(id: task.id, projectID: nil)
     }
 
     public func deleteTask(_ task: PCCTask) async {
@@ -134,12 +136,22 @@ public final class TasksViewModel: ObservableObject {
         }
     }
 
+    /// `scopedProjectID`/`scopedCourseID` read together as one
+    /// `TaskContainer` — the screen is scoped to a Project, a Course, or (both
+    /// `nil`) not scoped at all, the same three-way shape a Task's own
+    /// container has.
+    private var scope: TaskContainer {
+        TaskContainer(projectID: scopedProjectID, courseID: scopedCourseID)
+    }
+
     /// Whether `task` belongs where this screen is scoped — always `true`
-    /// for the unscoped, top-level Tasks screen (both scopes `nil`).
+    /// for the unscoped, top-level Tasks screen.
     private func matchesScope(_ task: PCCTask) -> Bool {
-        if let scopedProjectID, task.projectID != scopedProjectID { return false }
-        if let scopedCourseID, task.courseID != scopedCourseID { return false }
-        return true
+        switch scope {
+        case .none: return true
+        case .project(let id): return task.projectID == id
+        case .course(let id): return task.courseID == id
+        }
     }
 
     /// Swaps the freshly-updated Task into `tasks`, dropping it when scoped
