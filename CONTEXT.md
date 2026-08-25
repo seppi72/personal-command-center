@@ -5,20 +5,20 @@ A single-user system that aggregates, organizes, prioritizes, and surfaces the o
 ## Language
 
 **Task**:
-The atomic unit of work. May belong to a Project, and may carry a Deadline.
+The atomic unit of work. May belong to a Project or a Course, not both — the two are alternate containers of the same kind, not orthogonal tags — and may carry a Deadline.
 _Avoid_: To-do, item, action.
 
 **Project**:
 A container of related Tasks with its own lifecycle, distinct from any single Task. May optionally belong to a Client, and may optionally be broken into Sprints.
 
 **Sprint**:
-An optional time-boxed iteration within a Project that Tasks can be grouped into.
+A time-boxed iteration within one Project that Tasks can be grouped into. A Project's use of Sprints is optional, but a Sprint itself is scoped to the Project it was created in for its lifetime — it doesn't move to a different Project.
 
 **Client**:
 A grouping of Projects (e.g. an employer or a freelance client) — the owner may have one or many. Sits above Project, not beside it: Client → Project → (optional Sprint) → Task. Created directly by the owner, not auto-detected — there's no external source of "you have a new client."
 
 **Deadline**:
-A due-date concept attachable to a Task, Project, or other dated obligation.
+A due-date concept attachable to a Task, Project, Course, or other dated obligation.
 
 **Personal Commitment**:
 A recurring or scheduled personal obligation (e.g. a standing calendar block), distinct from a Task — it is scheduled/time-bound rather than completed.
@@ -33,7 +33,10 @@ A surfaced item requiring the owner's attention. Has two aspects: membership in 
 A record of duration spent on work, captured primarily by starting/stopping a live timer, with after-the-fact manual duration entry as a fallback. Attaches to a Task, or directly to a Project or Client when the work isn't task-shaped (e.g. a call, admin time). Is how Work Hours is tracked, since no external timesheet system exists to mirror.
 
 **Course**:
-A container of related Tasks/Deadlines for a single school class (e.g. "CS 301"), analogous to how a Project contains personal Tasks. Created directly by the owner each term, not auto-detected; the Tasks/Deadlines inside it are what auto-populate, from a school data source.
+A container of related Tasks/Deadlines for a single school class (e.g. "CS 301"), analogous to how a Project contains personal Tasks — down to optionally carrying its own Deadline the same way a Project can. Created directly by the owner each term, not auto-detected; the Tasks/Deadlines inside it are what auto-populate, from a school data source.
+
+**Term**:
+The month and year identifying which academic term a Course belongs to (e.g. "September 2026").
 
 **Source of truth (per domain)**:
 Whether the Command Center is canonical owner of a domain's data or a mirror of an external system of record.
