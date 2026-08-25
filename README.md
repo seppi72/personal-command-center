@@ -75,6 +75,11 @@ All routes require `Authorization: Bearer <token>` and are versioned under `/v1`
 | `DELETE` | `/v1/personal-commitments/:commitmentID` | Delete a Personal Commitment and remove its CalDAV event |
 | `GET` | `/v1/calendar-events` | List every mirrored external Calendar event (read-only — no create/update/delete; see "Calendar sync" below) |
 | `GET` | `/v1/automation-logs` | Recent `AutomationLog` entries, most recent first, plus the most recent sync failure (if any) singled out (read-only; see "Automation Log" below) |
+| `GET` | `/v1/courses` | List all Courses |
+| `POST` | `/v1/courses` | Create a Course (`{ "name": "...", "termMonth": 1-12, "termYear": ... }`) |
+| `PUT` | `/v1/courses/:courseID` | Edit a Course's name/Term (same body as create) |
+| `DELETE` | `/v1/courses/:courseID` | Delete a Course |
+| `PUT` | `/v1/courses/:courseID/deadline` | Attach/change/remove a Course's Deadline (`{ "dueDate": "<ISO 8601>"? }`, omit or `null` to remove) |
 
 Deleting a Project doesn't delete its Tasks — they become Project-less. Deleting a Client doesn't delete its Projects — they become Client-less, the same orphaning shape.
 
@@ -83,6 +88,14 @@ Deleting a Project doesn't delete its Tasks — they become Project-less. Deleti
 A Client (`CONTEXT.md`) sits above Project, not beside it — created directly by the owner, since there's no external source of "you have a new client" to auto-detect one from. `ClientController` is a plain CRUD surface, same shape as `ProjectController`'s name-only create/edit. `ProjectController.setClient` (`PUT /v1/projects/:projectID/client`) assigns, moves, or removes a Project's Client — the same "one write handles all three ACs" shape `TaskController.assignProject` already has for a Task's Project.
 
 Both the backend model and the client-side struct are named `PCCClient` in Swift, not `Client` — that would collide with Vapor's own `Client` protocol (`app.client`/`req.client`) server-side, the same problem `PCCTask` sidesteps for `_Concurrency.Task`. For the same reason, the backend's Client JSON response type is `PCCClientResponse`, not `ClientResponse` — Vapor already declares its own `ClientResponse` (the response type of `app.client`'s HTTP calls), so the unqualified name is ambiguous even though only one is ever in scope for a JSON body. The domain term "Client" is what shows up everywhere that matters — the `schema`, the JSON API, docs, and UI text.
+
+### Courses (ticket #19)
+
+A Course (`CONTEXT.md`) is a container of related Tasks/Deadlines for a single school class, e.g. "CS 301" — analogous to how a Project contains personal Tasks, down to optionally carrying its own Deadline the same way a Project can (`PUT /v1/courses/:courseID/deadline` mirrors `ProjectController.setDeadline` exactly). Created directly by the owner each Term, not auto-detected; the Tasks/Deadlines inside it are what auto-populate later, from a school data source. `CourseController` is a plain CRUD surface, same shape as `ProjectController`'s/`ClientController`'s — `GET /v1/courses` lists every Course with no scoping, since a Course is top-level, not nested under anything.
+
+Term (the month and year a Course belongs to, e.g. "September 2026") is modeled as two required integers, `termMonth`/`termYear`, rather than a `Date` — there's no real day-of-month in a Term, and fabricating one (e.g. the 1st) would misrepresent the domain. The JSON shape keeps `termMonth`/`termYear` flat on `SaveCourseRequest`/`CourseResponse` rather than a nested `{ "term": { ... } }` object, matching every other DTO in this codebase.
+
+Unlike `PCCClient`/`PCCTask`, `Course` collides with nothing in Vapor/the stdlib, so the model, response DTO, and PCCUI struct are all named plainly `Course`. Tasks don't reference Course yet — that cross-entity wiring (and `GET /v1/deadlines` picking up Course Deadlines) is ticket #20, out of scope here.
 
 ### Personal Commitments
 
@@ -116,9 +129,11 @@ the read-only Deadlines screen (`DeadlinesView` + `DeadlinesViewModel` +
 `URLSessionPersonalCommitmentsAPIClient` +
 `URLSessionMirroredCalendarEventsAPIClient`, ticket #7), the Automation
 Log screen (`AutomationLogView` + `AutomationLogViewModel` +
-`URLSessionAutomationLogsAPIClient`, ticket #8), and the Clients screen
+`URLSessionAutomationLogsAPIClient`, ticket #8), the Clients screen
 (`ClientsView` + `ClientsViewModel` + `URLSessionClientsAPIClient`,
-ticket #17), built as a plain SPM target with no Vapor/Fluent dependency.
+ticket #17), and the Courses screen (`CourseView` + `CoursesViewModel` +
+`URLSessionCoursesAPIClient`, ticket #19), built as a plain SPM target with
+no Vapor/Fluent dependency.
 It isn't wrapped in an Xcode app target yet — no Xcode is set up in this
 environment. To use it:
 
@@ -128,13 +143,15 @@ environment. To use it:
    `URLSessionTasksAPIClient`, `URLSessionDeadlinesAPIClient`,
    `URLSessionPersonalCommitmentsAPIClient`,
    `URLSessionMirroredCalendarEventsAPIClient`,
-   `URLSessionAutomationLogsAPIClient`, and `URLSessionClientsAPIClient` with
+   `URLSessionAutomationLogsAPIClient`, `URLSessionClientsAPIClient`, and
+   `URLSessionCoursesAPIClient` with
    the backend's base URL and the device's bearer token. Wrap each in its
    matching view model to show `ProjectsView(viewModel:)`,
    `TasksView(viewModel:)` (pass `scopedProjectID` to scope the screen to
    one Project, or omit it to list every Task), `DeadlinesView(viewModel:)`,
    `PersonalCommitmentsView(viewModel:)`, `CalendarView(viewModel:)`,
-   `AutomationLogView(viewModel:)`, and `ClientsView(viewModel:)`. A Task
+   `AutomationLogView(viewModel:)`, `ClientsView(viewModel:)`, and
+   `CourseView(viewModel:)`. A Task
    or Project's Deadline is set/cleared from its own create/edit form in
    `TasksView`/`ProjectsView` — the Deadlines screen is a read-only sorted
    view of both. Each Commitment's sync status (pushed to CalDAV, or
@@ -144,7 +161,11 @@ environment. To use it:
    Project has one — assigning/moving/removing a Project's Client itself is
    API-only for now (`PUT /v1/projects/:projectID/client`); ticket #17's
    Mac/iOS scope is the indicator plus a standalone `ClientsView` for
-   Client CRUD, not a Client picker inside `ProjectFormSheet`.
+   Client CRUD, not a Client picker inside `ProjectFormSheet`. `CourseView`
+   is a standalone screen mirroring `ClientsView`'s list/create/edit/delete
+   shape, with a name field, Term (month/year) fields, and a Deadline
+   toggle in its create/edit form (mirroring `ProjectFormSheet`'s Deadline
+   section) — ticket #19's Mac/iOS scope; a Task↔Course picker is ticket #20.
 4. `CalendarView` merges Personal Commitments and mirrored external Calendar
    events (populated by the backend's recurring sync job — see "Calendar
    sync" above) into one chronological list. A mirrored event shows a lock
@@ -166,5 +187,6 @@ The backend's `PCCTask` model and the client's `PCCTask` struct are named
 throughout their targets. The domain term "Task" is what appears in the API
 paths/JSON and the UI text.
 
-It has been verified with `swift build --target PCCUI` (type-checks and links)
-but not run in a simulator or on-device.
+It has been verified with `swift build --target PCCUI` (type-checks and
+links), including the new Course screen, but not run in a simulator or
+on-device.
