@@ -21,10 +21,10 @@ enum TransactionType: String, Codable, CaseIterable, Sendable {
 /// four independently-optional container foreign keys, a Transaction has
 /// exactly one possible container, so there's no "exactly one of N" to
 /// enforce. Its FK uses `.cascade` (`CreateTransaction`), matching
-/// `TimeEntry`'s own FKs: `AccountController.delete` doesn't yet guard
-/// against a referencing Transaction (that's ticket #38), so this cascade is
-/// reachable today, not just a database-level fallback the way `TimeEntry`'s
-/// is.
+/// `TimeEntry`'s own FKs: `AccountController.delete` now guards against a
+/// referencing Transaction (ticket #38), so this cascade is a
+/// database-level fallback only, not reachable through the API, the same
+/// way `TimeEntry`'s FKs already are.
 final class Transaction: Model, @unchecked Sendable {
     static let schema = "transactions"
 
