@@ -86,8 +86,12 @@ All routes require `Authorization: Bearer <token>` and are versioned under `/v1`
 | `PUT` | `/v1/courses/:courseID` | Edit a Course's name/Term (same body as create) |
 | `DELETE` | `/v1/courses/:courseID` | Delete a Course |
 | `PUT` | `/v1/courses/:courseID/deadline` | Attach/change/remove a Course's Deadline (`{ "dueDate": "<ISO 8601>"? }`, omit or `null` to remove) |
+| `GET` | `/v1/time-entries` | List all Time Entries; add any combination of `?taskID=`/`?projectID=`/`?clientID=`/`?courseID=` to scope to one container |
+| `POST` | `/v1/time-entries` | Create a Time Entry (`{ "startDate": "<ISO 8601>", "endDate": "<ISO 8601>", "notes": "..."?, "taskID"/"projectID"/"clientID"/"courseID": "..." }`, exactly one of the last four required) |
+| `PUT` | `/v1/time-entries/:timeEntryID` | Edit a Time Entry (same body as create, replacing every field including its container) |
+| `DELETE` | `/v1/time-entries/:timeEntryID` | Delete a Time Entry |
 
-Deleting a Project doesn't delete its Tasks — they become Project-less. Deleting a Client doesn't delete its Projects — they become Client-less, the same orphaning shape.
+Deleting a Project doesn't delete its Tasks — they become Project-less. Deleting a Client doesn't delete its Projects — they become Client-less, the same orphaning shape. Deleting the Task/Project/Client/Course a Time Entry is attached to deletes the Time Entry along with it, the opposite tradeoff — a Time Entry can't legally exist container-less (see "Time Entries" below).
 
 ### Clients (ticket #17)
 
@@ -116,6 +120,14 @@ Unlike `PCCClient`/`PCCTask`, `Course` collides with nothing in Vapor/the stdlib
 A Task belongs to at most one of {Project, Course}, never both (`docs/adr/0003-task-belongs-to-project-xor-course.md`) — the two are alternate containers of the same kind, not orthogonal tags. `TaskController.assignProject`/`assignCourse` (`PUT /v1/tasks/:taskID/project`/`.../course`) enforce the exclusivity at write time: setting a non-nil `projectID` clears the Task's `courseID` outright, and setting a non-nil `courseID` clears both `projectID` and, transitively, `sprintID` (a Sprint is scoped to a Project, so a Project-less Task can't reference one — the same `.../project` already does when a Task moves to a *different* Project, ticket #18). *Removing* a Project or Course (`projectID`/`courseID: null`) leaves the other side untouched, since a Task with one never has the other to begin with. `AddCourseToPCCTask`'s `course_id` foreign key is `.setNull`, matching `project_id`/`sprint_id` — deleting a Course orphans its Tasks (Course-less) rather than deleting them. `GET /v1/tasks` accepts `?courseID=` alongside `?projectID=`/`?sprintID=`, and `GET /v1/deadlines` folds in Courses' own Deadlines (a third `DeadlineItemResponse.Kind` alongside `.task`/`.project`) — Course-scoped Tasks needed no special handling there, since the Task query was never scoped by container to begin with.
 
 Unlike `?projectID=`/`?sprintID=` on `GET /v1/tasks`, `POST /v1/tasks` does *not* gain a `courseID` field — a Task is created Project-less and Course-less either way, matching how it was already created Project-less before this ticket (assignment is `assignProject`'s own job, not `create`'s); `courseID`/`projectID` join the Task model's own initializer (used by tests and internal construction) the same way `projectID` already had.
+
+### Time Entries (ticket #27)
+
+A Time Entry (`CONTEXT.md`) is canonical (no external timesheet system exists to mirror), and attaches to exactly one of Task, Project, Client, or Course — required, never none, never more than one (`docs/adr/0004-time-entry-container-includes-course.md`), the same alternate-container shape as a Task's Project/Course exclusivity (ADR-0003) extended to a fourth peer. Unlike `TaskController`, which creates a Task container-less and assigns it via separate follow-up endpoints, `TimeEntryController.create`/`update` take the container inline in `SaveTimeEntryRequest` — a Time Entry's container is mandatory from the start, so there's no valid "not yet assigned" state to create into.
+
+`TimeEntryController.validatedContainer` rejects a request with zero or more than one of `taskID`/`projectID`/`clientID`/`courseID` set, then `verifyContainerExists` confirms the one given id actually resolves to a row before the Time Entry is saved. `verifyNoOverlap` rejects a span that strictly overlaps an existing Time Entry's span — touching boundaries (one ends exactly when another starts) are allowed, so the check uses strict `<`/`>` rather than `<=`/`>=`. The overlap check is global, not scoped to the same container: Work Hours tracks one person's time, who can only be doing one thing at once, regardless of which Task/Project/Client/Course each span is logged against. `update` excludes the Time Entry being edited from its own overlap check, so editing a Time Entry without changing its span (e.g. only its notes) doesn't reject against itself.
+
+`TimeEntry`'s four foreign keys (`task_id`/`project_id`/`client_id`/`course_id`) are all optional at the Fluent/Postgres level — only one is ever non-nil for a given row — but each uses `.cascade` in `CreateTimeEntry`, not `.setNull` like `PCCTask.project`/`course`: since a Time Entry can't legally exist container-less, deleting the Task/Project/Client/Course it's attached to deletes the Time Entry along with it rather than leaving a row with all four foreign keys nil.
 
 ### Personal Commitments
 
