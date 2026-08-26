@@ -33,6 +33,9 @@ A surfaced item requiring the owner's attention. Has two aspects: membership in 
 A record spanning a start and end time, captured primarily by starting/stopping a live timer, with after-the-fact manual entry (the same start/end shape, just typed in) as a fallback. Attaches to exactly one of Task, Project, Client, or Course — required, never none, never more than one — the same alternate-container shape as Task's own Project/Course exclusivity (ADR-0003), extended to a fourth peer (ADR-0004). A direct Project, Client, or Course attachment is for work that isn't task-shaped (e.g. a call, admin time, sitting in a lecture). Is how Work Hours is tracked, since no external timesheet system exists to mirror.
 _Avoid_: Timesheet entry, log entry.
 
+**Work Hours**:
+The aggregate view over Time Entries — totals grouped by day, or by one of Time Entry's four containers (Task, Project, Client, Course), over a chosen range. A Project/Client/Course total folds in not just Time Entries logged directly against that container but, transitively, everything logged beneath it: a Project's total includes its Tasks' entries, a Client's total includes its Projects' totals (direct and Task-level), a Course's total includes its Tasks' entries (ADR-0005). A Task total is direct entries only — a Task has nothing below it to fold in. A running live timer (no `endDate` yet) doesn't contribute to any Work Hours total until it's stopped.
+
 **Course**:
 A container of related Tasks/Deadlines for a single school class (e.g. "CS 301"), analogous to how a Project contains personal Tasks — down to optionally carrying its own Deadline the same way a Project can. Created directly by the owner each term, not auto-detected; the Tasks/Deadlines inside it are what auto-populate, from a school data source.
 
