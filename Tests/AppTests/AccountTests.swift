@@ -19,6 +19,7 @@ extension AppTestSuite {
                 try await configure(app)
             }) { app in
                 let result = try await test(app)
+                try await Transaction.query(on: app.db).delete()
                 try await Account.query(on: app.db).delete()
                 return result
             }
@@ -254,6 +255,86 @@ extension AppTestSuite {
                         #expect(res.status == .notFound)
                     }
                 )
+            }
+        }
+
+        @Test("an Account's Balance reflects its opening balance plus every Transaction logged against it")
+        func balanceReflectsTransactions() async throws {
+            try await withAccountsApp { app in
+                let account = Account(name: "Checking", type: .checking, openingBalance: 100)
+                try await account.save(on: app.db)
+                let accountID = try account.requireID()
+                try await Transaction(
+                    amount: 30, type: .expense, date: Date(timeIntervalSince1970: 1_800_000_000), accountID: accountID
+                ).save(on: app.db)
+                try await Transaction(
+                    amount: 50, type: .income, date: Date(timeIntervalSince1970: 1_800_003_600), accountID: accountID
+                ).save(on: app.db)
+
+                try await app.testing().test(
+                    .GET, "/v1/accounts",
+                    headers: authHeaders(),
+                    afterResponse: { res async throws in
+                        #expect(res.status == .ok)
+                        let body = try res.content.decode([AccountResponse].self)
+                        // 100 opening - 30 expense + 50 income == 120.
+                        #expect(body.first?.balance == 120)
+                        #expect(body.first?.openingBalance == 100)
+                    }
+                )
+            }
+        }
+
+        @Test("computes independent Balances for multiple Accounts in one listing")
+        func computesIndependentBalancesForMultipleAccounts() async throws {
+            try await withAccountsApp { app in
+                let checking = Account(name: "Checking", type: .checking, openingBalance: 100)
+                let savings = Account(name: "Savings", type: .savings, openingBalance: 500)
+                try await checking.save(on: app.db)
+                try await savings.save(on: app.db)
+                try await Transaction(
+                    amount: 40, type: .expense, date: Date(timeIntervalSince1970: 1_800_000_000),
+                    accountID: try checking.requireID()
+                ).save(on: app.db)
+                try await Transaction(
+                    amount: 25, type: .income, date: Date(timeIntervalSince1970: 1_800_000_000),
+                    accountID: try savings.requireID()
+                ).save(on: app.db)
+
+                try await app.testing().test(
+                    .GET, "/v1/accounts",
+                    headers: authHeaders(),
+                    afterResponse: { res async throws in
+                        #expect(res.status == .ok)
+                        let body = try res.content.decode([AccountResponse].self)
+                        let byName = Dictionary(uniqueKeysWithValues: body.map { ($0.name, $0) })
+                        #expect(byName["Checking"]?.balance == 60)
+                        #expect(byName["Savings"]?.balance == 525)
+                    }
+                )
+            }
+        }
+
+        @Test("deleting an Account still succeeds while Transactions reference it (ticket #38 adds the guard)")
+        func deletingAccountWithTransactionsStillSucceeds() async throws {
+            try await withAccountsApp { app in
+                let account = Account(name: "Checking", type: .checking, openingBalance: 0)
+                try await account.save(on: app.db)
+                let id = try account.requireID()
+                try await Transaction(
+                    amount: 10, type: .expense, date: Date(timeIntervalSince1970: 1_800_000_000), accountID: id
+                ).save(on: app.db)
+
+                try await app.testing().test(
+                    .DELETE, "/v1/accounts/\(id)",
+                    headers: authHeaders(),
+                    afterResponse: { res async in
+                        #expect(res.status == .noContent)
+                    }
+                )
+
+                let stored = try await Account.find(id, on: app.db)
+                #expect(stored == nil)
             }
         }
     }
