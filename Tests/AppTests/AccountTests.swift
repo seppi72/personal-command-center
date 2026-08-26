@@ -315,8 +315,8 @@ extension AppTestSuite {
             }
         }
 
-        @Test("deleting an Account still succeeds while Transactions reference it (ticket #38 adds the guard)")
-        func deletingAccountWithTransactionsStillSucceeds() async throws {
+        @Test("rejects deleting an Account a Transaction still references")
+        func deletingAccountWithReferencingTransactionFails() async throws {
             try await withAccountsApp { app in
                 let account = Account(name: "Checking", type: .checking, openingBalance: 0)
                 try await account.save(on: app.db)
@@ -329,12 +329,12 @@ extension AppTestSuite {
                     .DELETE, "/v1/accounts/\(id)",
                     headers: authHeaders(),
                     afterResponse: { res async in
-                        #expect(res.status == .noContent)
+                        #expect(res.status == .badRequest)
                     }
                 )
 
                 let stored = try await Account.find(id, on: app.db)
-                #expect(stored == nil)
+                #expect(stored != nil)
             }
         }
     }

@@ -119,19 +119,28 @@ struct AccountController: RouteCollection {
         return trimmed
     }
 
-    /// No referencing-entity check before deleting, unlike
-    /// `ProjectController`/`ClientController.delete`'s guard against
-    /// orphaning a Time Entry (ticket #29) — deleting an Account still
-    /// succeeds even with Transactions attached (ticket #37's AC), same
-    /// `.cascade` FK fallback `CreateTransaction` gives it. The equivalent
-    /// guard against a referencing Transaction is ticket #38, deliberately
-    /// scoped out of this ticket.
+    /// Ticket #38: an Account can't be deleted while any Transaction still
+    /// references it — mirrors `ProjectController`/`ClientController`'s
+    /// identical guard against a referencing Time Entry (ticket #29), checked
+    /// before ever calling `.delete()`. `CreateTransaction`'s `.cascade` FK
+    /// stays as a fallback-only concern, same reasoning as ticket #37's
+    /// `Account.openingBalance`/`account_id` note — this controller-level
+    /// check is what actually stops the delete.
     func delete(req: Request) async throws -> HTTPStatus {
         guard let account = try await findAccount(req: req) else {
             throw Abort(.notFound)
         }
+        try await Self.verifyNoReferencingTransactions(accountID: try account.requireID(), req: req)
         try await account.delete(on: req.db)
         return .noContent
+    }
+
+    /// Ticket #38: same shape/error convention as ticket #29's guard
+    /// (`ProjectController.verifyNoReferencingTimeEntries`).
+    private static func verifyNoReferencingTransactions(accountID: UUID, req: Request) async throws {
+        guard try await Transaction.query(on: req.db).filter(\.$account.$id == accountID).first() == nil else {
+            throw Abort(.badRequest, reason: "cannot delete an Account with Transactions attached")
+        }
     }
 
     private func findAccount(req: Request) async throws -> Account? {

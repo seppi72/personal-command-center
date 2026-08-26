@@ -158,11 +158,15 @@ Since each `groupBy`'s row has genuinely different JSON keys, `WorkHoursRow` (ba
 
 An Account (`CONTEXT.md`) is a named store of money the owner tracks — Checking, Savings, Cash, Credit Card, Investment, or Loan — created directly by the owner, not auto-detected (`docs/adr/0006-manual-entry-over-bank-aggregation-for-finances.md`). `AccountController` is a plain CRUD surface, same shape as `ProjectController`/`ClientController`, with one deliberate deviation from this codebase's usual PUT-replaces-everything convention: `UpdateAccountRequest` carries `name`/`type` only, with no `openingBalance` field at all — an Account's opening balance is set once at creation and never editable after (`docs/adr/0007-computed-balance-over-reconciliation.md`).
 
-`AccountType`'s asset/liability classification (Checking/Savings/Cash/Investment = asset, Credit Card/Loan = liability) is a fixed mapping, not owner-configurable — `AccountResponse.classification` is a computed property derived from `type`, never a field a request can set independently of it. `AccountResponse.balance` is `openingBalance` today, always: there's no Transaction model yet for it to sum, so the two trivially agree until a future ticket adds Transactions and this becomes `openingBalance + Σ(Transactions)`. `Account.delete` has no referencing-entity guard the way `ProjectController`/`ClientController.delete` do (ticket #29) — nothing references an Account yet, since Transaction doesn't exist as of this ticket; that guard is a follow-up once it does.
+`AccountType`'s asset/liability classification (Checking/Savings/Cash/Investment = asset, Credit Card/Loan = liability) is a fixed mapping, not owner-configurable — `AccountResponse.classification` is a computed property derived from `type`, never a field a request can set independently of it. `AccountResponse.balance` is `openingBalance` plus every Transaction logged against the Account, summed via `Transaction.netAmount`/`netAmountsByAccount` (ticket #37). `Account.delete` rejects while any Transaction still references it (ticket #38, below) rather than orphaning or cascading it away.
 
 ### Blocking deletion with referencing Time Entries (ticket #29)
 
 `TaskController`/`ProjectController`/`ClientController`/`CourseController.delete` each query for a Time Entry referencing the row being deleted and reject with a clear error if one exists, before ever calling `.delete()` — the owner must reassign or delete those Time Entries first, rather than the delete either orphaning the Time Entry (as `Client` → `Project` deletion still does) or silently taking it down too. `SprintController.delete` is unaffected — Sprint is not a Time Entry container.
+
+### Blocking Account deletion while Transactions reference it (ticket #38)
+
+`AccountController.delete` follows the same shape ticket #29 already gave `TaskController`/`ProjectController`/`ClientController`/`CourseController`: it queries for a Transaction referencing the Account being deleted and rejects with a clear error if one exists, before ever calling `.delete()` — the owner must reassign or delete those Transactions first. This is a deliberate reversal of ticket #36's original note that no such guard existed yet; it applies now that Transaction (ticket #37) exists to reference an Account.
 
 ### Personal Commitments
 
