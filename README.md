@@ -112,6 +112,8 @@ All routes require `Authorization: Bearer <token>` and are versioned under `/v1`
 | `POST` | `/v1/subcategories` | Create a Subcategory within a Category (`{ "categoryID": "...", "name": "..." }`) |
 | `PUT` | `/v1/subcategories/:subcategoryID` | Rename a Subcategory (`{ "name": "..." }`) |
 | `DELETE` | `/v1/subcategories/:subcategoryID` | Delete a Subcategory |
+| `GET` | `/v1/notifications` | List undismissed Notifications, newest first (see "Notifications" below) |
+| `POST` | `/v1/notifications/:notificationID/dismiss` | Dismiss a Notification — idempotent, no error on an already-dismissed row |
 
 Deleting a Project doesn't delete its Tasks — they become Project-less. Deleting a Client doesn't delete its Projects — they become Client-less, the same orphaning shape. Deleting a Task/Project/Client/Course that a Time Entry still references is rejected outright (ticket #29) — a Time Entry can't legally exist container-less, so the owner must reassign or delete those Time Entries first (see "Time Entries" below).
 
@@ -197,6 +199,12 @@ A day's Balance/Net-Worth figure is computed *as of that day's end* — `opening
 
 Projected Balance's `averageDailyNet` is net cash flow (income minus expenses, i.e. `Transaction.signedAmount`'s own sign) over the trailing 30 days, divided by 30; `projectedBalance` is today's Balance (via `Transaction.netAmount(forAccount:asOf:)` — the same as-of-day-end formula the dense series use, not `AccountController`'s plain `netAmount`, so there's one shared "Balance as of a day" definition across this whole feature rather than two that could disagree) plus `averageDailyNet` times the period's remaining days. "Remaining days" excludes today itself — today's own net cash flow is already baked into today's Balance, so counting it again as a projected day would double it — and is `tomorrow` through `Calendar.current.dateInterval(of: .weekOfYear/.month, for: today)`'s exclusive `end` (the start of the *next* period), that span being exactly "tomorrow through the period's last day, inclusive," clamped to zero rather than negative on a period's last day.
 
+### Notifications (ticket #46)
+
+A Notification (`CONTEXT.md`) is the owner's "needs you" queue: a surfaced item stored rather than live-computed, so it can be dismissed and stay dismissed. `NotificationController` is the read/dismiss surface only — `GET /v1/notifications` returns undismissed (`isDismissed == false`) rows newest-first, and `POST /v1/notifications/:notificationID/dismiss` sets `isDismissed = true`, idempotently (dismissing an already-dismissed row succeeds as a no-op, not an error). Nothing in this ticket creates a `PCCNotification` automatically — that's tickets #47/#48's own job (an overdue Task/Project/Course scan, and an Automation Log `.failure` entry, per `CONTEXT.md`); tests and manual verification insert rows directly, the same way ticket #36 (Account CRUD) demoed Balance before any Transaction existed to generate one. There's no `DELETE` route — a dismissed row is never hard-deleted, kept for history the same way `AutomationLog` entries are.
+
+`sourceType: String`/`sourceID: UUID` is the same open-ended plain-string pointer shape `AutomationLog` already uses for its own `subjectType`/`subjectID`, chosen over a Fluent `@Enum` since the set of source types will keep growing. The Swift model is named `PCCNotification`, not `Notification` — an unqualified `Notification` collides with Foundation's own `Notification`/`NotificationCenter` types, pulled in transitively on this platform, the same kind of collision `PCCTask`/`PCCCategory`/`PCCClient` already sidestep. The domain term "Notification" is what appears in the schema (`notifications`), the JSON API, docs, and UI text; only the Swift symbol differs.
+
 ### Personal Commitments
 
 A Personal Commitment (`CONTEXT.md`) is canonical — the Command Center owns it, not the external Calendar — so create/edit/delete always succeed locally regardless of whether the CalDAV push succeeds. Each push (or removal) is attempted synchronously in the same request, and its outcome is written to `AutomationLog` and reflected in the Commitment's `syncStatus` (`pending` → `synced` or `failed`) in the response, rather than failing the request. The recurring sync job (below) is what retries a failed push later; browsing `AutomationLog` itself is ticket #8's.
@@ -250,7 +258,9 @@ detail flow (`CategoriesView`/`CategoryDetailView` + `CategoriesViewModel`/
 `URLSessionSubcategoriesAPIClient`, ticket #39), and the Finances Reporting
 screen (`FinancesReportingView` + `FinancesReportingViewModel` +
 `URLSessionFinancesReportingAPIClient` + `URLSessionAccountsAPIClient`,
-ticket #40), built as a plain SPM target
+ticket #40), and the Notifications screen (`NotificationsView` +
+`NotificationsViewModel` + `URLSessionNotificationsAPIClient`,
+ticket #46), built as a plain SPM target
 with no Vapor/Fluent dependency.
 It isn't wrapped in an Xcode app target yet — no Xcode is set up in this
 environment. To use it:
@@ -265,8 +275,9 @@ environment. To use it:
    `URLSessionSprintsAPIClient`, `URLSessionCoursesAPIClient`,
    `URLSessionTimeEntriesAPIClient`, `URLSessionWorkHoursAPIClient`,
    `URLSessionAccountsAPIClient`, `URLSessionTransactionsAPIClient`,
-   `URLSessionCategoriesAPIClient`, `URLSessionSubcategoriesAPIClient`, and
-   `URLSessionFinancesReportingAPIClient`
+   `URLSessionCategoriesAPIClient`, `URLSessionSubcategoriesAPIClient`,
+   `URLSessionFinancesReportingAPIClient`, and
+   `URLSessionNotificationsAPIClient`
    with the backend's base URL and the
    device's bearer token. Wrap each in its
    matching view model to show `ProjectsView(viewModel:)`,
@@ -279,9 +290,10 @@ environment. To use it:
    `URLSessionTimeEntriesAPIClient` between a `TimeEntriesViewModel` and a
    `TimerViewModel`), `WorkHoursView(viewModel:)`,
    `AccountsView(viewModel:)`, `TransactionsView(viewModel:)`,
-   `CategoriesView(viewModel:)`, and `FinancesReportingView(viewModel:)`
+   `CategoriesView(viewModel:)`, `FinancesReportingView(viewModel:)`
    (constructed from both `URLSessionFinancesReportingAPIClient` and
-   `URLSessionAccountsAPIClient`, the latter populating its Account picker).
+   `URLSessionAccountsAPIClient`, the latter populating its Account picker),
+   and `NotificationsView(viewModel:)`.
    A Task
    or Project's Deadline is set/cleared from its own create/edit form in
    `TasksView`/`ProjectsView` — the Deadlines screen is a read-only sorted
@@ -393,6 +405,13 @@ environment. To use it:
    opening the screen defaults to the trailing 30 days through now, read
    more informatively as a trend than `WorkHoursViewModel`'s own
    current-week default.
+9. `NotificationsView` (ticket #46) is a plain `List` of open Notifications,
+   newest first, dismissed via swipe-to-delete (`NotificationsViewModel.dismiss`)
+   — the same per-row destructive-action pattern `PersonalCommitmentsView`
+   already uses, rather than a redundant second tap target for the same
+   action. No create/edit UI, since nothing here is owner-authored; see
+   "Notifications" above for the backend read/dismiss surface this screen
+   renders.
 
 The backend's `PCCTask` model and the client's `PCCTask` struct are named
 `PCCTask` in Swift, not `Task` — that would shadow `_Concurrency.Task`
