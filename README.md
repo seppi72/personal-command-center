@@ -95,6 +95,10 @@ All routes require `Authorization: Bearer <token>` and are versioned under `/v1`
 | `PUT` | `/v1/time-entries/timer/stop` | Stop the running timer into a completed Time Entry (`endDate = now`); 404 if none is running |
 | `PUT` | `/v1/time-entries/timer/cancel` | Cancel the running timer outright — deletes it with no saved record; 404 if none is running |
 | `GET` | `/v1/work-hours` | The Work Hours rollup (`?groupBy=day\|project\|client\|task\|course`, `?start=`/`?end=` both required, `<ISO 8601>`, range is `[start, end)`) — see "Work Hours" below |
+| `GET` | `/v1/accounts` | List all Accounts with their Balance |
+| `POST` | `/v1/accounts` | Create an Account (`{ "name": "...", "type": "checking\|savings\|cash\|creditCard\|investment\|loan", "openingBalance": <number> }`) |
+| `PUT` | `/v1/accounts/:accountID` | Edit an Account's name/type (`{ "name": "...", "type": "..." }`) — `openingBalance` is immutable, see "Accounts" below |
+| `DELETE` | `/v1/accounts/:accountID` | Delete an Account |
 
 Deleting a Project doesn't delete its Tasks — they become Project-less. Deleting a Client doesn't delete its Projects — they become Client-less, the same orphaning shape. Deleting a Task/Project/Client/Course that a Time Entry still references is rejected outright (ticket #29) — a Time Entry can't legally exist container-less, so the owner must reassign or delete those Time Entries first (see "Time Entries" below).
 
@@ -150,6 +154,12 @@ Project/Client/Course totals fold transitively (`docs/adr/0005-work-hours-rollup
 
 Since each `groupBy`'s row has genuinely different JSON keys, `WorkHoursRow` (backend) encodes itself by hand rather than relying on `Codable`'s synthesized conformance for one struct — the same "build the response by hand" move `TimeEntryController.getTimer` already makes for its own not-one-fixed-shape response. The PCCUI-side `WorkHoursRow` mirrors this the other way: one `Decodable` struct with optional `date`/`id`/`name` fields, whichever one's non-`nil` telling `WorkHoursView` how to label a row, since a given response only ever contains rows of the one `groupBy` kind that was requested.
 
+### Accounts (ticket #36)
+
+An Account (`CONTEXT.md`) is a named store of money the owner tracks — Checking, Savings, Cash, Credit Card, Investment, or Loan — created directly by the owner, not auto-detected (`docs/adr/0006-manual-entry-over-bank-aggregation-for-finances.md`). `AccountController` is a plain CRUD surface, same shape as `ProjectController`/`ClientController`, with one deliberate deviation from this codebase's usual PUT-replaces-everything convention: `UpdateAccountRequest` carries `name`/`type` only, with no `openingBalance` field at all — an Account's opening balance is set once at creation and never editable after (`docs/adr/0007-computed-balance-over-reconciliation.md`).
+
+`AccountType`'s asset/liability classification (Checking/Savings/Cash/Investment = asset, Credit Card/Loan = liability) is a fixed mapping, not owner-configurable — `AccountResponse.classification` is a computed property derived from `type`, never a field a request can set independently of it. `AccountResponse.balance` is `openingBalance` today, always: there's no Transaction model yet for it to sum, so the two trivially agree until a future ticket adds Transactions and this becomes `openingBalance + Σ(Transactions)`. `Account.delete` has no referencing-entity guard the way `ProjectController`/`ClientController.delete` do (ticket #29) — nothing references an Account yet, since Transaction doesn't exist as of this ticket; that guard is a follow-up once it does.
+
 ### Blocking deletion with referencing Time Entries (ticket #29)
 
 `TaskController`/`ProjectController`/`ClientController`/`CourseController.delete` each query for a Time Entry referencing the row being deleted and reject with a clear error if one exists, before ever calling `.delete()` — the owner must reassign or delete those Time Entries first, rather than the delete either orphaning the Time Entry (as `Client` → `Project` deletion still does) or silently taking it down too. `SprintController.delete` is unaffected — Sprint is not a Time Entry container.
@@ -195,10 +205,11 @@ ticket #18), the Courses screen (`CourseView` + `CoursesViewModel` +
 (`TimeEntriesView` + `TimeEntriesViewModel` +
 `URLSessionTimeEntriesAPIClient`, ticket #27), the live-timer control
 (`TimerView` + `TimerViewModel`, sharing the same
-`URLSessionTimeEntriesAPIClient`, ticket #28), and the Work Hours rollup
+`URLSessionTimeEntriesAPIClient`, ticket #28), the Work Hours rollup
 screen (`WorkHoursView` + `WorkHoursViewModel` +
-`URLSessionWorkHoursAPIClient`, ticket #25), built as a plain SPM target
-with no Vapor/Fluent dependency.
+`URLSessionWorkHoursAPIClient`, ticket #25), and the Accounts screen
+(`AccountsView` + `AccountsViewModel` + `URLSessionAccountsAPIClient`,
+ticket #36), built as a plain SPM target with no Vapor/Fluent dependency.
 It isn't wrapped in an Xcode app target yet — no Xcode is set up in this
 environment. To use it:
 
@@ -210,8 +221,9 @@ environment. To use it:
    `URLSessionMirroredCalendarEventsAPIClient`,
    `URLSessionAutomationLogsAPIClient`, `URLSessionClientsAPIClient`,
    `URLSessionSprintsAPIClient`, `URLSessionCoursesAPIClient`,
-   `URLSessionTimeEntriesAPIClient`, and `URLSessionWorkHoursAPIClient` with
-   the backend's base URL and the device's bearer token. Wrap each in its
+   `URLSessionTimeEntriesAPIClient`, `URLSessionWorkHoursAPIClient`, and
+   `URLSessionAccountsAPIClient` with the backend's base URL and the
+   device's bearer token. Wrap each in its
    matching view model to show `ProjectsView(viewModel:)`,
    `TasksView(viewModel:)` (pass `scopedProjectID` to scope the screen to
    one Project, or omit it to list every Task), `DeadlinesView(viewModel:)`,
@@ -220,7 +232,8 @@ environment. To use it:
    `CourseView(viewModel:)`, `TimeEntriesView(viewModel:)`,
    `TimerView(viewModel:)` (the last two share one
    `URLSessionTimeEntriesAPIClient` between a `TimeEntriesViewModel` and a
-   `TimerViewModel`), and `WorkHoursView(viewModel:)`. A Task
+   `TimerViewModel`), `WorkHoursView(viewModel:)`, and
+   `AccountsView(viewModel:)`. A Task
    or Project's Deadline is set/cleared from its own create/edit form in
    `TasksView`/`ProjectsView` — the Deadlines screen is a read-only sorted
    view of both. Each Commitment's sync status (pushed to CalDAV, or
