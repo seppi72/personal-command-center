@@ -109,4 +109,24 @@ final class Transaction: Model, @unchecked Sendable {
             totals[transaction.$account.id, default: 0] += transaction.signedAmount
         }
     }
+
+    /// Every Transaction against `accountID`, dated on or before `day`'s end
+    /// — `day`'s calendar day (`Calendar.current`, same "local means this
+    /// server's timezone" caveat as `WorkHoursController.dayRows`) through
+    /// its last moment, inclusive. The historical-balance analog of
+    /// `netAmount`, which sums *every* Transaction regardless of date;
+    /// `FinancesReportingController` (ticket #40) is what actually needs
+    /// "as of a given day" rather than "as of right now" — a day's
+    /// Balance/Net-Worth figure is `openingBalance + this` (`CONTEXT.md`).
+    static func netAmount(forAccount accountID: UUID, asOf day: Date, on database: any Database) async throws -> Double {
+        let calendar = Calendar.current
+        guard let dayEnd = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: day)) else {
+            preconditionFailure("date(byAdding:) failed for a plain +1 day")
+        }
+        return try await Transaction.query(on: database)
+            .filter(\.$account.$id == accountID)
+            .filter(\.$date < dayEnd)
+            .all()
+            .reduce(0) { $0 + $1.signedAmount }
+    }
 }
