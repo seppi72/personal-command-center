@@ -65,7 +65,8 @@ extension AppTestSuite {
                     beforeRequest: { req async throws in
                         try req.content.encode(
                             SaveTransactionRequest(
-                                accountID: accountID, amount: 42.50, type: .expense, date: date, notes: "Groceries", categoryID: nil, subcategoryID: nil)
+                                accountID: accountID, amount: 42.50, type: .expense, date: date, notes: "Groceries", categoryID: nil, subcategoryID: nil
+                            )
                         )
                     },
                     afterResponse: { res async throws in
@@ -93,7 +94,8 @@ extension AppTestSuite {
                         try req.content.encode(
                             SaveTransactionRequest(
                                 accountID: UUID(), amount: 10, type: .expense,
-                                date: Date(timeIntervalSince1970: 1_800_000_000), notes: nil, categoryID: nil, subcategoryID: nil)
+                                date: Date(timeIntervalSince1970: 1_800_000_000), notes: nil, categoryID: nil, subcategoryID: nil
+                            )
                         )
                     },
                     afterResponse: { res async in
@@ -121,7 +123,8 @@ extension AppTestSuite {
                         try req.content.encode(
                             SaveTransactionRequest(
                                 accountID: try account.requireID(), amount: amount, type: .expense,
-                                date: Date(timeIntervalSince1970: 1_800_000_000), notes: nil, categoryID: nil, subcategoryID: nil)
+                                date: Date(timeIntervalSince1970: 1_800_000_000), notes: nil, categoryID: nil, subcategoryID: nil
+                            )
                         )
                     },
                     afterResponse: { res async in
@@ -178,7 +181,9 @@ extension AppTestSuite {
                         headers: authHeaders(),
                         beforeRequest: { req async throws in
                             try req.content.encode(
-                                SaveTransactionRequest(accountID: accountID, amount: 5, type: .expense, date: date, notes: nil, categoryID: nil, subcategoryID: nil)
+                                SaveTransactionRequest(
+                                    accountID: accountID, amount: 5, type: .expense, date: date, notes: nil, categoryID: nil, subcategoryID: nil
+                                )
                             )
                         },
                         afterResponse: { res async in
@@ -284,7 +289,8 @@ extension AppTestSuite {
                         try req.content.encode(
                             SaveTransactionRequest(
                                 accountID: try account.requireID(), amount: 5, type: .expense,
-                                date: Date(timeIntervalSince1970: 1_800_000_000), notes: nil, categoryID: nil, subcategoryID: nil)
+                                date: Date(timeIntervalSince1970: 1_800_000_000), notes: nil, categoryID: nil, subcategoryID: nil
+                            )
                         )
                     },
                     afterResponse: { res async in
@@ -312,7 +318,8 @@ extension AppTestSuite {
                     beforeRequest: { req async throws in
                         try req.content.encode(
                             SaveTransactionRequest(
-                                accountID: accountID, amount: 99, type: .income, date: newDate, notes: "Refund", categoryID: nil, subcategoryID: nil)
+                                accountID: accountID, amount: 99, type: .income, date: newDate, notes: "Refund", categoryID: nil, subcategoryID: nil
+                            )
                         )
                     },
                     afterResponse: { res async throws in
@@ -342,7 +349,8 @@ extension AppTestSuite {
                         try req.content.encode(
                             SaveTransactionRequest(
                                 accountID: try account.requireID(), amount: 5, type: .expense,
-                                date: Date(timeIntervalSince1970: 1_800_000_000), notes: nil, categoryID: nil, subcategoryID: nil)
+                                date: Date(timeIntervalSince1970: 1_800_000_000), notes: nil, categoryID: nil, subcategoryID: nil
+                            )
                         )
                     },
                     afterResponse: { res async in
