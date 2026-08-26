@@ -94,6 +94,7 @@ All routes require `Authorization: Bearer <token>` and are versioned under `/v1`
 | `POST` | `/v1/time-entries/timer/start` | Start a timer with `startDate = now` (`{ "taskID"/"projectID"/"clientID"/"courseID": "..." }`, exactly one required); fails if one is already running |
 | `PUT` | `/v1/time-entries/timer/stop` | Stop the running timer into a completed Time Entry (`endDate = now`); 404 if none is running |
 | `PUT` | `/v1/time-entries/timer/cancel` | Cancel the running timer outright — deletes it with no saved record; 404 if none is running |
+| `GET` | `/v1/work-hours` | The Work Hours rollup (`?groupBy=day\|project\|client\|task\|course`, `?start=`/`?end=` both required, `<ISO 8601>`, range is `[start, end)`) — see "Work Hours" below |
 
 Deleting a Project doesn't delete its Tasks — they become Project-less. Deleting a Client doesn't delete its Projects — they become Client-less, the same orphaning shape. Deleting a Task/Project/Client/Course that a Time Entry still references is rejected outright (ticket #29) — a Time Entry can't legally exist container-less, so the owner must reassign or delete those Time Entries first (see "Time Entries" below).
 
@@ -139,6 +140,16 @@ A live timer is a `TimeEntry` row that hasn't been stopped yet — `endDate == n
 
 `POST /v1/time-entries/timer/start` rejects if a timer is already running (checked before the container is even decoded), then validates its container the same way `create` does (`TimeEntryController.validatedContainer`, refactored to take the four ids directly so both `SaveTimeEntryRequest` and `StartTimerRequest` can share it) and saves a `TimeEntry` with `startDate = now`, no `endDate`. `GET /v1/time-entries/timer` queries fresh from the database on every call — genuinely server-side state, not per-connection — and returns a literal JSON `null` when none is running, since `TimeEntryResponse?` can't be returned directly from a Vapor route handler (no `AsyncResponseEncodable` conformance for `Optional`); the response is built by hand instead. `PUT /v1/time-entries/timer/stop` sets `endDate = now` under the same zero-duration/overlap validation as `update` — nothing is mutated or saved until both checks pass, so a rejected stop leaves the timer running, unchanged. A running timer's `NULL end_date` is treated as open-ended, not excluded, by that same overlap check — `verifyNoOverlap`'s filter is `endDate IS NULL OR endDate > startDate` — so a manual entry (or another `create`/`update`) that begins before an already-running timer still overlaps it, the same "only doing one thing at once" invariant ticket #27 already enforces between two completed entries. `PUT /v1/time-entries/timer/cancel` deletes the running entry outright, no saved record. No cap or warning is enforced on how long a timer has been running.
 
+### Work Hours (ticket #25)
+
+Work Hours (`CONTEXT.md`) is the aggregate view over Time Entries — totals grouped by day, or by one of Time Entry's four containers, over `[start, end)`. `GET /v1/work-hours` is one read-only endpoint serving all five `groupBy` values, since they share the same query/validation shape and differ only in how the same underlying Time Entries get bucketed; only completed Time Entries (`endDate != nil`) starting in range are counted — a running live timer contributes nothing until it's stopped. `WorkHoursController.validatedRange` parses `start`/`end` from the query string by hand with `ISO8601DateFormatter` rather than decoding straight into `Date`: Vapor's query-string decoder defaults `Date` to seconds-since-1970, unlike its JSON-body decoder (what every other date in this API relies on defaulting to ISO 8601), so a plain `req.query[Date.self, at:]` here would silently expect a different wire format than everywhere else.
+
+`groupBy=day` is dense — one row per calendar day in range (`Calendar.current.startOfDay`, this process's own local timezone — there's no owner-timezone concept elsewhere in the domain yet), including a day with nothing logged. An entry spanning midnight counts entirely toward its `startDate`'s day rather than being split. The other four `groupBy` values are sparse — a container with a zero total in range doesn't appear as a row at all — and each row carries the entity's id and name (`{projectID, projectName, totalSeconds}` etc.) so `WorkHoursView` doesn't need a second round-trip to label it.
+
+Project/Client/Course totals fold transitively (`docs/adr/0005-work-hours-rollup-transitive-fold.md`): a Project's total is its own direct-to-Project entries plus every entry logged against any Task belonging to it; a Client's total is its own direct entries plus each of its Projects' already-folded totals; a Course's total is its own direct entries plus every entry logged against any Task belonging to it. A Task's total is direct entries only — nothing folds into a Task. Sprint isn't a sixth `groupBy` dimension: a Sprint's entries already fold into their Project via the owning Task's `project_id`. `WorkHoursController.containerRows` loads every Task/Project/Client/Course regardless of `groupBy` (a personal, single-owner dataset) rather than only the ones a Time Entry happens to reference directly — a Client's fold needs *every* one of its Projects' totals, including a Project with no Time Entries of its own, or an indirectly-folded Client total could come out short.
+
+Since each `groupBy`'s row has genuinely different JSON keys, `WorkHoursRow` (backend) encodes itself by hand rather than relying on `Codable`'s synthesized conformance for one struct — the same "build the response by hand" move `TimeEntryController.getTimer` already makes for its own not-one-fixed-shape response. The PCCUI-side `WorkHoursRow` mirrors this the other way: one `Decodable` struct with optional `date`/`id`/`name` fields, whichever one's non-`nil` telling `WorkHoursView` how to label a row, since a given response only ever contains rows of the one `groupBy` kind that was requested.
+
 ### Blocking deletion with referencing Time Entries (ticket #29)
 
 `TaskController`/`ProjectController`/`ClientController`/`CourseController.delete` each query for a Time Entry referencing the row being deleted and reject with a clear error if one exists, before ever calling `.delete()` — the owner must reassign or delete those Time Entries first, rather than the delete either orphaning the Time Entry (as `Client` → `Project` deletion still does) or silently taking it down too. `SprintController.delete` is unaffected — Sprint is not a Time Entry container.
@@ -182,9 +193,11 @@ ticket #17), a Sprints section within the Project detail flow
 ticket #18), the Courses screen (`CourseView` + `CoursesViewModel` +
 `URLSessionCoursesAPIClient`, ticket #19), the Time Entries screen
 (`TimeEntriesView` + `TimeEntriesViewModel` +
-`URLSessionTimeEntriesAPIClient`, ticket #27), and the live-timer control
+`URLSessionTimeEntriesAPIClient`, ticket #27), the live-timer control
 (`TimerView` + `TimerViewModel`, sharing the same
-`URLSessionTimeEntriesAPIClient`, ticket #28), built as a plain SPM target
+`URLSessionTimeEntriesAPIClient`, ticket #28), and the Work Hours rollup
+screen (`WorkHoursView` + `WorkHoursViewModel` +
+`URLSessionWorkHoursAPIClient`, ticket #25), built as a plain SPM target
 with no Vapor/Fluent dependency.
 It isn't wrapped in an Xcode app target yet — no Xcode is set up in this
 environment. To use it:
@@ -196,18 +209,18 @@ environment. To use it:
    `URLSessionPersonalCommitmentsAPIClient`,
    `URLSessionMirroredCalendarEventsAPIClient`,
    `URLSessionAutomationLogsAPIClient`, `URLSessionClientsAPIClient`,
-   `URLSessionSprintsAPIClient`, `URLSessionCoursesAPIClient`, and
-   `URLSessionTimeEntriesAPIClient` with
+   `URLSessionSprintsAPIClient`, `URLSessionCoursesAPIClient`,
+   `URLSessionTimeEntriesAPIClient`, and `URLSessionWorkHoursAPIClient` with
    the backend's base URL and the device's bearer token. Wrap each in its
    matching view model to show `ProjectsView(viewModel:)`,
    `TasksView(viewModel:)` (pass `scopedProjectID` to scope the screen to
    one Project, or omit it to list every Task), `DeadlinesView(viewModel:)`,
    `PersonalCommitmentsView(viewModel:)`, `CalendarView(viewModel:)`,
    `AutomationLogView(viewModel:)`, `ClientsView(viewModel:)`,
-   `CourseView(viewModel:)`, `TimeEntriesView(viewModel:)`, and
+   `CourseView(viewModel:)`, `TimeEntriesView(viewModel:)`,
    `TimerView(viewModel:)` (the last two share one
    `URLSessionTimeEntriesAPIClient` between a `TimeEntriesViewModel` and a
-   `TimerViewModel`). A Task
+   `TimerViewModel`), and `WorkHoursView(viewModel:)`. A Task
    or Project's Deadline is set/cleared from its own create/edit form in
    `TasksView`/`ProjectsView` — the Deadlines screen is a read-only sorted
    view of both. Each Commitment's sync status (pushed to CalDAV, or
@@ -277,6 +290,15 @@ environment. To use it:
    failure (if any) shown as a banner at the top of the screen rather than
    only visible if it's still recent enough to also appear further down the
    list — see "Automation Log" above.
+6. `WorkHoursView` (ticket #25) is a plain `List` of `{name, total}` rows —
+   no chart, matching every other screen's minimal convention — above a
+   `Picker` for the five `groupBy` values and two `DatePicker`s for the
+   range, all sharing one `WorkHoursViewModel`. Every control change
+   reloads immediately (no separate "Apply" step, unlike a form with
+   unsaved state to submit); opening the screen defaults to `groupBy = .day`
+   and the current week, Monday through now, and loads right away via
+   `.task`. A row's duration is formatted as plain "1h 30m"/"45m" text —
+   see "Work Hours" above for the backend rollup this screen renders.
 
 The backend's `PCCTask` model and the client's `PCCTask` struct are named
 `PCCTask` in Swift, not `Task` — that would shadow `_Concurrency.Task`
@@ -286,5 +308,6 @@ paths/JSON and the UI text.
 It has been verified with `swift build --target PCCUI` (type-checks and links,
 including the ticket #18 Sprint UI, the ticket #19 Course screen, the
 ticket #20 Task↔Course picker plus `CourseDetailView`'s Tasks section, the
-ticket #27 Time Entries screen, and the ticket #28 `TimerView` live-timer
-control) but not run in a simulator or on-device.
+ticket #27 Time Entries screen, the ticket #28 `TimerView` live-timer
+control, and the ticket #25 `WorkHoursView` rollup screen) but not run in a
+simulator or on-device.
