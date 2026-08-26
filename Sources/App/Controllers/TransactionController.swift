@@ -8,6 +8,8 @@ struct TransactionResponse: Content {
     let type: TransactionType
     let date: Date
     let notes: String?
+    let categoryID: UUID?
+    let subcategoryID: UUID?
 
     init(_ transaction: Transaction) throws {
         self.id = try transaction.requireID()
@@ -16,6 +18,8 @@ struct TransactionResponse: Content {
         self.type = transaction.type
         self.date = transaction.date
         self.notes = transaction.notes
+        self.categoryID = transaction.$category.id
+        self.subcategoryID = transaction.$subcategory.id
     }
 }
 
@@ -23,13 +27,19 @@ struct TransactionResponse: Content {
 /// in the body either way, the same "container is mandatory from the start,
 /// no valid unassigned state" shape `SaveTimeEntryRequest` already has
 /// (`CONTEXT.md`'s Time Entry entry) — a Transaction can't exist accountless
-/// any more than a Time Entry can exist container-less.
+/// any more than a Time Entry can exist container-less. `categoryID`/
+/// `subcategoryID` (ticket #39) are optional and independent of each other —
+/// not a single polymorphic container — but see
+/// `TransactionController.verifyCategoryAndSubcategory` for the one
+/// consistency rule enforced between them.
 struct SaveTransactionRequest: Content {
     let accountID: UUID
     let amount: Double
     let type: TransactionType
     let date: Date
     let notes: String?
+    let categoryID: UUID?
+    let subcategoryID: UUID?
 }
 
 /// Ticket #37: Transaction CRUD (`CONTEXT.md`) — a plain CRUD surface, same
@@ -73,32 +83,38 @@ struct TransactionController: RouteCollection {
     func create(req: Request) async throws -> TransactionResponse {
         let payload = try req.content.decode(SaveTransactionRequest.self)
         try await verifyAccountExists(payload.accountID, req: req)
+        try await Self.verifyCategoryAndSubcategory(categoryID: payload.categoryID, subcategoryID: payload.subcategoryID, req: req)
         let transaction = Transaction(
             amount: try Self.validatedAmount(payload.amount),
             type: payload.type,
             date: payload.date,
             notes: Self.normalizedNotes(payload.notes),
-            accountID: payload.accountID
+            accountID: payload.accountID,
+            categoryID: payload.categoryID,
+            subcategoryID: payload.subcategoryID
         )
         try await transaction.save(on: req.db)
         return try TransactionResponse(transaction)
     }
 
     /// Edits every field under the same validation as `create` — amount,
-    /// type, date, notes, and account all travel in the same
-    /// `SaveTransactionRequest` this Transaction is simply overwritten with,
-    /// mirroring `TimeEntryController.update`.
+    /// type, date, notes, account, category, and subcategory all travel in
+    /// the same `SaveTransactionRequest` this Transaction is simply
+    /// overwritten with, mirroring `TimeEntryController.update`.
     func update(req: Request) async throws -> TransactionResponse {
         guard let transaction = try await findTransaction(req: req) else {
             throw Abort(.notFound)
         }
         let payload = try req.content.decode(SaveTransactionRequest.self)
         try await verifyAccountExists(payload.accountID, req: req)
+        try await Self.verifyCategoryAndSubcategory(categoryID: payload.categoryID, subcategoryID: payload.subcategoryID, req: req)
         transaction.amount = try Self.validatedAmount(payload.amount)
         transaction.type = payload.type
         transaction.date = payload.date
         transaction.notes = Self.normalizedNotes(payload.notes)
         transaction.$account.id = payload.accountID
+        transaction.$category.id = payload.categoryID
+        transaction.$subcategory.id = payload.subcategoryID
         try await transaction.save(on: req.db)
         return try TransactionResponse(transaction)
     }
@@ -117,6 +133,29 @@ struct TransactionController: RouteCollection {
     private func verifyAccountExists(_ accountID: UUID, req: Request) async throws {
         guard try await Account.find(accountID, on: req.db) != nil else {
             throw Abort(.badRequest, reason: "no such Account")
+        }
+    }
+
+    /// Ticket #39: `categoryID`/`subcategoryID` are independent fields, not a
+    /// single polymorphic container, but the AC's own enumeration of valid
+    /// states — neither, a Category alone, or a Category *and* Subcategory
+    /// together — rules out a `subcategoryID` whose `categoryID` is missing
+    /// or belongs to a different Category. Verifies both exist and, when a
+    /// `subcategoryID` is given, that its parent Category matches
+    /// `categoryID` exactly (mirrors `TaskController.assignSprint`'s
+    /// Sprint-belongs-to-Project check, one level down the hierarchy).
+    private static func verifyCategoryAndSubcategory(categoryID: UUID?, subcategoryID: UUID?, req: Request) async throws {
+        if let categoryID {
+            guard try await PCCCategory.find(categoryID, on: req.db) != nil else {
+                throw Abort(.badRequest, reason: "no such Category")
+            }
+        }
+        guard let subcategoryID else { return }
+        guard let subcategory = try await Subcategory.find(subcategoryID, on: req.db) else {
+            throw Abort(.badRequest, reason: "no such Subcategory")
+        }
+        guard subcategory.$category.id == categoryID else {
+            throw Abort(.badRequest, reason: "subcategoryID requires its parent categoryID")
         }
     }
 

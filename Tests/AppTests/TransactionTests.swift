@@ -6,7 +6,9 @@ import VaporTesting
 
 /// Same seam as `AccountTests`/`TimeEntryTests`: real HTTP requests against a
 /// running Vapor app, backed by a real (test) Postgres database. Shares the
-/// `accounts` table with `AccountTests`, so both clean it up on teardown.
+/// `accounts` table with `AccountTests` and the `categories`/`subcategories`
+/// tables with `CategoryTests`/`SubcategoryTests`, so all of them clean up on
+/// teardown.
 extension AppTestSuite {
     @Suite("Transactions", .serialized)
     struct TransactionTests {
@@ -19,6 +21,8 @@ extension AppTestSuite {
                 let result = try await test(app)
                 try await Transaction.query(on: app.db).delete()
                 try await Account.query(on: app.db).delete()
+                try await Subcategory.query(on: app.db).delete()
+                try await PCCCategory.query(on: app.db).delete()
                 return result
             }
         }
@@ -31,6 +35,12 @@ extension AppTestSuite {
             let account = Account(name: name, type: .checking, openingBalance: openingBalance)
             try await account.save(on: app.db)
             return account
+        }
+
+        private func makeCategory(_ app: Application, name: String = "Food") async throws -> PCCCategory {
+            let category = PCCCategory(name: name)
+            try await category.save(on: app.db)
+            return category
         }
 
         @Test("rejects requests without a bearer token")
@@ -55,7 +65,7 @@ extension AppTestSuite {
                     beforeRequest: { req async throws in
                         try req.content.encode(
                             SaveTransactionRequest(
-                                accountID: accountID, amount: 42.50, type: .expense, date: date, notes: "Groceries"
+                                accountID: accountID, amount: 42.50, type: .expense, date: date, notes: "Groceries", categoryID: nil, subcategoryID: nil
                             )
                         )
                     },
@@ -84,7 +94,7 @@ extension AppTestSuite {
                         try req.content.encode(
                             SaveTransactionRequest(
                                 accountID: UUID(), amount: 10, type: .expense,
-                                date: Date(timeIntervalSince1970: 1_800_000_000), notes: nil
+                                date: Date(timeIntervalSince1970: 1_800_000_000), notes: nil, categoryID: nil, subcategoryID: nil
                             )
                         )
                     },
@@ -113,7 +123,7 @@ extension AppTestSuite {
                         try req.content.encode(
                             SaveTransactionRequest(
                                 accountID: try account.requireID(), amount: amount, type: .expense,
-                                date: Date(timeIntervalSince1970: 1_800_000_000), notes: nil
+                                date: Date(timeIntervalSince1970: 1_800_000_000), notes: nil, categoryID: nil, subcategoryID: nil
                             )
                         )
                     },
@@ -171,7 +181,9 @@ extension AppTestSuite {
                         headers: authHeaders(),
                         beforeRequest: { req async throws in
                             try req.content.encode(
-                                SaveTransactionRequest(accountID: accountID, amount: 5, type: .expense, date: date, notes: nil)
+                                SaveTransactionRequest(
+                                    accountID: accountID, amount: 5, type: .expense, date: date, notes: nil, categoryID: nil, subcategoryID: nil
+                                )
                             )
                         },
                         afterResponse: { res async in
@@ -277,7 +289,7 @@ extension AppTestSuite {
                         try req.content.encode(
                             SaveTransactionRequest(
                                 accountID: try account.requireID(), amount: 5, type: .expense,
-                                date: Date(timeIntervalSince1970: 1_800_000_000), notes: nil
+                                date: Date(timeIntervalSince1970: 1_800_000_000), notes: nil, categoryID: nil, subcategoryID: nil
                             )
                         )
                     },
@@ -306,7 +318,7 @@ extension AppTestSuite {
                     beforeRequest: { req async throws in
                         try req.content.encode(
                             SaveTransactionRequest(
-                                accountID: accountID, amount: 99, type: .income, date: newDate, notes: "Refund"
+                                accountID: accountID, amount: 99, type: .income, date: newDate, notes: "Refund", categoryID: nil, subcategoryID: nil
                             )
                         )
                     },
@@ -337,7 +349,7 @@ extension AppTestSuite {
                         try req.content.encode(
                             SaveTransactionRequest(
                                 accountID: try account.requireID(), amount: 5, type: .expense,
-                                date: Date(timeIntervalSince1970: 1_800_000_000), notes: nil
+                                date: Date(timeIntervalSince1970: 1_800_000_000), notes: nil, categoryID: nil, subcategoryID: nil
                             )
                         )
                     },
@@ -382,6 +394,219 @@ extension AppTestSuite {
                         #expect(res.status == .notFound)
                     }
                 )
+            }
+        }
+
+        @Test("tags a Transaction with a Category alone")
+        func tagsTransactionWithCategoryAlone() async throws {
+            try await withTransactionsApp { app in
+                let account = try await makeAccount(app)
+                let category = try await makeCategory(app)
+                let categoryID = try category.requireID()
+
+                try await app.testing().test(
+                    .POST, "/v1/transactions",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(
+                            SaveTransactionRequest(
+                                accountID: try account.requireID(), amount: 10, type: .expense,
+                                date: Date(timeIntervalSince1970: 1_800_000_000), notes: nil,
+                                categoryID: categoryID, subcategoryID: nil
+                            )
+                        )
+                    },
+                    afterResponse: { res async throws in
+                        #expect(res.status == .ok)
+                        let body = try res.content.decode(TransactionResponse.self)
+                        #expect(body.categoryID == categoryID)
+                        #expect(body.subcategoryID == nil)
+                    }
+                )
+            }
+        }
+
+        @Test("tags a Transaction with a Category and its Subcategory")
+        func tagsTransactionWithCategoryAndSubcategory() async throws {
+            try await withTransactionsApp { app in
+                let account = try await makeAccount(app)
+                let category = try await makeCategory(app)
+                let categoryID = try category.requireID()
+                let subcategory = Subcategory(name: "Groceries", categoryID: categoryID)
+                try await subcategory.save(on: app.db)
+                let subcategoryID = try subcategory.requireID()
+
+                try await app.testing().test(
+                    .POST, "/v1/transactions",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(
+                            SaveTransactionRequest(
+                                accountID: try account.requireID(), amount: 10, type: .expense,
+                                date: Date(timeIntervalSince1970: 1_800_000_000), notes: nil,
+                                categoryID: categoryID, subcategoryID: subcategoryID
+                            )
+                        )
+                    },
+                    afterResponse: { res async throws in
+                        #expect(res.status == .ok)
+                        let body = try res.content.decode(TransactionResponse.self)
+                        #expect(body.categoryID == categoryID)
+                        #expect(body.subcategoryID == subcategoryID)
+                    }
+                )
+            }
+        }
+
+        @Test("rejects tagging a Transaction with a subcategoryID but no categoryID")
+        func rejectsSubcategoryWithoutCategory() async throws {
+            try await withTransactionsApp { app in
+                let account = try await makeAccount(app)
+                let category = try await makeCategory(app)
+                let subcategory = Subcategory(name: "Groceries", categoryID: try category.requireID())
+                try await subcategory.save(on: app.db)
+
+                try await app.testing().test(
+                    .POST, "/v1/transactions",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(
+                            SaveTransactionRequest(
+                                accountID: try account.requireID(), amount: 10, type: .expense,
+                                date: Date(timeIntervalSince1970: 1_800_000_000), notes: nil,
+                                categoryID: nil, subcategoryID: try subcategory.requireID()
+                            )
+                        )
+                    },
+                    afterResponse: { res async in
+                        #expect(res.status == .badRequest)
+                    }
+                )
+
+                let stored = try await Transaction.query(on: app.db).all()
+                #expect(stored.isEmpty)
+            }
+        }
+
+        @Test("rejects tagging a Transaction with a subcategoryID that belongs to a different categoryID")
+        func rejectsSubcategoryFromOtherCategory() async throws {
+            try await withTransactionsApp { app in
+                let account = try await makeAccount(app)
+                let categoryA = try await makeCategory(app, name: "Food")
+                let categoryB = try await makeCategory(app, name: "Transport")
+                let subcategoryOfA = Subcategory(name: "Groceries", categoryID: try categoryA.requireID())
+                try await subcategoryOfA.save(on: app.db)
+
+                try await app.testing().test(
+                    .POST, "/v1/transactions",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(
+                            SaveTransactionRequest(
+                                accountID: try account.requireID(), amount: 10, type: .expense,
+                                date: Date(timeIntervalSince1970: 1_800_000_000), notes: nil,
+                                categoryID: try categoryB.requireID(), subcategoryID: try subcategoryOfA.requireID()
+                            )
+                        )
+                    },
+                    afterResponse: { res async in
+                        #expect(res.status == .badRequest)
+                    }
+                )
+
+                let stored = try await Transaction.query(on: app.db).all()
+                #expect(stored.isEmpty)
+            }
+        }
+
+        @Test("rejects a nonexistent categoryID")
+        func rejectsNonexistentCategory() async throws {
+            try await withTransactionsApp { app in
+                let account = try await makeAccount(app)
+
+                try await app.testing().test(
+                    .POST, "/v1/transactions",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(
+                            SaveTransactionRequest(
+                                accountID: try account.requireID(), amount: 10, type: .expense,
+                                date: Date(timeIntervalSince1970: 1_800_000_000), notes: nil,
+                                categoryID: UUID(), subcategoryID: nil
+                            )
+                        )
+                    },
+                    afterResponse: { res async in
+                        #expect(res.status == .badRequest)
+                    }
+                )
+            }
+        }
+
+        @Test("rejects a nonexistent subcategoryID")
+        func rejectsNonexistentSubcategory() async throws {
+            try await withTransactionsApp { app in
+                let account = try await makeAccount(app)
+                let category = try await makeCategory(app)
+
+                try await app.testing().test(
+                    .POST, "/v1/transactions",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(
+                            SaveTransactionRequest(
+                                accountID: try account.requireID(), amount: 10, type: .expense,
+                                date: Date(timeIntervalSince1970: 1_800_000_000), notes: nil,
+                                categoryID: try category.requireID(), subcategoryID: UUID()
+                            )
+                        )
+                    },
+                    afterResponse: { res async in
+                        #expect(res.status == .badRequest)
+                    }
+                )
+            }
+        }
+
+        @Test("edits a Transaction to remove its Category/Subcategory tagging")
+        func editsTransactionToClearTagging() async throws {
+            try await withTransactionsApp { app in
+                let account = try await makeAccount(app)
+                let accountID = try account.requireID()
+                let category = try await makeCategory(app)
+                let categoryID = try category.requireID()
+                let subcategory = Subcategory(name: "Groceries", categoryID: categoryID)
+                try await subcategory.save(on: app.db)
+                let transaction = Transaction(
+                    amount: 20, type: .expense, date: Date(timeIntervalSince1970: 1_800_000_000),
+                    accountID: accountID, categoryID: categoryID, subcategoryID: try subcategory.requireID()
+                )
+                try await transaction.save(on: app.db)
+                let id = try transaction.requireID()
+
+                try await app.testing().test(
+                    .PUT, "/v1/transactions/\(id)",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(
+                            SaveTransactionRequest(
+                                accountID: accountID, amount: 20, type: .expense,
+                                date: Date(timeIntervalSince1970: 1_800_000_000), notes: nil,
+                                categoryID: nil, subcategoryID: nil
+                            )
+                        )
+                    },
+                    afterResponse: { res async throws in
+                        #expect(res.status == .ok)
+                        let body = try res.content.decode(TransactionResponse.self)
+                        #expect(body.categoryID == nil)
+                        #expect(body.subcategoryID == nil)
+                    }
+                )
+
+                let stored = try await Transaction.find(id, on: app.db)
+                #expect(stored?.$category.id == nil)
+                #expect(stored?.$subcategory.id == nil)
             }
         }
     }

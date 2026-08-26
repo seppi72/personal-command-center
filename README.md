@@ -104,6 +104,14 @@ All routes require `Authorization: Bearer <token>` and are versioned under `/v1`
 | `GET` | `/v1/expenses-per-day` | Expense totals across every Account regardless of Type (`?start=`/`?end=` both required) — one dense row per day |
 | `GET` | `/v1/accounts/:accountID/balance-history` | One Account's Balance over `[start, end)` (`?start=`/`?end=` both required) — one dense row per day, each as of that day's end |
 | `GET` | `/v1/accounts/:accountID/projected-balance` | One Account's Projected Balance (`?period=week\|month`) — `{ averageDailyNet, projectedBalance, period }` |
+| `GET` | `/v1/categories` | List all Categories |
+| `POST` | `/v1/categories` | Create a Category (`{ "name": "..." }`) |
+| `PUT` | `/v1/categories/:categoryID` | Rename a Category (`{ "name": "..." }`) |
+| `DELETE` | `/v1/categories/:categoryID` | Delete a Category — cascade-deletes its Subcategories, see "Categories/Subcategories" below |
+| `GET` | `/v1/subcategories` | List a Category's Subcategories — `?categoryID=` is required |
+| `POST` | `/v1/subcategories` | Create a Subcategory within a Category (`{ "categoryID": "...", "name": "..." }`) |
+| `PUT` | `/v1/subcategories/:subcategoryID` | Rename a Subcategory (`{ "name": "..." }`) |
+| `DELETE` | `/v1/subcategories/:subcategoryID` | Delete a Subcategory |
 
 Deleting a Project doesn't delete its Tasks — they become Project-less. Deleting a Client doesn't delete its Projects — they become Client-less, the same orphaning shape. Deleting a Task/Project/Client/Course that a Time Entry still references is rejected outright (ticket #29) — a Time Entry can't legally exist container-less, so the owner must reassign or delete those Time Entries first (see "Time Entries" below).
 
@@ -173,6 +181,14 @@ An Account (`CONTEXT.md`) is a named store of money the owner tracks — Checkin
 
 `AccountController.delete` follows the same shape ticket #29 already gave `TaskController`/`ProjectController`/`ClientController`/`CourseController`: it queries for a Transaction referencing the Account being deleted and rejects with a clear error if one exists, before ever calling `.delete()` — the owner must reassign or delete those Transactions first. This is a deliberate reversal of ticket #36's original note that no such guard existed yet; it applies now that Transaction (ticket #37) exists to reference an Account.
 
+### Categories/Subcategories + Transaction tagging (ticket #39)
+
+`CategoryController`/`SubcategoryController` are plain CRUD surfaces for Category/Subcategory (`CONTEXT.md`) — a Category is flat, same shape as `ClientController`; `GET /v1/subcategories` requires `?categoryID=`, same shape as `SprintController`'s required `?projectID=`, since a Subcategory has no meaning outside the Category it's scoped to. Deleting a Category cascade-deletes its Subcategories (`CreateSubcategory`'s `.cascade` FK, matching `CreateSprint`'s own `project_id`), and orphans (sets null on) rather than blocks any referencing Transaction's `categoryID`/`subcategoryID` (`AddCategoryToTransaction`'s `.setNull` FKs) — the opposite tradeoff from ticket #38's Account/Transaction guard, since a Transaction's Category is optional where its Account is required. Neither controller has an application-level delete guard the way `AccountController`/`ClientController` do; the database's own FK actions are what produce this behavior.
+
+`Transaction` gains optional `categoryID`/`subcategoryID` fields, independent of each other rather than a single polymorphic container. The only consistency rule between them is enforced in `TransactionController.verifyCategoryAndSubcategory`: a `subcategoryID` requires a `categoryID` that's actually its parent — ruling out a Subcategory tagged without its Category, so the only valid states are neither, a Category alone, or a Category *and* its Subcategory together.
+
+The Swift model backing Category is named `PCCCategory`, not `Category` — an unqualified `Category` collides with the Objective-C runtime's own `Category` typedef (`objc/runtime.h`, pulled in transitively through Foundation on Darwin), the same kind of collision `PCCTask`/`PCCClient` already sidestep. The domain term "Category" is what appears in the schema, JSON API, docs, and UI text; only the Swift symbol differs.
+
 ### Finances Reporting (ticket #40)
 
 `FinancesReportingController` is read-only, computed rollups over Account/Transaction (`CONTEXT.md`'s Net Worth/Projected Balance entries) — mirroring Work Hours' "one feature family, several read endpoints sharing the same range/dense-day query pattern" shape (ticket #25), but as five separate routes rather than one `groupBy`-style endpoint, since the five figures don't share a single response shape the way Work Hours' five `groupBy` values do. `GET /v1/net-worth` is the current figure, computed live from every Account's Balance the same "load every Account, load every net Transaction sum once" shape `AccountController.index` already uses. The other four are each a dense `[start, end)` day-by-day series (`GET /v1/net-worth/trend`, `GET /v1/expenses-per-day`, `GET /v1/accounts/:accountID/balance-history`) or a computed figure for one Account and period (`GET /v1/accounts/:accountID/projected-balance`) — `validatedRange` parses `start`/`end` from the query string by hand with `ISO8601DateFormatter`, the same `WorkHoursController.validatedRange` reasoning (Vapor's query decoder defaults `Date` to seconds-since-1970, unlike its JSON-body decoder).
@@ -226,9 +242,15 @@ ticket #18), the Courses screen (`CourseView` + `CoursesViewModel` +
 screen (`WorkHoursView` + `WorkHoursViewModel` +
 `URLSessionWorkHoursAPIClient`, ticket #25), the Accounts screen
 (`AccountsView` + `AccountsViewModel` + `URLSessionAccountsAPIClient`,
-ticket #36), and the Finances Reporting screen (`FinancesReportingView` +
-`FinancesReportingViewModel` + `URLSessionFinancesReportingAPIClient` +
-`URLSessionAccountsAPIClient`, ticket #40), built as a plain SPM target
+ticket #36), the Transactions screen (`TransactionsView` +
+`TransactionsViewModel` + `URLSessionTransactionsAPIClient`, ticket #37),
+the Categories screen with a Subcategories section within the Category
+detail flow (`CategoriesView`/`CategoryDetailView` + `CategoriesViewModel`/
+`SubcategoriesViewModel` + `URLSessionCategoriesAPIClient`/
+`URLSessionSubcategoriesAPIClient`, ticket #39), and the Finances Reporting
+screen (`FinancesReportingView` + `FinancesReportingViewModel` +
+`URLSessionFinancesReportingAPIClient` + `URLSessionAccountsAPIClient`,
+ticket #40), built as a plain SPM target
 with no Vapor/Fluent dependency.
 It isn't wrapped in an Xcode app target yet — no Xcode is set up in this
 environment. To use it:
@@ -242,7 +264,9 @@ environment. To use it:
    `URLSessionAutomationLogsAPIClient`, `URLSessionClientsAPIClient`,
    `URLSessionSprintsAPIClient`, `URLSessionCoursesAPIClient`,
    `URLSessionTimeEntriesAPIClient`, `URLSessionWorkHoursAPIClient`,
-   `URLSessionAccountsAPIClient`, and `URLSessionFinancesReportingAPIClient`
+   `URLSessionAccountsAPIClient`, `URLSessionTransactionsAPIClient`,
+   `URLSessionCategoriesAPIClient`, `URLSessionSubcategoriesAPIClient`, and
+   `URLSessionFinancesReportingAPIClient`
    with the backend's base URL and the
    device's bearer token. Wrap each in its
    matching view model to show `ProjectsView(viewModel:)`,
@@ -254,7 +278,8 @@ environment. To use it:
    `TimerView(viewModel:)` (the last two share one
    `URLSessionTimeEntriesAPIClient` between a `TimeEntriesViewModel` and a
    `TimerViewModel`), `WorkHoursView(viewModel:)`,
-   `AccountsView(viewModel:)`, and `FinancesReportingView(viewModel:)`
+   `AccountsView(viewModel:)`, `TransactionsView(viewModel:)`,
+   `CategoriesView(viewModel:)`, and `FinancesReportingView(viewModel:)`
    (constructed from both `URLSessionFinancesReportingAPIClient` and
    `URLSessionAccountsAPIClient`, the latter populating its Account picker).
    A Task
@@ -336,7 +361,23 @@ environment. To use it:
    and the current week, Monday through now, and loads right away via
    `.task`. A row's duration is formatted as plain "1h 30m"/"45m" text —
    see "Work Hours" above for the backend rollup this screen renders.
-7. `FinancesReportingView` (ticket #40) is a plain `List` of `Section`s — Net
+7. `CategoriesView` (ticket #39) lists Categories with add/edit/delete;
+   tapping a row navigates into `CategoryDetailView`, which shows the
+   Category's name read-only above a "Subcategories" section with its own
+   add/edit/delete — the same shape `ProjectDetailView`'s own Sprints section
+   already has, down to `CategoriesViewModel.makeSubcategoriesViewModel(for:)`
+   mirroring `ProjectsViewModel.makeSprintsViewModel(for:)`.
+   `TransactionFormSheet` (ticket #37's screen) now also has a Category
+   picker and, once a Category is picked, a Subcategory picker filtered to
+   that Category's own Subcategories — picking a different Category (or
+   clearing it) clears an incompatible Subcategory selection, mirroring
+   `TransactionController.verifyCategoryAndSubcategory`'s server-side rule.
+   `TransactionsViewModel` now also takes a `categoriesClient:
+   CategoriesAPIClient` and a `subcategoriesClient: SubcategoriesAPIClient`
+   in its `init`, loading every Category's Subcategories up front (Categories
+   are a small, owner-created list) rather than fetching them on demand per
+   keystroke in the form.
+8. `FinancesReportingView` (ticket #40) is a plain `List` of `Section`s — Net
    Worth (current figure as text, plus a `LineMark` trend chart), Account
    Balance (an Account `Picker` plus a `LineMark` history chart), expenses
    per day (a `BarMark` chart), and Projected Balance (a week/month `Picker`
@@ -355,13 +396,19 @@ environment. To use it:
 
 The backend's `PCCTask` model and the client's `PCCTask` struct are named
 `PCCTask` in Swift, not `Task` — that would shadow `_Concurrency.Task`
-throughout their targets. The domain term "Task" is what appears in the API
-paths/JSON and the UI text.
+throughout their targets. Category (ticket #39) is named `PCCCategory` in
+Swift on both sides for the same reason, but against a different collision:
+an unqualified `Category` collides with the Objective-C runtime's own
+`Category` typedef (`objc/runtime.h`, pulled in transitively through
+Foundation on Darwin). In every case the domain term ("Task", "Category")
+is what appears in the API paths/JSON and the UI text — only the Swift
+symbol differs.
 
 It has been verified with `swift build --target PCCUI` (type-checks and links,
 including the ticket #18 Sprint UI, the ticket #19 Course screen, the
 ticket #20 Task↔Course picker plus `CourseDetailView`'s Tasks section, the
 ticket #27 Time Entries screen, the ticket #28 `TimerView` live-timer
-control, the ticket #25 `WorkHoursView` rollup screen, and the ticket #40
-`FinancesReportingView` screen, `PCCUI`'s first use of SwiftUI's `Charts`
-framework) but not run in a simulator or on-device.
+control, the ticket #25 `WorkHoursView` rollup screen, the ticket #39
+Categories/Subcategories screens plus `TransactionFormSheet`'s new pickers,
+and the ticket #40 `FinancesReportingView` screen, `PCCUI`'s first use of
+SwiftUI's `Charts` framework) but not run in a simulator or on-device.
