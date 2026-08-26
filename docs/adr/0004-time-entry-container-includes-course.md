@@ -1,0 +1,7 @@
+# A Time Entry attaches to exactly one of Task, Project, Client, or Course
+
+`CONTEXT.md`'s original wording for Time Entry named only Task, Project, and Client as attachment targets — it predates Course entirely. While grilling the Time Entry slice, the gap surfaced: Task already treats Project and Course as peer containers (ADR-0003), so a Time Entry that could attach to a Project directly but not a Course directly would be an inconsistency with no domain reason behind it — non-task-shaped school work (e.g. sitting in a lecture, office hours) is just as real as non-task-shaped Project work (e.g. a client call).
+
+We chose to add Course as a fourth peer in the same exclusivity set: a Time Entry references exactly one of {Task, Project, Client, Course}, required (never none) and mutually exclusive — the same `*Container` shape `TaskContainer` already established for Project/Course, just extended to four cases. The alternative — leaving Course out and treating Work Hours as scoped to paid/professional work only — was considered and rejected because nothing in the domain draws that line; the owner may want hours logged against school work too (e.g. a graded or paid TA role).
+
+The trade-off: extending the container to four cases is more branching than the two-case `TaskContainer`, and if a future need ever wants a Time Entry attached to more than one target at once (e.g. Project work billed to a Client independently of the Project's own Client), this boundary has to be revisited.
