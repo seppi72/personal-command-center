@@ -9,19 +9,21 @@ struct AccountResponse: Content {
     let openingBalance: Double
     let balance: Double
 
-    /// `balance == openingBalance` today, always — there's no Transaction
-    /// model yet for it to sum (ticket #36 is Account CRUD only). Once
-    /// Transactions land, `balance` becomes `openingBalance + Σ(Transactions)`
-    /// (`docs/adr/0007-computed-balance-over-reconciliation.md`) computed
-    /// here rather than stored, the same "derive it every response" shape
-    /// `WorkHoursController` already uses for its rollup totals.
-    init(_ account: Account) throws {
+    /// `balance` is `openingBalance + Σ(Transactions)`
+    /// (`docs/adr/0007-computed-balance-over-reconciliation.md`, ticket
+    /// #37), passed in already computed rather than derived here: computing
+    /// it needs a database round trip (`Transaction.netAmount`), which an
+    /// `init` can't perform. `AccountController` is the single place that
+    /// computes it before constructing this response, the same "derive it
+    /// every response" shape `WorkHoursController` already uses for its
+    /// rollup totals.
+    init(_ account: Account, balance: Double) throws {
         self.id = try account.requireID()
         self.name = account.name
         self.type = account.type
         self.classification = account.type.classification
         self.openingBalance = account.openingBalance
-        self.balance = account.openingBalance
+        self.balance = balance
     }
 }
 
@@ -59,8 +61,16 @@ struct AccountController: RouteCollection {
     /// Lists every Account with its Balance (`CONTEXT.md`) — no per-owner
     /// scoping, same "no per-client local store" reasoning as
     /// `ProjectController.index` (ADR-0001): this is a single-owner system.
+    /// Balances come from one `Transaction.netAmountsByAccount` call rather
+    /// than `computedBalance` per row — the same "load once, aggregate in
+    /// memory" shape `WorkHoursController` uses, avoiding an N+1 query as
+    /// the Account list grows.
     func index(req: Request) async throws -> [AccountResponse] {
-        try await Account.query(on: req.db).all().map(AccountResponse.init)
+        let accounts = try await Account.query(on: req.db).all()
+        let netAmounts = try await Transaction.netAmountsByAccount(on: req.db)
+        return try accounts.map { account in
+            try AccountResponse(account, balance: account.openingBalance + (netAmounts[try account.requireID()] ?? 0))
+        }
     }
 
     func create(req: Request) async throws -> AccountResponse {
@@ -71,7 +81,10 @@ struct AccountController: RouteCollection {
             openingBalance: payload.openingBalance
         )
         try await account.save(on: req.db)
-        return try AccountResponse(account)
+        // No Transaction can already reference a brand-new Account, so its
+        // Balance is trivially its opening balance — skip the round trip
+        // `computedBalance` would otherwise make for a guaranteed-zero sum.
+        return try AccountResponse(account, balance: account.openingBalance)
     }
 
     /// Edits `name`/`type` only — `openingBalance` isn't in
@@ -85,7 +98,15 @@ struct AccountController: RouteCollection {
         account.name = try Self.validatedName(payload.name)
         account.type = payload.type
         try await account.save(on: req.db)
-        return try AccountResponse(account)
+        return try AccountResponse(account, balance: try await Self.computedBalance(for: account, on: req.db))
+    }
+
+    /// `openingBalance + Σ(Transactions)` (`CONTEXT.md`,
+    /// `docs/adr/0007-computed-balance-over-reconciliation.md`) — the only
+    /// place `AccountController` computes an Account's Balance, so `index`/
+    /// `update`/`create` can't drift into three different formulas.
+    private static func computedBalance(for account: Account, on db: any Database) async throws -> Double {
+        try await account.openingBalance + Transaction.netAmount(forAccount: account.requireID(), on: db)
     }
 
     /// An Account is created/edited "with a name" — reject an empty or
@@ -99,10 +120,12 @@ struct AccountController: RouteCollection {
     }
 
     /// No referencing-entity check before deleting, unlike
-    /// `ProjectController`/`ClientController.delete` — those guard against
-    /// orphaning a Time Entry (ticket #29), but nothing references an
-    /// Account yet (Transaction doesn't exist as of ticket #36). Add the
-    /// same guard here once Transaction lands.
+    /// `ProjectController`/`ClientController.delete`'s guard against
+    /// orphaning a Time Entry (ticket #29) — deleting an Account still
+    /// succeeds even with Transactions attached (ticket #37's AC), same
+    /// `.cascade` FK fallback `CreateTransaction` gives it. The equivalent
+    /// guard against a referencing Transaction is ticket #38, deliberately
+    /// scoped out of this ticket.
     func delete(req: Request) async throws -> HTTPStatus {
         guard let account = try await findAccount(req: req) else {
             throw Abort(.notFound)
