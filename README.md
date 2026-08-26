@@ -104,6 +104,14 @@ All routes require `Authorization: Bearer <token>` and are versioned under `/v1`
 | `GET` | `/v1/expenses-per-day` | Expense totals across every Account regardless of Type (`?start=`/`?end=` both required) — one dense row per day |
 | `GET` | `/v1/accounts/:accountID/balance-history` | One Account's Balance over `[start, end)` (`?start=`/`?end=` both required) — one dense row per day, each as of that day's end |
 | `GET` | `/v1/accounts/:accountID/projected-balance` | One Account's Projected Balance (`?period=week\|month`) — `{ averageDailyNet, projectedBalance, period }` |
+| `GET` | `/v1/categories` | List all Categories |
+| `POST` | `/v1/categories` | Create a Category (`{ "name": "..." }`) |
+| `PUT` | `/v1/categories/:categoryID` | Rename a Category (`{ "name": "..." }`) |
+| `DELETE` | `/v1/categories/:categoryID` | Delete a Category — cascade-deletes its Subcategories, see "Categories/Subcategories" below |
+| `GET` | `/v1/subcategories` | List a Category's Subcategories — `?categoryID=` is required |
+| `POST` | `/v1/subcategories` | Create a Subcategory within a Category (`{ "categoryID": "...", "name": "..." }`) |
+| `PUT` | `/v1/subcategories/:subcategoryID` | Rename a Subcategory (`{ "name": "..." }`) |
+| `DELETE` | `/v1/subcategories/:subcategoryID` | Delete a Subcategory |
 
 Deleting a Project doesn't delete its Tasks — they become Project-less. Deleting a Client doesn't delete its Projects — they become Client-less, the same orphaning shape. Deleting a Task/Project/Client/Course that a Time Entry still references is rejected outright (ticket #29) — a Time Entry can't legally exist container-less, so the owner must reassign or delete those Time Entries first (see "Time Entries" below).
 
