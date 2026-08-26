@@ -30,7 +30,8 @@ An audit-trail record of an action the system took on its own (e.g. a data pull,
 A surfaced item requiring the owner's attention. Has two aspects: membership in the "needs you" queue (the data) and delivery through a push/alert channel (the transport).
 
 **Time Entry**:
-A record of duration spent on work, captured primarily by starting/stopping a live timer, with after-the-fact manual duration entry as a fallback. Attaches to a Task, or directly to a Project or Client when the work isn't task-shaped (e.g. a call, admin time). Is how Work Hours is tracked, since no external timesheet system exists to mirror.
+A record spanning a start and end time, captured primarily by starting/stopping a live timer, with after-the-fact manual entry (the same start/end shape, just typed in) as a fallback. Attaches to exactly one of Task, Project, Client, or Course — required, never none, never more than one — the same alternate-container shape as Task's own Project/Course exclusivity (ADR-0003), extended to a fourth peer (ADR-0004). A direct Project, Client, or Course attachment is for work that isn't task-shaped (e.g. a call, admin time, sitting in a lecture). Is how Work Hours is tracked, since no external timesheet system exists to mirror.
+_Avoid_: Timesheet entry, log entry.
 
 **Course**:
 A container of related Tasks/Deadlines for a single school class (e.g. "CS 301"), analogous to how a Project contains personal Tasks — down to optionally carrying its own Deadline the same way a Project can. Created directly by the owner each term, not auto-detected; the Tasks/Deadlines inside it are what auto-populate, from a school data source.
