@@ -42,7 +42,23 @@ A container of related Tasks/Deadlines for a single school class (e.g. "CS 301")
 **Term**:
 The month and year identifying which academic term a Course belongs to (e.g. "September 2026").
 
+**Account**:
+A named store of money the owner tracks — Checking, Savings, Cash, Credit Card, Investment, or Loan — created directly by the owner, not auto-detected (Finances is canonical; see "Source of truth" below, and `docs/adr/0006-manual-entry-over-bank-aggregation-for-finances.md`). An Account's Type classifies it as an asset (Checking, Savings, Cash, Investment) or a liability (Credit Card, Loan) for Net Worth purposes. Its Balance is computed as its `openingBalance` (set once at creation) plus the signed sum of every Transaction logged against it — never edited directly (`docs/adr/0007-computed-balance-over-reconciliation.md`).
+
+**Transaction**:
+A single logged movement of money against exactly one Account, signed as an expense (money out) or income (money in). May optionally carry a Category or a Subcategory, but neither is required.
+_Avoid_: Entry, log entry (already claimed by Time Entry's own avoid-list).
+
+**Category** / **Subcategory**:
+An owner-created label for grouping Transactions by kind of spending (e.g. "Food"), created directly by the owner — the same "no external source to auto-detect from" shape as Client/Course. A Category may contain Subcategories (e.g. "Groceries", "Takeout", "Cafe", "Drinks" under "Food") — exactly one level deep; a Subcategory doesn't itself have children. A Subcategory is scoped to the Category it was created in for its lifetime, the same way a Sprint is scoped to its Project. A Transaction tagged with a Subcategory transitively counts toward its parent Category too.
+
+**Net Worth**:
+The owner's total financial position at a point in time — the sum of every asset Account's Balance minus the sum of every liability Account's Balance. Computed live from current Balances, not stored; surfaced both as a current figure and as a trend over time.
+
+**Projected Balance**:
+The forecasted value of an Account's Balance at the end of the current week or month, computed by extrapolating the trailing 30-day average daily net cash flow (income minus expenses) forward across the period's remaining days. Distinct from Net Worth — it projects one Account forward, not the owner's total position.
+
 **Source of truth (per domain)**:
 Whether the Command Center is canonical owner of a domain's data or a mirror of an external system of record.
-- **Canonical** (Command Center owns it): Tasks, Projects, Deadlines, Personal Commitments, Work Hours (self-logged — no employer timesheet system exists to mirror).
-- **Mirrored** (an external system remains authoritative): Finances, Calendar, School.
+- **Canonical** (Command Center owns it): Tasks, Projects, Deadlines, Personal Commitments, Work Hours (self-logged — no employer timesheet system exists to mirror), Finances (self-logged — the owner holds a mix of digital and traditional banks with no single aggregatable external source, so this mirrors Work Hours' shape rather than Calendar's).
+- **Mirrored** (an external system remains authoritative): Calendar, School.
