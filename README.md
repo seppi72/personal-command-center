@@ -168,6 +168,14 @@ An Account (`CONTEXT.md`) is a named store of money the owner tracks — Checkin
 
 `AccountController.delete` follows the same shape ticket #29 already gave `TaskController`/`ProjectController`/`ClientController`/`CourseController`: it queries for a Transaction referencing the Account being deleted and rejects with a clear error if one exists, before ever calling `.delete()` — the owner must reassign or delete those Transactions first. This is a deliberate reversal of ticket #36's original note that no such guard existed yet; it applies now that Transaction (ticket #37) exists to reference an Account.
 
+### Categories/Subcategories + Transaction tagging (ticket #39)
+
+`CategoryController`/`SubcategoryController` are plain CRUD surfaces for Category/Subcategory (`CONTEXT.md`) — a Category is flat, same shape as `ClientController`; `GET /v1/subcategories` requires `?categoryID=`, same shape as `SprintController`'s required `?projectID=`, since a Subcategory has no meaning outside the Category it's scoped to. Deleting a Category cascade-deletes its Subcategories (`CreateSubcategory`'s `.cascade` FK, matching `CreateSprint`'s own `project_id`), and orphans (sets null on) rather than blocks any referencing Transaction's `categoryID`/`subcategoryID` (`AddCategoryToTransaction`'s `.setNull` FKs) — the opposite tradeoff from ticket #38's Account/Transaction guard, since a Transaction's Category is optional where its Account is required. Neither controller has an application-level delete guard the way `AccountController`/`ClientController` do; the database's own FK actions are what produce this behavior.
+
+`Transaction` gains optional `categoryID`/`subcategoryID` fields, independent of each other rather than a single polymorphic container. The only consistency rule between them is enforced in `TransactionController.verifyCategoryAndSubcategory`: a `subcategoryID` requires a `categoryID` that's actually its parent — ruling out a Subcategory tagged without its Category, so the only valid states are neither, a Category alone, or a Category *and* its Subcategory together.
+
+The Swift model backing Category is named `PCCCategory`, not `Category` — an unqualified `Category` collides with the Objective-C runtime's own `Category` typedef (`objc/runtime.h`, pulled in transitively through Foundation on Darwin), the same kind of collision `PCCTask`/`PCCClient` already sidestep. The domain term "Category" is what appears in the schema, JSON API, docs, and UI text; only the Swift symbol differs.
+
 ### Personal Commitments
 
 A Personal Commitment (`CONTEXT.md`) is canonical — the Command Center owns it, not the external Calendar — so create/edit/delete always succeed locally regardless of whether the CalDAV push succeeds. Each push (or removal) is attempted synchronously in the same request, and its outcome is written to `AutomationLog` and reflected in the Commitment's `syncStatus` (`pending` → `synced` or `failed`) in the response, rather than failing the request. The recurring sync job (below) is what retries a failed push later; browsing `AutomationLog` itself is ticket #8's.
@@ -211,9 +219,15 @@ ticket #18), the Courses screen (`CourseView` + `CoursesViewModel` +
 (`TimerView` + `TimerViewModel`, sharing the same
 `URLSessionTimeEntriesAPIClient`, ticket #28), the Work Hours rollup
 screen (`WorkHoursView` + `WorkHoursViewModel` +
-`URLSessionWorkHoursAPIClient`, ticket #25), and the Accounts screen
+`URLSessionWorkHoursAPIClient`, ticket #25), the Accounts screen
 (`AccountsView` + `AccountsViewModel` + `URLSessionAccountsAPIClient`,
-ticket #36), built as a plain SPM target with no Vapor/Fluent dependency.
+ticket #36), the Transactions screen (`TransactionsView` +
+`TransactionsViewModel` + `URLSessionTransactionsAPIClient`, ticket #37),
+and the Categories screen with a Subcategories section within the Category
+detail flow (`CategoriesView`/`CategoryDetailView` + `CategoriesViewModel`/
+`SubcategoriesViewModel` + `URLSessionCategoriesAPIClient`/
+`URLSessionSubcategoriesAPIClient`, ticket #39), built as a plain SPM target
+with no Vapor/Fluent dependency.
 It isn't wrapped in an Xcode app target yet — no Xcode is set up in this
 environment. To use it:
 
@@ -225,8 +239,10 @@ environment. To use it:
    `URLSessionMirroredCalendarEventsAPIClient`,
    `URLSessionAutomationLogsAPIClient`, `URLSessionClientsAPIClient`,
    `URLSessionSprintsAPIClient`, `URLSessionCoursesAPIClient`,
-   `URLSessionTimeEntriesAPIClient`, `URLSessionWorkHoursAPIClient`, and
-   `URLSessionAccountsAPIClient` with the backend's base URL and the
+   `URLSessionTimeEntriesAPIClient`, `URLSessionWorkHoursAPIClient`,
+   `URLSessionAccountsAPIClient`, `URLSessionTransactionsAPIClient`,
+   `URLSessionCategoriesAPIClient`, and `URLSessionSubcategoriesAPIClient`
+   with the backend's base URL and the
    device's bearer token. Wrap each in its
    matching view model to show `ProjectsView(viewModel:)`,
    `TasksView(viewModel:)` (pass `scopedProjectID` to scope the screen to
@@ -236,8 +252,9 @@ environment. To use it:
    `CourseView(viewModel:)`, `TimeEntriesView(viewModel:)`,
    `TimerView(viewModel:)` (the last two share one
    `URLSessionTimeEntriesAPIClient` between a `TimeEntriesViewModel` and a
-   `TimerViewModel`), `WorkHoursView(viewModel:)`, and
-   `AccountsView(viewModel:)`. A Task
+   `TimerViewModel`), `WorkHoursView(viewModel:)`,
+   `AccountsView(viewModel:)`, `TransactionsView(viewModel:)`, and
+   `CategoriesView(viewModel:)`. A Task
    or Project's Deadline is set/cleared from its own create/edit form in
    `TasksView`/`ProjectsView` — the Deadlines screen is a read-only sorted
    view of both. Each Commitment's sync status (pushed to CalDAV, or
@@ -316,15 +333,37 @@ environment. To use it:
    and the current week, Monday through now, and loads right away via
    `.task`. A row's duration is formatted as plain "1h 30m"/"45m" text —
    see "Work Hours" above for the backend rollup this screen renders.
+7. `CategoriesView` (ticket #39) lists Categories with add/edit/delete;
+   tapping a row navigates into `CategoryDetailView`, which shows the
+   Category's name read-only above a "Subcategories" section with its own
+   add/edit/delete — the same shape `ProjectDetailView`'s own Sprints section
+   already has, down to `CategoriesViewModel.makeSubcategoriesViewModel(for:)`
+   mirroring `ProjectsViewModel.makeSprintsViewModel(for:)`.
+   `TransactionFormSheet` (ticket #37's screen) now also has a Category
+   picker and, once a Category is picked, a Subcategory picker filtered to
+   that Category's own Subcategories — picking a different Category (or
+   clearing it) clears an incompatible Subcategory selection, mirroring
+   `TransactionController.verifyCategoryAndSubcategory`'s server-side rule.
+   `TransactionsViewModel` now also takes a `categoriesClient:
+   CategoriesAPIClient` and a `subcategoriesClient: SubcategoriesAPIClient`
+   in its `init`, loading every Category's Subcategories up front (Categories
+   are a small, owner-created list) rather than fetching them on demand per
+   keystroke in the form.
 
 The backend's `PCCTask` model and the client's `PCCTask` struct are named
 `PCCTask` in Swift, not `Task` — that would shadow `_Concurrency.Task`
-throughout their targets. The domain term "Task" is what appears in the API
-paths/JSON and the UI text.
+throughout their targets. Category (ticket #39) is named `PCCCategory` in
+Swift on both sides for the same reason, but against a different collision:
+an unqualified `Category` collides with the Objective-C runtime's own
+`Category` typedef (`objc/runtime.h`, pulled in transitively through
+Foundation on Darwin). In every case the domain term ("Task", "Category")
+is what appears in the API paths/JSON and the UI text — only the Swift
+symbol differs.
 
 It has been verified with `swift build --target PCCUI` (type-checks and links,
 including the ticket #18 Sprint UI, the ticket #19 Course screen, the
 ticket #20 Task↔Course picker plus `CourseDetailView`'s Tasks section, the
 ticket #27 Time Entries screen, the ticket #28 `TimerView` live-timer
-control, and the ticket #25 `WorkHoursView` rollup screen) but not run in a
-simulator or on-device.
+control, the ticket #25 `WorkHoursView` rollup screen, and the ticket #39
+Categories/Subcategories screens plus `TransactionFormSheet`'s new pickers)
+but not run in a simulator or on-device.

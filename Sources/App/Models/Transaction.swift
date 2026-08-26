@@ -9,9 +9,9 @@ enum TransactionType: String, Codable, CaseIterable, Sendable {
 }
 
 /// A single logged movement of money against exactly one Account
-/// (`CONTEXT.md`), signed as an expense or income. Ticket #37 gives it
-/// `accountID`/`amount`/`type`/`date`/`notes` only — `categoryID`/
-/// `subcategoryID` are ticket #39's addition, once Category exists.
+/// (`CONTEXT.md`), signed as an expense or income. Ticket #37 gave it
+/// `accountID`/`amount`/`type`/`date`/`notes`; ticket #39 adds the optional
+/// `categoryID`/`subcategoryID` tagging.
 ///
 /// `type` is stored as its raw `String` rather than through Fluent's
 /// `@Enum`, the same "plain column, translate at the edges" choice
@@ -48,6 +48,22 @@ final class Transaction: Model, @unchecked Sendable {
     @Parent(key: "account_id")
     var account: Account
 
+    /// The Category this Transaction is tagged with, if any (`CONTEXT.md`,
+    /// ticket #39). `.setNull` (`AddCategoryToTransaction`) orphans this
+    /// Transaction rather than deleting it when the Category is removed —
+    /// the opposite tradeoff from `account`'s own `.cascade`, since a
+    /// Transaction's Category is optional where its Account is required.
+    @OptionalParent(key: "category_id")
+    var category: PCCCategory?
+
+    /// The Subcategory this Transaction is tagged with, if any — transitively
+    /// counts toward its parent Category too (`CONTEXT.md`). Nothing at the
+    /// model level keeps `subcategory`/`category` consistent with each
+    /// other; `TransactionController` is what rejects a `subcategoryID`
+    /// whose parent doesn't match `categoryID` (ticket #39).
+    @OptionalParent(key: "subcategory_id")
+    var subcategory: Subcategory?
+
     var type: TransactionType {
         get {
             guard let type = TransactionType(rawValue: typeRawValue) else {
@@ -76,7 +92,9 @@ final class Transaction: Model, @unchecked Sendable {
         type: TransactionType,
         date: Date,
         notes: String? = nil,
-        accountID: UUID
+        accountID: UUID,
+        categoryID: UUID? = nil,
+        subcategoryID: UUID? = nil
     ) {
         self.id = id
         self.amount = amount
@@ -84,6 +102,8 @@ final class Transaction: Model, @unchecked Sendable {
         self.date = date
         self.notes = notes
         self.$account.id = accountID
+        self.$category.id = categoryID
+        self.$subcategory.id = subcategoryID
     }
 
     /// An Account's Balance is `openingBalance + Σ(signedAmount)` over every

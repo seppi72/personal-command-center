@@ -110,6 +110,8 @@ public struct URLSessionTransactionsAPIClient: TransactionsAPIClient {
         let type: TransactionType
         let date: Date
         let notes: String?
+        let categoryID: UUID?
+        let subcategoryID: UUID?
 
         init(_ values: TransactionFormValues) throws {
             guard let accountID = values.accountID else {
@@ -120,6 +122,8 @@ public struct URLSessionTransactionsAPIClient: TransactionsAPIClient {
             self.type = values.type
             self.date = values.date
             self.notes = values.notes
+            self.categoryID = values.categoryID
+            self.subcategoryID = values.subcategoryID
         }
     }
 

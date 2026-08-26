@@ -49,6 +49,9 @@ public func configure(_ app: Application) async throws {
     app.migrations.add(MakeTimeEntryEndDateOptional())
     app.migrations.add(CreateAccount())
     app.migrations.add(CreateTransaction())
+    app.migrations.add(CreateCategory())
+    app.migrations.add(CreateSubcategory())
+    app.migrations.add(AddCategoryToTransaction())
     try await app.autoMigrate()
 
     let validTokens = Set(
