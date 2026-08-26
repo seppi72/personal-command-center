@@ -18,6 +18,7 @@ extension AppTestSuite {
                 try await configure(app)
             }) { app in
                 let result = try await test(app)
+                try await TimeEntry.query(on: app.db).delete()
                 try await Project.query(on: app.db).delete()
                 return result
             }
@@ -183,6 +184,30 @@ extension AppTestSuite {
                         #expect(res.status == .notFound)
                     }
                 )
+            }
+        }
+
+        @Test("rejects deleting a Project a Time Entry still references")
+        func deletingProjectWithReferencingTimeEntryFails() async throws {
+            try await withProjectsApp { app in
+                let project = Project(name: "Referenced")
+                try await project.save(on: app.db)
+                let id = try project.requireID()
+                let start = Date(timeIntervalSince1970: 1_800_000_000)
+                try await TimeEntry(
+                    startDate: start, endDate: start.addingTimeInterval(3600), container: .project(id)
+                ).save(on: app.db)
+
+                try await app.testing().test(
+                    .DELETE, "/v1/projects/\(id)",
+                    headers: authHeaders(),
+                    afterResponse: { res async in
+                        #expect(res.status == .badRequest)
+                    }
+                )
+
+                let stored = try await Project.find(id, on: app.db)
+                #expect(stored != nil)
             }
         }
     }

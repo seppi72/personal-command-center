@@ -14,10 +14,11 @@ struct CreateTimeEntry: AsyncMigration {
             // (`TimeEntryController` enforces it at write time) — none is
             // `.required` since none is unconditionally set, but each is
             // `.cascade` rather than `.setNull`: unlike e.g. `PCCTask`'s
-            // `project_id`, a Time Entry can't legally exist
-            // container-less, so deleting the referenced Task/Project/
-            // Client/Course must delete the Time Entry along with it
-            // instead of leaving a row with all four foreign keys nil.
+            // `project_id`, a Time Entry can't legally exist container-less.
+            // This cascade is a database-level fallback only — the
+            // Task/Project/Client/Course controllers reject the delete
+            // outright while a Time Entry still references it (ticket #29),
+            // so it's never actually reached through the API.
             .field("task_id", .uuid, .references(PCCTask.schema, "id", onDelete: .cascade))
             .field("project_id", .uuid, .references(Project.schema, "id", onDelete: .cascade))
             .field("client_id", .uuid, .references(PCCClient.schema, "id", onDelete: .cascade))

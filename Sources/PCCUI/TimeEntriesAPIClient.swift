@@ -11,6 +11,19 @@ public protocol TimeEntriesAPIClient: Sendable {
     func createTimeEntry(_ values: TimeEntryFormValues) async throws -> TimeEntry
     func updateTimeEntry(id: UUID, values: TimeEntryFormValues) async throws -> TimeEntry
     func deleteTimeEntry(id: UUID) async throws
+
+    // Ticket #28: the live timer's own sub-resource — see
+    // `Sources/App/Controllers/TimeEntryController.swift`'s `getTimer`/
+    // `startTimer`/`stopTimer`/`cancelTimer`.
+
+    /// The currently running timer, or `nil` if none.
+    func getActiveTimer() async throws -> TimeEntry?
+    /// Starts a timer against `container`; fails if one is already running.
+    func startTimer(container: TimeEntryContainer) async throws -> TimeEntry
+    /// Stops the running timer into a completed Time Entry.
+    func stopTimer() async throws -> TimeEntry
+    /// Cancels the running timer, discarding it with no saved record.
+    func cancelTimer() async throws
 }
 
 public enum TimeEntriesAPIClientError: Error {
@@ -88,6 +101,64 @@ public struct URLSessionTimeEntriesAPIClient: TimeEntriesAPIClient {
         let request = makeRequest(path: "v1/time-entries/\(id)", method: "DELETE")
         let (_, response) = try await session.data(for: request)
         try Self.checkStatus(response)
+    }
+
+    public func getActiveTimer() async throws -> TimeEntry? {
+        let request = makeRequest(path: "v1/time-entries/timer", method: "GET")
+        let (data, response) = try await session.data(for: request)
+        try Self.checkStatus(response)
+        // The backend returns a literal JSON `null` body when no timer is
+        // running (`TimeEntryController.getTimer`) — `JSONDecoder` decodes
+        // that straight into `nil` for an `Optional` top-level type.
+        return try decoder.decode(TimeEntry?.self, from: data)
+    }
+
+    public func startTimer(container: TimeEntryContainer) async throws -> TimeEntry {
+        var request = makeRequest(path: "v1/time-entries/timer/start", method: "POST")
+        try attach(StartTimerPayload(container), to: &request)
+        return try await send(request)
+    }
+
+    public func stopTimer() async throws -> TimeEntry {
+        try await send(makeRequest(path: "v1/time-entries/timer/stop", method: "PUT"))
+    }
+
+    public func cancelTimer() async throws {
+        let request = makeRequest(path: "v1/time-entries/timer/cancel", method: "PUT")
+        let (_, response) = try await session.data(for: request)
+        try Self.checkStatus(response)
+    }
+
+    private struct StartTimerPayload: Encodable {
+        let taskID: UUID?
+        let projectID: UUID?
+        let clientID: UUID?
+        let courseID: UUID?
+
+        init(_ container: TimeEntryContainer) {
+            switch container {
+            case .task(let id):
+                self.taskID = id
+                self.projectID = nil
+                self.clientID = nil
+                self.courseID = nil
+            case .project(let id):
+                self.taskID = nil
+                self.projectID = id
+                self.clientID = nil
+                self.courseID = nil
+            case .client(let id):
+                self.taskID = nil
+                self.projectID = nil
+                self.clientID = id
+                self.courseID = nil
+            case .course(let id):
+                self.taskID = nil
+                self.projectID = nil
+                self.clientID = nil
+                self.courseID = id
+            }
+        }
     }
 
     private struct SaveTimeEntryPayload: Encodable {

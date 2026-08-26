@@ -1,10 +1,12 @@
 import Fluent
 import Vapor
 
-/// A record spanning a start and end time (`CONTEXT.md`), captured here via
-/// manual entry — the "type it in after the fact" fallback the glossary
-/// describes; starting/stopping a live timer is a future slice, not this
-/// one. Attaches to exactly one of Task, Project, Client, or Course —
+/// A record spanning a start and end time (`CONTEXT.md`), captured either by
+/// starting/stopping a live timer (ticket #28) or via manual entry — the
+/// "type it in after the fact" fallback the glossary describes. A row
+/// mid-timer has `endDate == nil` (`isRunning`); every other row — manually
+/// entered, or a timer that's been stopped — has a concrete `endDate`.
+/// Attaches to exactly one of Task, Project, Client, or Course —
 /// required, never none, never more than one
 /// (`docs/adr/0004-time-entry-container-includes-course.md`), the same
 /// alternate-container shape as `PCCTask.container` (ADR-0003) extended to a
@@ -14,9 +16,13 @@ import Vapor
 /// one is ever non-nil for a given row, `TimeEntryController` enforces the
 /// exclusivity at write time — but each uses `.cascade` (`CreateTimeEntry`),
 /// not `.setNull` like `PCCTask.project`/`course`: a Time Entry can't
-/// legally exist container-less, so deleting the Task/Project/Client/Course
-/// it's attached to must delete the Time Entry along with it rather than
-/// leave a row with all four foreign keys nil.
+/// legally exist container-less. In practice that cascade is a
+/// database-level fallback only: `TaskController`/`ProjectController`/
+/// `ClientController`/`CourseController.delete` each reject deleting a
+/// Task/Project/Client/Course while any Time Entry still references it
+/// (ticket #29), so the API never actually reaches the point of cascading a
+/// delete onto a Time Entry — the owner must reassign or delete those Time
+/// Entries first.
 final class TimeEntry: Model, @unchecked Sendable {
     static let schema = "time_entries"
 
@@ -26,8 +32,11 @@ final class TimeEntry: Model, @unchecked Sendable {
     @Field(key: "start_date")
     var startDate: Date
 
-    @Field(key: "end_date")
-    var endDate: Date
+    /// `nil` while this Time Entry is a running live timer (ticket #28,
+    /// `MakeTimeEntryEndDateOptional`) — see `isRunning`. Always non-nil for
+    /// a manually-entered Time Entry and for a timer once stopped.
+    @OptionalField(key: "end_date")
+    var endDate: Date?
 
     @OptionalField(key: "notes")
     var notes: String?
@@ -49,7 +58,7 @@ final class TimeEntry: Model, @unchecked Sendable {
     init(
         id: UUID? = nil,
         startDate: Date,
-        endDate: Date,
+        endDate: Date? = nil,
         notes: String? = nil,
         container: TimeEntryContainer
     ) {
@@ -59,6 +68,10 @@ final class TimeEntry: Model, @unchecked Sendable {
         self.notes = notes
         setContainer(container)
     }
+
+    /// `true` while this Time Entry is an in-progress live timer (ticket
+    /// #28) — no `endDate` yet.
+    var isRunning: Bool { endDate == nil }
 
     /// The one foreign key that's actually set, read back as a
     /// `TimeEntryContainer` — `nil` only for a row in a state no write path
