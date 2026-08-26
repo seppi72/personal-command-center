@@ -99,6 +99,11 @@ All routes require `Authorization: Bearer <token>` and are versioned under `/v1`
 | `POST` | `/v1/accounts` | Create an Account (`{ "name": "...", "type": "checking\|savings\|cash\|creditCard\|investment\|loan", "openingBalance": <number> }`) |
 | `PUT` | `/v1/accounts/:accountID` | Edit an Account's name/type (`{ "name": "...", "type": "..." }`) — `openingBalance` is immutable, see "Accounts" below |
 | `DELETE` | `/v1/accounts/:accountID` | Delete an Account |
+| `GET` | `/v1/net-worth` | Current Net Worth: every asset Account's Balance minus every liability Account's Balance, computed live |
+| `GET` | `/v1/net-worth/trend` | Net Worth trend (`?start=`/`?end=` both required, `<ISO 8601>`, range is `[start, end)`) — one dense row per day, each as of that day's end — see "Finances Reporting" below |
+| `GET` | `/v1/expenses-per-day` | Expense totals across every Account regardless of Type (`?start=`/`?end=` both required) — one dense row per day |
+| `GET` | `/v1/accounts/:accountID/balance-history` | One Account's Balance over `[start, end)` (`?start=`/`?end=` both required) — one dense row per day, each as of that day's end |
+| `GET` | `/v1/accounts/:accountID/projected-balance` | One Account's Projected Balance (`?period=week\|month`) — `{ averageDailyNet, projectedBalance, period }` |
 
 Deleting a Project doesn't delete its Tasks — they become Project-less. Deleting a Client doesn't delete its Projects — they become Client-less, the same orphaning shape. Deleting a Task/Project/Client/Course that a Time Entry still references is rejected outright (ticket #29) — a Time Entry can't legally exist container-less, so the owner must reassign or delete those Time Entries first (see "Time Entries" below).
 
@@ -168,6 +173,14 @@ An Account (`CONTEXT.md`) is a named store of money the owner tracks — Checkin
 
 `AccountController.delete` follows the same shape ticket #29 already gave `TaskController`/`ProjectController`/`ClientController`/`CourseController`: it queries for a Transaction referencing the Account being deleted and rejects with a clear error if one exists, before ever calling `.delete()` — the owner must reassign or delete those Transactions first. This is a deliberate reversal of ticket #36's original note that no such guard existed yet; it applies now that Transaction (ticket #37) exists to reference an Account.
 
+### Finances Reporting (ticket #40)
+
+`FinancesReportingController` is read-only, computed rollups over Account/Transaction (`CONTEXT.md`'s Net Worth/Projected Balance entries) — mirroring Work Hours' "one feature family, several read endpoints sharing the same range/dense-day query pattern" shape (ticket #25), but as five separate routes rather than one `groupBy`-style endpoint, since the five figures don't share a single response shape the way Work Hours' five `groupBy` values do. `GET /v1/net-worth` is the current figure, computed live from every Account's Balance the same "load every Account, load every net Transaction sum once" shape `AccountController.index` already uses. The other four are each a dense `[start, end)` day-by-day series (`GET /v1/net-worth/trend`, `GET /v1/expenses-per-day`, `GET /v1/accounts/:accountID/balance-history`) or a computed figure for one Account and period (`GET /v1/accounts/:accountID/projected-balance`) — `validatedRange` parses `start`/`end` from the query string by hand with `ISO8601DateFormatter`, the same `WorkHoursController.validatedRange` reasoning (Vapor's query decoder defaults `Date` to seconds-since-1970, unlike its JSON-body decoder).
+
+A day's Balance/Net-Worth figure is computed *as of that day's end* — `openingBalance` plus every Transaction dated on or before that day (`CONTEXT.md`) — not just Transactions dated inside `[start, end)`: a Transaction dated before `start` still carries forward into every day's figure, since a day's Balance is opening-balance-forward, not range-relative. `Self.cumulativeSeries` computes this efficiently: one Account query and one Transaction query total (not one Transaction query per Account, and not one query per day), sorting each Account's Transactions once and walking them alongside the dense day list with a single advancing index — an O(n log n) alternative to the O(days × transactions) a naive per-day filter-and-sum would cost. `netWorthTrend` reuses this per Account, weighting each Account's own series by `+1`/`-1` for asset/liability before summing across Accounts per day. `expensesPerDay` is *not* cumulative, unlike the other three — each day's figure is that day's own expense total, the same "one day's total, not a running total" shape `WorkHoursController.dayRows` already has for `groupBy=day`.
+
+Projected Balance's `averageDailyNet` is net cash flow (income minus expenses, i.e. `Transaction.signedAmount`'s own sign) over the trailing 30 days, divided by 30; `projectedBalance` is today's Balance (via `Transaction.netAmount(forAccount:asOf:)` — the same as-of-day-end formula the dense series use, not `AccountController`'s plain `netAmount`, so there's one shared "Balance as of a day" definition across this whole feature rather than two that could disagree) plus `averageDailyNet` times the period's remaining days. "Remaining days" excludes today itself — today's own net cash flow is already baked into today's Balance, so counting it again as a projected day would double it — and is `tomorrow` through `Calendar.current.dateInterval(of: .weekOfYear/.month, for: today)`'s exclusive `end` (the start of the *next* period), that span being exactly "tomorrow through the period's last day, inclusive," clamped to zero rather than negative on a period's last day.
+
 ### Personal Commitments
 
 A Personal Commitment (`CONTEXT.md`) is canonical — the Command Center owns it, not the external Calendar — so create/edit/delete always succeed locally regardless of whether the CalDAV push succeeds. Each push (or removal) is attempted synchronously in the same request, and its outcome is written to `AutomationLog` and reflected in the Commitment's `syncStatus` (`pending` → `synced` or `failed`) in the response, rather than failing the request. The recurring sync job (below) is what retries a failed push later; browsing `AutomationLog` itself is ticket #8's.
@@ -211,9 +224,12 @@ ticket #18), the Courses screen (`CourseView` + `CoursesViewModel` +
 (`TimerView` + `TimerViewModel`, sharing the same
 `URLSessionTimeEntriesAPIClient`, ticket #28), the Work Hours rollup
 screen (`WorkHoursView` + `WorkHoursViewModel` +
-`URLSessionWorkHoursAPIClient`, ticket #25), and the Accounts screen
+`URLSessionWorkHoursAPIClient`, ticket #25), the Accounts screen
 (`AccountsView` + `AccountsViewModel` + `URLSessionAccountsAPIClient`,
-ticket #36), built as a plain SPM target with no Vapor/Fluent dependency.
+ticket #36), and the Finances Reporting screen (`FinancesReportingView` +
+`FinancesReportingViewModel` + `URLSessionFinancesReportingAPIClient` +
+`URLSessionAccountsAPIClient`, ticket #40), built as a plain SPM target
+with no Vapor/Fluent dependency.
 It isn't wrapped in an Xcode app target yet — no Xcode is set up in this
 environment. To use it:
 
@@ -225,8 +241,9 @@ environment. To use it:
    `URLSessionMirroredCalendarEventsAPIClient`,
    `URLSessionAutomationLogsAPIClient`, `URLSessionClientsAPIClient`,
    `URLSessionSprintsAPIClient`, `URLSessionCoursesAPIClient`,
-   `URLSessionTimeEntriesAPIClient`, `URLSessionWorkHoursAPIClient`, and
-   `URLSessionAccountsAPIClient` with the backend's base URL and the
+   `URLSessionTimeEntriesAPIClient`, `URLSessionWorkHoursAPIClient`,
+   `URLSessionAccountsAPIClient`, and `URLSessionFinancesReportingAPIClient`
+   with the backend's base URL and the
    device's bearer token. Wrap each in its
    matching view model to show `ProjectsView(viewModel:)`,
    `TasksView(viewModel:)` (pass `scopedProjectID` to scope the screen to
@@ -236,8 +253,11 @@ environment. To use it:
    `CourseView(viewModel:)`, `TimeEntriesView(viewModel:)`,
    `TimerView(viewModel:)` (the last two share one
    `URLSessionTimeEntriesAPIClient` between a `TimeEntriesViewModel` and a
-   `TimerViewModel`), `WorkHoursView(viewModel:)`, and
-   `AccountsView(viewModel:)`. A Task
+   `TimerViewModel`), `WorkHoursView(viewModel:)`,
+   `AccountsView(viewModel:)`, and `FinancesReportingView(viewModel:)`
+   (constructed from both `URLSessionFinancesReportingAPIClient` and
+   `URLSessionAccountsAPIClient`, the latter populating its Account picker).
+   A Task
    or Project's Deadline is set/cleared from its own create/edit form in
    `TasksView`/`ProjectsView` — the Deadlines screen is a read-only sorted
    view of both. Each Commitment's sync status (pushed to CalDAV, or
@@ -316,6 +336,22 @@ environment. To use it:
    and the current week, Monday through now, and loads right away via
    `.task`. A row's duration is formatted as plain "1h 30m"/"45m" text —
    see "Work Hours" above for the backend rollup this screen renders.
+7. `FinancesReportingView` (ticket #40) is a plain `List` of `Section`s — Net
+   Worth (current figure as text, plus a `LineMark` trend chart), Account
+   Balance (an Account `Picker` plus a `LineMark` history chart), expenses
+   per day (a `BarMark` chart), and Projected Balance (a week/month `Picker`
+   plus `averageDailyNet`/`projectedBalance` as text, not a chart, per the
+   ticket's own settled scope) — using SwiftUI's native `Charts` framework,
+   its first use anywhere in `PCCUI`, rather than a third-party charting
+   dependency. One shared `start`/`end` `DatePicker` pair drives the Net
+   Worth trend, Account Balance history, and expense-per-day sections
+   together; the Account picker and period picker each reload only their own
+   two Account-scoped sections (`FinancesReportingViewModel.loadSelectedAccountFigures`)
+   rather than the whole screen. Every control change reloads immediately,
+   the same no-separate-Apply-step convention `WorkHoursView` already has;
+   opening the screen defaults to the trailing 30 days through now, read
+   more informatively as a trend than `WorkHoursViewModel`'s own
+   current-week default.
 
 The backend's `PCCTask` model and the client's `PCCTask` struct are named
 `PCCTask` in Swift, not `Task` — that would shadow `_Concurrency.Task`
@@ -326,5 +362,6 @@ It has been verified with `swift build --target PCCUI` (type-checks and links,
 including the ticket #18 Sprint UI, the ticket #19 Course screen, the
 ticket #20 Task↔Course picker plus `CourseDetailView`'s Tasks section, the
 ticket #27 Time Entries screen, the ticket #28 `TimerView` live-timer
-control, and the ticket #25 `WorkHoursView` rollup screen) but not run in a
-simulator or on-device.
+control, the ticket #25 `WorkHoursView` rollup screen, and the ticket #40
+`FinancesReportingView` screen, `PCCUI`'s first use of SwiftUI's `Charts`
+framework) but not run in a simulator or on-device.
