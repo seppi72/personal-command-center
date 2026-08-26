@@ -9,7 +9,7 @@ import Foundation
 /// type `TimeEntriesViewModel`/`TimeEntryFormSheet` reason about once,
 /// rather than a rule re-derived at each call site that touches all four
 /// fields.
-public enum TimeEntryContainer: Equatable {
+public enum TimeEntryContainer: Equatable, Sendable {
     case task(UUID)
     case project(UUID)
     case client(UUID)

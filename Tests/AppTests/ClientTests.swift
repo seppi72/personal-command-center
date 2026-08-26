@@ -17,6 +17,7 @@ extension AppTestSuite {
                 try await configure(app)
             }) { app in
                 let result = try await test(app)
+                try await TimeEntry.query(on: app.db).delete()
                 try await Project.query(on: app.db).delete()
                 try await PCCClient.query(on: app.db).delete()
                 return result
@@ -170,6 +171,30 @@ extension AppTestSuite {
 
                 let stored = try await PCCClient.find(id, on: app.db)
                 #expect(stored == nil)
+            }
+        }
+
+        @Test("rejects deleting a Client a Time Entry still references")
+        func deletingClientWithReferencingTimeEntryFails() async throws {
+            try await withClientsApp { app in
+                let client = PCCClient(name: "Referenced")
+                try await client.save(on: app.db)
+                let id = try client.requireID()
+                let start = Date(timeIntervalSince1970: 1_800_000_000)
+                try await TimeEntry(
+                    startDate: start, endDate: start.addingTimeInterval(3600), container: .client(id)
+                ).save(on: app.db)
+
+                try await app.testing().test(
+                    .DELETE, "/v1/clients/\(id)",
+                    headers: authHeaders(),
+                    afterResponse: { res async in
+                        #expect(res.status == .badRequest)
+                    }
+                )
+
+                let stored = try await PCCClient.find(id, on: app.db)
+                #expect(stored != nil)
             }
         }
 

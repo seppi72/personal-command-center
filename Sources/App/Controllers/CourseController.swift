@@ -110,8 +110,17 @@ struct CourseController: RouteCollection {
         guard let course = try await findCourse(req: req) else {
             throw Abort(.notFound)
         }
+        try await Self.verifyNoReferencingTimeEntries(courseID: try course.requireID(), req: req)
         try await course.delete(on: req.db)
         return .noContent
+    }
+
+    /// Ticket #29: a Course can't be deleted while any Time Entry still
+    /// references it — mirrors `TaskController`'s identical check.
+    private static func verifyNoReferencingTimeEntries(courseID: UUID, req: Request) async throws {
+        guard try await TimeEntry.query(on: req.db).filter(\.$course.$id == courseID).first() == nil else {
+            throw Abort(.badRequest, reason: "cannot delete a Course with Time Entries attached")
+        }
     }
 
     /// Attach, change, or remove (`dueDate: null`) a Course's Deadline —

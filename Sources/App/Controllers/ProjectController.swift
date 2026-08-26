@@ -88,8 +88,17 @@ struct ProjectController: RouteCollection {
         guard let project = try await findProject(req: req) else {
             throw Abort(.notFound)
         }
+        try await Self.verifyNoReferencingTimeEntries(projectID: try project.requireID(), req: req)
         try await project.delete(on: req.db)
         return .noContent
+    }
+
+    /// Ticket #29: a Project can't be deleted while any Time Entry still
+    /// references it — mirrors `TaskController`'s identical check.
+    private static func verifyNoReferencingTimeEntries(projectID: UUID, req: Request) async throws {
+        guard try await TimeEntry.query(on: req.db).filter(\.$project.$id == projectID).first() == nil else {
+            throw Abort(.badRequest, reason: "cannot delete a Project with Time Entries attached")
+        }
     }
 
     /// Attach, change, or remove (`dueDate: null`) a Project's Deadline —

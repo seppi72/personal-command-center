@@ -53,7 +53,13 @@ public struct TimeEntriesView: View {
                     title: "Edit Time Entry",
                     initialValues: TimeEntryFormValues(
                         startDate: entry.startDate,
-                        endDate: entry.endDate,
+                        // A running timer (ticket #28) has no `endDate` yet
+                        // — default the field to "now" so the form always
+                        // shows a concrete end time to adjust. Saving from
+                        // here completes the timer through the regular edit
+                        // endpoint, an alternate path to the same result as
+                        // `TimerViewModel.stop()`.
+                        endDate: entry.endDate ?? Date(),
                         notes: entry.notes,
                         taskID: entry.taskID,
                         projectID: entry.projectID,
@@ -82,6 +88,11 @@ public struct TimeEntriesView: View {
                         Text(entry.startDate, style: .date)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
+                        if entry.isRunning {
+                            Text("Running")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
                         if let notes = entry.notes {
                             Text(notes)
                                 .font(.caption)

@@ -90,8 +90,12 @@ All routes require `Authorization: Bearer <token>` and are versioned under `/v1`
 | `POST` | `/v1/time-entries` | Create a Time Entry (`{ "startDate": "<ISO 8601>", "endDate": "<ISO 8601>", "notes": "..."?, "taskID"/"projectID"/"clientID"/"courseID": "..." }`, exactly one of the last four required) |
 | `PUT` | `/v1/time-entries/:timeEntryID` | Edit a Time Entry (same body as create, replacing every field including its container) |
 | `DELETE` | `/v1/time-entries/:timeEntryID` | Delete a Time Entry |
+| `GET` | `/v1/time-entries/timer` | The currently running timer, or `null` if none — server-side state, visible from any device (ticket #28) |
+| `POST` | `/v1/time-entries/timer/start` | Start a timer with `startDate = now` (`{ "taskID"/"projectID"/"clientID"/"courseID": "..." }`, exactly one required); fails if one is already running |
+| `PUT` | `/v1/time-entries/timer/stop` | Stop the running timer into a completed Time Entry (`endDate = now`); 404 if none is running |
+| `PUT` | `/v1/time-entries/timer/cancel` | Cancel the running timer outright — deletes it with no saved record; 404 if none is running |
 
-Deleting a Project doesn't delete its Tasks — they become Project-less. Deleting a Client doesn't delete its Projects — they become Client-less, the same orphaning shape. Deleting the Task/Project/Client/Course a Time Entry is attached to deletes the Time Entry along with it, the opposite tradeoff — a Time Entry can't legally exist container-less (see "Time Entries" below).
+Deleting a Project doesn't delete its Tasks — they become Project-less. Deleting a Client doesn't delete its Projects — they become Client-less, the same orphaning shape. Deleting a Task/Project/Client/Course that a Time Entry still references is rejected outright (ticket #29) — a Time Entry can't legally exist container-less, so the owner must reassign or delete those Time Entries first (see "Time Entries" below).
 
 ### Clients (ticket #17)
 
@@ -127,7 +131,17 @@ A Time Entry (`CONTEXT.md`) is canonical (no external timesheet system exists to
 
 `TimeEntryController.validatedContainer` rejects a request with zero or more than one of `taskID`/`projectID`/`clientID`/`courseID` set, then `verifyContainerExists` confirms the one given id actually resolves to a row before the Time Entry is saved. `verifyNoOverlap` rejects a span that strictly overlaps an existing Time Entry's span — touching boundaries (one ends exactly when another starts) are allowed, so the check uses strict `<`/`>` rather than `<=`/`>=`. The overlap check is global, not scoped to the same container: Work Hours tracks one person's time, who can only be doing one thing at once, regardless of which Task/Project/Client/Course each span is logged against. `update` excludes the Time Entry being edited from its own overlap check, so editing a Time Entry without changing its span (e.g. only its notes) doesn't reject against itself.
 
-`TimeEntry`'s four foreign keys (`task_id`/`project_id`/`client_id`/`course_id`) are all optional at the Fluent/Postgres level — only one is ever non-nil for a given row — but each uses `.cascade` in `CreateTimeEntry`, not `.setNull` like `PCCTask.project`/`course`: since a Time Entry can't legally exist container-less, deleting the Task/Project/Client/Course it's attached to deletes the Time Entry along with it rather than leaving a row with all four foreign keys nil.
+`TimeEntry`'s four foreign keys (`task_id`/`project_id`/`client_id`/`course_id`) are all optional at the Fluent/Postgres level — only one is ever non-nil for a given row — but each uses `.cascade` in `CreateTimeEntry`, not `.setNull` like `PCCTask.project`/`course`: since a Time Entry can't legally exist container-less, a *database-level* delete of its Task/Project/Client/Course would take it down too. In practice that cascade is a fallback only — since ticket #29, `TaskController`/`ProjectController`/`ClientController`/`CourseController.delete` each reject the delete outright while a Time Entry still references it (see "Blocking deletion with referencing Time Entries" below), so the API never actually reaches the cascade.
+
+### Live Timer (ticket #28)
+
+A live timer is a `TimeEntry` row that hasn't been stopped yet — `endDate == nil` (`TimeEntry.isRunning`) — rather than a separate table, so stopping one is just setting the same `end_date` column manual entries already use. `end_date` was `.required` since `CreateTimeEntry`; `MakeTimeEntryEndDateOptional` drops that `NOT NULL` constraint directly via `SQLDatabase` (Fluent's schema builder has no "make an existing column nullable" operation of its own).
+
+`POST /v1/time-entries/timer/start` rejects if a timer is already running (checked before the container is even decoded), then validates its container the same way `create` does (`TimeEntryController.validatedContainer`, refactored to take the four ids directly so both `SaveTimeEntryRequest` and `StartTimerRequest` can share it) and saves a `TimeEntry` with `startDate = now`, no `endDate`. `GET /v1/time-entries/timer` queries fresh from the database on every call — genuinely server-side state, not per-connection — and returns a literal JSON `null` when none is running, since `TimeEntryResponse?` can't be returned directly from a Vapor route handler (no `AsyncResponseEncodable` conformance for `Optional`); the response is built by hand instead. `PUT /v1/time-entries/timer/stop` sets `endDate = now` under the same zero-duration/overlap validation as `update` — nothing is mutated or saved until both checks pass, so a rejected stop leaves the timer running, unchanged. A running timer's `NULL end_date` is treated as open-ended, not excluded, by that same overlap check — `verifyNoOverlap`'s filter is `endDate IS NULL OR endDate > startDate` — so a manual entry (or another `create`/`update`) that begins before an already-running timer still overlaps it, the same "only doing one thing at once" invariant ticket #27 already enforces between two completed entries. `PUT /v1/time-entries/timer/cancel` deletes the running entry outright, no saved record. No cap or warning is enforced on how long a timer has been running.
+
+### Blocking deletion with referencing Time Entries (ticket #29)
+
+`TaskController`/`ProjectController`/`ClientController`/`CourseController.delete` each query for a Time Entry referencing the row being deleted and reject with a clear error if one exists, before ever calling `.delete()` — the owner must reassign or delete those Time Entries first, rather than the delete either orphaning the Time Entry (as `Client` → `Project` deletion still does) or silently taking it down too. `SprintController.delete` is unaffected — Sprint is not a Time Entry container.
 
 ### Personal Commitments
 
@@ -165,9 +179,13 @@ Log screen (`AutomationLogView` + `AutomationLogViewModel` +
 (`ClientsView` + `ClientsViewModel` + `URLSessionClientsAPIClient`,
 ticket #17), a Sprints section within the Project detail flow
 (`ProjectDetailView` + `SprintsViewModel` + `URLSessionSprintsAPIClient`,
-ticket #18), and the Courses screen (`CourseView` + `CoursesViewModel` +
-`URLSessionCoursesAPIClient`, ticket #19), built as a plain SPM target with
-no Vapor/Fluent dependency.
+ticket #18), the Courses screen (`CourseView` + `CoursesViewModel` +
+`URLSessionCoursesAPIClient`, ticket #19), the Time Entries screen
+(`TimeEntriesView` + `TimeEntriesViewModel` +
+`URLSessionTimeEntriesAPIClient`, ticket #27), and the live-timer control
+(`TimerView` + `TimerViewModel`, sharing the same
+`URLSessionTimeEntriesAPIClient`, ticket #28), built as a plain SPM target
+with no Vapor/Fluent dependency.
 It isn't wrapped in an Xcode app target yet — no Xcode is set up in this
 environment. To use it:
 
@@ -178,14 +196,18 @@ environment. To use it:
    `URLSessionPersonalCommitmentsAPIClient`,
    `URLSessionMirroredCalendarEventsAPIClient`,
    `URLSessionAutomationLogsAPIClient`, `URLSessionClientsAPIClient`,
-   `URLSessionSprintsAPIClient`, and `URLSessionCoursesAPIClient` with
+   `URLSessionSprintsAPIClient`, `URLSessionCoursesAPIClient`, and
+   `URLSessionTimeEntriesAPIClient` with
    the backend's base URL and the device's bearer token. Wrap each in its
    matching view model to show `ProjectsView(viewModel:)`,
    `TasksView(viewModel:)` (pass `scopedProjectID` to scope the screen to
    one Project, or omit it to list every Task), `DeadlinesView(viewModel:)`,
    `PersonalCommitmentsView(viewModel:)`, `CalendarView(viewModel:)`,
-   `AutomationLogView(viewModel:)`, `ClientsView(viewModel:)`, and
-   `CourseView(viewModel:)`. A Task
+   `AutomationLogView(viewModel:)`, `ClientsView(viewModel:)`,
+   `CourseView(viewModel:)`, `TimeEntriesView(viewModel:)`, and
+   `TimerView(viewModel:)` (the last two share one
+   `URLSessionTimeEntriesAPIClient` between a `TimeEntriesViewModel` and a
+   `TimerViewModel`). A Task
    or Project's Deadline is set/cleared from its own create/edit form in
    `TasksView`/`ProjectsView` — the Deadlines screen is a read-only sorted
    view of both. Each Commitment's sync status (pushed to CalDAV, or
@@ -228,7 +250,18 @@ environment. To use it:
    the top-level Tasks screen uses (just scoped to that Course), rather than
    a separate, duplicated implementation. `DeadlinesView`'s row glyph now has
    a third case (`"graduationcap"`) for a Course's own Deadline, alongside
-   the existing Task/Project glyphs.
+   the existing Task/Project glyphs. `TimeEntriesView` (ticket #27) lists
+   Time Entries with add/edit/delete via `TimeEntryFormSheet`, a container
+   picker with the same "pick one, clears the other three" shape as
+   `TaskFormSheet`'s Project/Course pair; a row with no `endDate` yet (a
+   running timer — ticket #28) shows a "Running" label, and editing one
+   defaults its end-time field to "now" rather than crashing on a nil value.
+   `TimerView` (ticket #28) is a separate, minimal control — the currently
+   running timer (what it's attached to, and since when) with Stop/Cancel
+   buttons, or a container picker and Start button when none is running —
+   backed by its own `TimerViewModel`, constructed from the same
+   `URLSessionTimeEntriesAPIClient` plus the four picker-data clients
+   `TimeEntriesViewModel` already takes.
 4. `CalendarView` merges Personal Commitments and mirrored external Calendar
    events (populated by the backend's recurring sync job — see "Calendar
    sync" above) into one chronological list. A mirrored event shows a lock
@@ -251,6 +284,7 @@ throughout their targets. The domain term "Task" is what appears in the API
 paths/JSON and the UI text.
 
 It has been verified with `swift build --target PCCUI` (type-checks and links,
-including the ticket #18 Sprint UI, the ticket #19 Course screen, and the
-ticket #20 Task↔Course picker plus `CourseDetailView`'s Tasks section) but
-not run in a simulator or on-device.
+including the ticket #18 Sprint UI, the ticket #19 Course screen, the
+ticket #20 Task↔Course picker plus `CourseDetailView`'s Tasks section, the
+ticket #27 Time Entries screen, and the ticket #28 `TimerView` live-timer
+control) but not run in a simulator or on-device.

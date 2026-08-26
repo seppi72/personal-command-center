@@ -7,7 +7,9 @@ import Foundation
 public struct TimeEntry: Codable, Identifiable, Equatable, Sendable {
     public let id: UUID
     public var startDate: Date
-    public var endDate: Date
+    /// `nil` while this Time Entry is a running live timer (ticket #28) —
+    /// see `isRunning`.
+    public var endDate: Date?
     public var notes: String?
     public var taskID: UUID?
     public var projectID: UUID?
@@ -17,7 +19,7 @@ public struct TimeEntry: Codable, Identifiable, Equatable, Sendable {
     public init(
         id: UUID,
         startDate: Date,
-        endDate: Date,
+        endDate: Date? = nil,
         notes: String? = nil,
         taskID: UUID? = nil,
         projectID: UUID? = nil,
@@ -33,4 +35,8 @@ public struct TimeEntry: Codable, Identifiable, Equatable, Sendable {
         self.clientID = clientID
         self.courseID = courseID
     }
+
+    /// `true` while this Time Entry is an in-progress live timer (ticket
+    /// #28) — no `endDate` yet.
+    public var isRunning: Bool { endDate == nil }
 }

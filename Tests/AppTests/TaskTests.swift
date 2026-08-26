@@ -17,6 +17,7 @@ extension AppTestSuite {
                 try await configure(app)
             }) { app in
                 let result = try await test(app)
+                try await TimeEntry.query(on: app.db).delete()
                 try await PCCTask.query(on: app.db).delete()
                 try await Project.query(on: app.db).delete()
                 try await Course.query(on: app.db).delete()
@@ -210,6 +211,30 @@ extension AppTestSuite {
                         #expect(res.status == .notFound)
                     }
                 )
+            }
+        }
+
+        @Test("rejects deleting a Task a Time Entry still references")
+        func deletingTaskWithReferencingTimeEntryFails() async throws {
+            try await withTasksApp { app in
+                let task = PCCTask(title: "Referenced")
+                try await task.save(on: app.db)
+                let id = try task.requireID()
+                let start = Date(timeIntervalSince1970: 1_800_000_000)
+                try await TimeEntry(
+                    startDate: start, endDate: start.addingTimeInterval(3600), container: .task(id)
+                ).save(on: app.db)
+
+                try await app.testing().test(
+                    .DELETE, "/v1/tasks/\(id)",
+                    headers: authHeaders(),
+                    afterResponse: { res async in
+                        #expect(res.status == .badRequest)
+                    }
+                )
+
+                let stored = try await PCCTask.find(id, on: app.db)
+                #expect(stored != nil)
             }
         }
 

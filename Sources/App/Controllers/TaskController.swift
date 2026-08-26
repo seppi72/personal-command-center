@@ -121,8 +121,20 @@ struct TaskController: RouteCollection {
         guard let task = try await findTask(req: req) else {
             throw Abort(.notFound)
         }
+        try await Self.verifyNoReferencingTimeEntries(taskID: try task.requireID(), req: req)
         try await task.delete(on: req.db)
         return .noContent
+    }
+
+    /// Ticket #29: a Task can't be deleted while any Time Entry still
+    /// references it — the owner must reassign or delete those Time
+    /// Entries first, rather than the delete either orphaning the Time
+    /// Entry or silently taking it with it. Mirrors `ProjectController`/
+    /// `ClientController`/`CourseController`'s identical check.
+    private static func verifyNoReferencingTimeEntries(taskID: UUID, req: Request) async throws {
+        guard try await TimeEntry.query(on: req.db).filter(\.$task.$id == taskID).first() == nil else {
+            throw Abort(.badRequest, reason: "cannot delete a Task with Time Entries attached")
+        }
     }
 
     func markComplete(req: Request) async throws -> TaskResponse {

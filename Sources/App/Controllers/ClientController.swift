@@ -72,8 +72,17 @@ struct ClientController: RouteCollection {
         guard let client = try await findClient(req: req) else {
             throw Abort(.notFound)
         }
+        try await Self.verifyNoReferencingTimeEntries(clientID: try client.requireID(), req: req)
         try await client.delete(on: req.db)
         return .noContent
+    }
+
+    /// Ticket #29: a Client can't be deleted while any Time Entry still
+    /// references it — mirrors `TaskController`'s identical check.
+    private static func verifyNoReferencingTimeEntries(clientID: UUID, req: Request) async throws {
+        guard try await TimeEntry.query(on: req.db).filter(\.$client.$id == clientID).first() == nil else {
+            throw Abort(.badRequest, reason: "cannot delete a Client with Time Entries attached")
+        }
     }
 
     private func findClient(req: Request) async throws -> PCCClient? {
