@@ -8,10 +8,10 @@ import Vapor
 /// for its own `subjectType`/`subjectID`, chosen over a Fluent `@Enum` since
 /// the set of source types will keep growing (an overdue Task/Project/Course
 /// today, more later). Rows are created automatically by
-/// `NotificationScanService` (ticket #47, an overdue-Deadline scan) and,
-/// once ticket #48 lands, by `CalendarSyncService` on an Automation Log
-/// failure — this model and `NotificationController` are just the shared
-/// storage and read/dismiss surface underneath both.
+/// `NotificationScanService` (ticket #47, an overdue-Deadline scan) and by
+/// `CalendarSyncService` on an Automation Log failure (ticket #48) — this
+/// model and `NotificationController` are just the shared storage and
+/// read/dismiss surface underneath both.
 ///
 /// Named `PCCNotification` in Swift only: an unqualified `Notification`
 /// collides with Foundation's own `Notification`/`NotificationCenter` types,

@@ -194,6 +194,34 @@ struct CalendarSyncService {
             try await entry.save(on: db)
         } catch {
             logger.warning("Failed to write AutomationLog entry for \(action) on \(subjectType) \(subjectID): \(error)")
+            return
+        }
+
+        guard outcome == .failure else { return }
+        await notifyOfFailure(entry)
+    }
+
+    /// Ticket #48: every `AutomationLog` row logged with a `.failure`
+    /// outcome — whatever the path (a push, a delete, or a pull) — opens a
+    /// `PCCNotification` pointing at that row (`sourceType: "AutomationLog"`,
+    /// `sourceID` its own id), inline and synchronous with the log write
+    /// itself, so a broken sync doesn't sit unnoticed between occasional
+    /// checks of the Automation Log view. Deliberately undeduped, unlike
+    /// the overdue-Deadline scan (`NotificationScanService`, ticket #47):
+    /// every distinct failure opens its own new row regardless of past
+    /// dismissals, so a second, unrelated sync failure isn't silently
+    /// swallowed just because an earlier one was already dismissed.
+    private func notifyOfFailure(_ entry: AutomationLog) async {
+        guard let entryID = try? entry.requireID() else { return }
+        let notification = PCCNotification(
+            sourceType: "AutomationLog",
+            sourceID: entryID,
+            message: entry.detail
+        )
+        do {
+            try await notification.save(on: db)
+        } catch {
+            logger.warning("Failed to write Notification for AutomationLog failure \(entryID): \(error)")
         }
     }
 }
