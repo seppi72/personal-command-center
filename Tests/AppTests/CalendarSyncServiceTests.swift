@@ -13,7 +13,9 @@ import VaporTesting
 /// so these tests call the Service methods the job itself calls, the same
 /// way `startCalendarSyncSchedule` would.
 // Serialized: shares `personal_commitments`/`automation_logs` with
-// `PersonalCommitmentTests`, and owns `mirrored_calendar_events`.
+// `PersonalCommitmentTests`, owns `mirrored_calendar_events`, and shares
+// `notifications` with `NotificationTests` (ticket #48's
+// Automation-Log-failure hook, tested below).
 extension AppTestSuite {
     @Suite("CalendarSyncService", .serialized)
     struct CalendarSyncServiceTests {
@@ -31,6 +33,7 @@ extension AppTestSuite {
                 try await AutomationLog.query(on: app.db).delete()
                 try await PersonalCommitment.query(on: app.db).delete()
                 try await MirroredCalendarEvent.query(on: app.db).delete()
+                try await PCCNotification.query(on: app.db).delete()
                 return result
             }
         }
@@ -41,6 +44,10 @@ extension AppTestSuite {
 
         private func logs(on app: Application, subjectType: String) async throws -> [AutomationLog] {
             try await AutomationLog.query(on: app.db).all().filter { $0.subjectType == subjectType }
+        }
+
+        private func automationLogNotifications(on app: Application) async throws -> [PCCNotification] {
+            try await PCCNotification.query(on: app.db).all().filter { $0.sourceType == "AutomationLog" }
         }
 
         // MARK: - pull
@@ -270,6 +277,116 @@ extension AppTestSuite {
                 let calls = await caldav.calls
                 #expect(calls.contains(.fetch))
                 #expect(calls.contains { if case .upsert = $0 { return true } else { return false } })
+            }
+        }
+
+        // MARK: - Notification on failure (ticket #48)
+
+        @Test("a CalDAV push failure creates an AutomationLog entry and a corresponding Notification")
+        func pushFailureCreatesNotification() async throws {
+            let caldav = FakeCalDAVClient(failureToThrow: CalDAVClientError.serverError(status: 503))
+            try await withSyncApp(caldav: caldav) { app, caldav in
+                let commitment = PersonalCommitment(
+                    title: "Doctor",
+                    startDate: Date(timeIntervalSince1970: 1_800_000_000),
+                    endDate: Date(timeIntervalSince1970: 1_800_003_600)
+                )
+                try await commitment.save(on: app.db)
+
+                await syncService(app, caldav: caldav).push(commitment, action: "personal_commitment.create")
+
+                let entries = try await logs(on: app, subjectType: "PersonalCommitment")
+                #expect(entries.count == 1)
+                #expect(entries.first?.outcome == .failure)
+
+                let notifications = try await automationLogNotifications(on: app)
+                #expect(notifications.count == 1)
+                #expect(notifications.first?.sourceID == entries.first?.id)
+                #expect(notifications.first?.isDismissed == false)
+                #expect(notifications.first?.message == entries.first?.detail)
+            }
+        }
+
+        @Test("a successful CalDAV push creates no Notification")
+        func successfulPushCreatesNoNotification() async throws {
+            try await withSyncApp { app, caldav in
+                let commitment = PersonalCommitment(
+                    title: "Doctor",
+                    startDate: Date(timeIntervalSince1970: 1_800_000_000),
+                    endDate: Date(timeIntervalSince1970: 1_800_003_600)
+                )
+                try await commitment.save(on: app.db)
+
+                await syncService(app, caldav: caldav).push(commitment, action: "personal_commitment.create")
+
+                let entries = try await logs(on: app, subjectType: "PersonalCommitment")
+                #expect(entries.first?.outcome == .success)
+                #expect(try await automationLogNotifications(on: app).isEmpty)
+            }
+        }
+
+        @Test("a CalDAV delete failure creates an AutomationLog entry and a corresponding Notification")
+        func removeFailureCreatesNotification() async throws {
+            let caldav = FakeCalDAVClient(failureToThrow: CalDAVClientError.serverError(status: 503))
+            try await withSyncApp(caldav: caldav) { app, caldav in
+                let commitment = PersonalCommitment(
+                    title: "Doctor",
+                    startDate: Date(timeIntervalSince1970: 1_800_000_000),
+                    endDate: Date(timeIntervalSince1970: 1_800_003_600)
+                )
+                try await commitment.save(on: app.db)
+
+                await syncService(app, caldav: caldav).remove(commitment, action: "personal_commitment.delete")
+
+                let entries = try await logs(on: app, subjectType: "PersonalCommitment")
+                #expect(entries.count == 1)
+                #expect(entries.first?.outcome == .failure)
+
+                let notifications = try await automationLogNotifications(on: app)
+                #expect(notifications.count == 1)
+                #expect(notifications.first?.sourceID == entries.first?.id)
+            }
+        }
+
+        @Test("a CalDAV pull failure creates an AutomationLog entry and a corresponding Notification")
+        func pullFailureCreatesNotification() async throws {
+            let caldav = FakeCalDAVClient(failureToThrow: CalDAVClientError.serverError(status: 503))
+            try await withSyncApp(caldav: caldav) { app, caldav in
+                await syncService(app, caldav: caldav).pull()
+
+                let entries = try await logs(on: app, subjectType: "CalendarSync")
+                #expect(entries.count == 1)
+                #expect(entries.first?.outcome == .failure)
+
+                let notifications = try await automationLogNotifications(on: app)
+                #expect(notifications.count == 1)
+                #expect(notifications.first?.sourceID == entries.first?.id)
+            }
+        }
+
+        @Test("a second, distinct failure creates a second Notification even after the first was dismissed")
+        func secondDistinctFailureCreatesItsOwnNotification() async throws {
+            let caldav = FakeCalDAVClient(failureToThrow: CalDAVClientError.serverError(status: 503))
+            try await withSyncApp(caldav: caldav) { app, caldav in
+                let service = syncService(app, caldav: caldav)
+                await service.pull()
+
+                let first = try await automationLogNotifications(on: app).first!
+                first.isDismissed = true
+                try await first.save(on: app.db)
+
+                await service.pull()
+
+                // Unlike the overdue-Deadline scan (ticket #47), a failure
+                // Notification is never deduped against past dismissals —
+                // every distinct failure gets its own new row.
+                let notifications = try await automationLogNotifications(on: app)
+                #expect(notifications.count == 2)
+                #expect(notifications.filter { !$0.isDismissed }.count == 1)
+
+                let entries = try await logs(on: app, subjectType: "CalendarSync")
+                #expect(entries.count == 2)
+                #expect(Set(notifications.map(\.sourceID)) == Set(entries.compactMap(\.id)))
             }
         }
     }
