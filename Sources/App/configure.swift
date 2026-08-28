@@ -95,5 +95,13 @@ public func configure(_ app: Application) async throws {
         startCalendarSyncSchedule(app, interval: .seconds(intervalSeconds))
     }
 
+    // The recurring overdue-Deadline Notification scan (ticket #47) doesn't
+    // run during tests either — see `startNotificationScanSchedule`'s doc
+    // comment for why.
+    if app.environment != .testing {
+        let intervalSeconds = Environment.get("NOTIFICATION_SCAN_INTERVAL_SECONDS").flatMap(Int.init) ?? 300
+        startNotificationScanSchedule(app, interval: .seconds(intervalSeconds))
+    }
+
     try routes(app)
 }
