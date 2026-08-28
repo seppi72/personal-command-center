@@ -52,6 +52,7 @@ public func configure(_ app: Application) async throws {
     app.migrations.add(CreateCategory())
     app.migrations.add(CreateSubcategory())
     app.migrations.add(AddCategoryToTransaction())
+    app.migrations.add(CreateNotification())
     try await app.autoMigrate()
 
     let validTokens = Set(

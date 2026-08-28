@@ -19,4 +19,5 @@ func routes(_ app: Application) throws {
     try v1.register(collection: CategoryController())
     try v1.register(collection: SubcategoryController())
     try v1.register(collection: FinancesReportingController())
+    try v1.register(collection: NotificationController())
 }
