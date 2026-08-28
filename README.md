@@ -441,8 +441,9 @@ SwiftUI's `Charts` framework) but not run in a simulator or on-device.
 
 `Sources/PCCDesktop` is a dev-only Mac preview app, separate from the real
 Mac/iOS app targets described above — a plain `.executableTarget` (see
-Package.swift) that composes every `PCCUI` screen into one `TabView` window
-and runs via `swift run`/`swift build --product PCCDesktop`. SwiftUI's `App`
+Package.swift) that composes every `PCCUI` screen into one `NavigationSplitView`
+window — a sidebar listing every screen, with the selected one in the detail
+pane — and runs via `swift run`/`swift build --product PCCDesktop`. SwiftUI's `App`
 protocol works fine as a bare SPM executable against the macOS SDK the
 Command Line Tools already ship, with no Xcode.app installation required —
 just no app icon, and it can't run on the iOS Simulator (that specifically

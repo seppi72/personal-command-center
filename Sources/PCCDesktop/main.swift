@@ -39,88 +39,123 @@ let subcategoriesClient = URLSessionSubcategoriesAPIClient(baseURL: baseURL, bea
 let financesReportingClient = URLSessionFinancesReportingAPIClient(baseURL: baseURL, bearerToken: bearerToken)
 let notificationsClient = URLSessionNotificationsAPIClient(baseURL: baseURL, bearerToken: bearerToken)
 
-struct DashboardView: View {
-    var body: some View {
-        TabView {
-            ProjectsView(
-                viewModel: ProjectsViewModel(
-                    client: projectsClient, clientsClient: clientsClient, sprintsClient: sprintsClient)
-            )
-            .tabItem { Label("Projects", systemImage: "folder") }
+// One instance per screen's view model, constructed once here (rather than
+// inline in `DashboardView.body`) so switching the sidebar selection
+// doesn't rebuild — and re-fetch, and lose scroll/sheet state for — the
+// screen you're navigating away from. Top-level code in `main.swift` runs
+// on the main actor, same as these `@MainActor` view models require.
+let projectsViewModel = ProjectsViewModel(client: projectsClient, clientsClient: clientsClient, sprintsClient: sprintsClient)
+let tasksViewModel = TasksViewModel(tasksClient: tasksClient, projectsClient: projectsClient, coursesClient: coursesClient)
+let deadlinesViewModel = DeadlinesViewModel(client: deadlinesClient)
+let calendarViewModel = CalendarViewModel(
+    commitmentsClient: personalCommitmentsClient, mirroredEventsClient: mirroredCalendarEventsClient)
+let personalCommitmentsViewModel = PersonalCommitmentsViewModel(client: personalCommitmentsClient)
+let clientsViewModel = ClientsViewModel(client: clientsClient)
+let coursesViewModel = CoursesViewModel(client: coursesClient, tasksClient: tasksClient, projectsClient: projectsClient)
+let timeEntriesViewModel = TimeEntriesViewModel(
+    timeEntriesClient: timeEntriesClient, tasksClient: tasksClient, projectsClient: projectsClient,
+    clientsClient: clientsClient, coursesClient: coursesClient)
+let timerViewModel = TimerViewModel(
+    timeEntriesClient: timeEntriesClient, tasksClient: tasksClient, projectsClient: projectsClient,
+    clientsClient: clientsClient, coursesClient: coursesClient)
+let workHoursViewModel = WorkHoursViewModel(client: workHoursClient)
+let accountsViewModel = AccountsViewModel(client: accountsClient)
+let transactionsViewModel = TransactionsViewModel(
+    transactionsClient: transactionsClient, accountsClient: accountsClient,
+    categoriesClient: categoriesClient, subcategoriesClient: subcategoriesClient)
+let categoriesViewModel = CategoriesViewModel(client: categoriesClient, subcategoriesClient: subcategoriesClient)
+let financesReportingViewModel = FinancesReportingViewModel(
+    reportingClient: financesReportingClient, accountsClient: accountsClient)
+let notificationsViewModel = NotificationsViewModel(client: notificationsClient)
+let automationLogViewModel = AutomationLogViewModel(client: automationLogsClient)
 
-            TasksView(
-                viewModel: TasksViewModel(
-                    tasksClient: tasksClient, projectsClient: projectsClient, coursesClient: coursesClient)
-            )
-            .tabItem { Label("Tasks", systemImage: "checkmark.circle") }
+/// One case per sidebar row. `CaseIterable` order is display order.
+enum Screen: String, CaseIterable, Identifiable {
+    case projects, tasks, deadlines, calendar, commitments, clients, courses
+    case timeEntries, timer, workHours, accounts, transactions, categories
+    case financesReporting, notifications, automationLog
 
-            DeadlinesView(viewModel: DeadlinesViewModel(client: deadlinesClient))
-                .tabItem { Label("Deadlines", systemImage: "clock") }
+    var id: String { rawValue }
 
-            CalendarView(
-                viewModel: CalendarViewModel(
-                    commitmentsClient: personalCommitmentsClient,
-                    mirroredEventsClient: mirroredCalendarEventsClient)
-            )
-            .tabItem { Label("Calendar", systemImage: "calendar") }
-
-            PersonalCommitmentsView(viewModel: PersonalCommitmentsViewModel(client: personalCommitmentsClient))
-                .tabItem { Label("Commitments", systemImage: "person.crop.circle") }
-
-            ClientsView(viewModel: ClientsViewModel(client: clientsClient))
-                .tabItem { Label("Clients", systemImage: "building.2") }
-
-            CourseView(
-                viewModel: CoursesViewModel(
-                    client: coursesClient, tasksClient: tasksClient, projectsClient: projectsClient)
-            )
-            .tabItem { Label("Courses", systemImage: "graduationcap") }
-
-            TimeEntriesView(
-                viewModel: TimeEntriesViewModel(
-                    timeEntriesClient: timeEntriesClient, tasksClient: tasksClient,
-                    projectsClient: projectsClient, clientsClient: clientsClient, coursesClient: coursesClient)
-            )
-            .tabItem { Label("Time Entries", systemImage: "stopwatch") }
-
-            TimerView(
-                viewModel: TimerViewModel(
-                    timeEntriesClient: timeEntriesClient, tasksClient: tasksClient,
-                    projectsClient: projectsClient, clientsClient: clientsClient, coursesClient: coursesClient)
-            )
-            .tabItem { Label("Timer", systemImage: "play.circle") }
-
-            WorkHoursView(viewModel: WorkHoursViewModel(client: workHoursClient))
-                .tabItem { Label("Work Hours", systemImage: "hourglass") }
-
-            AccountsView(viewModel: AccountsViewModel(client: accountsClient))
-                .tabItem { Label("Accounts", systemImage: "dollarsign.circle") }
-
-            TransactionsView(
-                viewModel: TransactionsViewModel(
-                    transactionsClient: transactionsClient, accountsClient: accountsClient,
-                    categoriesClient: categoriesClient, subcategoriesClient: subcategoriesClient)
-            )
-            .tabItem { Label("Transactions", systemImage: "creditcard") }
-
-            CategoriesView(
-                viewModel: CategoriesViewModel(client: categoriesClient, subcategoriesClient: subcategoriesClient)
-            )
-            .tabItem { Label("Categories", systemImage: "tag") }
-
-            FinancesReportingView(
-                viewModel: FinancesReportingViewModel(
-                    reportingClient: financesReportingClient, accountsClient: accountsClient)
-            )
-            .tabItem { Label("Finances", systemImage: "chart.line.uptrend.xyaxis") }
-
-            NotificationsView(viewModel: NotificationsViewModel(client: notificationsClient))
-                .tabItem { Label("Notifications", systemImage: "bell") }
-
-            AutomationLogView(viewModel: AutomationLogViewModel(client: automationLogsClient))
-                .tabItem { Label("Automation Log", systemImage: "list.bullet.rectangle") }
+    var title: String {
+        switch self {
+        case .projects: "Projects"
+        case .tasks: "Tasks"
+        case .deadlines: "Deadlines"
+        case .calendar: "Calendar"
+        case .commitments: "Commitments"
+        case .clients: "Clients"
+        case .courses: "Courses"
+        case .timeEntries: "Time Entries"
+        case .timer: "Timer"
+        case .workHours: "Work Hours"
+        case .accounts: "Accounts"
+        case .transactions: "Transactions"
+        case .categories: "Categories"
+        case .financesReporting: "Finances"
+        case .notifications: "Notifications"
+        case .automationLog: "Automation Log"
         }
-        .frame(minWidth: 900, minHeight: 600)
+    }
+
+    var systemImage: String {
+        switch self {
+        case .projects: "folder"
+        case .tasks: "checkmark.circle"
+        case .deadlines: "clock"
+        case .calendar: "calendar"
+        case .commitments: "person.crop.circle"
+        case .clients: "building.2"
+        case .courses: "graduationcap"
+        case .timeEntries: "stopwatch"
+        case .timer: "play.circle"
+        case .workHours: "hourglass"
+        case .accounts: "dollarsign.circle"
+        case .transactions: "creditcard"
+        case .categories: "tag"
+        case .financesReporting: "chart.line.uptrend.xyaxis"
+        case .notifications: "bell"
+        case .automationLog: "list.bullet.rectangle"
+        }
+    }
+}
+
+struct DashboardView: View {
+    @State private var selection: Screen? = .projects
+
+    var body: some View {
+        NavigationSplitView {
+            List(Screen.allCases, selection: $selection) { screen in
+                Label(screen.title, systemImage: screen.systemImage)
+                    .tag(screen)
+            }
+            .navigationTitle("Personal Command Center")
+        } detail: {
+            detail(for: selection ?? .projects)
+        }
+        .frame(minWidth: 1000, minHeight: 650)
+    }
+
+    @ViewBuilder
+    private func detail(for screen: Screen) -> some View {
+        switch screen {
+        case .projects: ProjectsView(viewModel: projectsViewModel)
+        case .tasks: TasksView(viewModel: tasksViewModel)
+        case .deadlines: DeadlinesView(viewModel: deadlinesViewModel)
+        case .calendar: CalendarView(viewModel: calendarViewModel)
+        case .commitments: PersonalCommitmentsView(viewModel: personalCommitmentsViewModel)
+        case .clients: ClientsView(viewModel: clientsViewModel)
+        case .courses: CourseView(viewModel: coursesViewModel)
+        case .timeEntries: TimeEntriesView(viewModel: timeEntriesViewModel)
+        case .timer: TimerView(viewModel: timerViewModel)
+        case .workHours: WorkHoursView(viewModel: workHoursViewModel)
+        case .accounts: AccountsView(viewModel: accountsViewModel)
+        case .transactions: TransactionsView(viewModel: transactionsViewModel)
+        case .categories: CategoriesView(viewModel: categoriesViewModel)
+        case .financesReporting: FinancesReportingView(viewModel: financesReportingViewModel)
+        case .notifications: NotificationsView(viewModel: notificationsViewModel)
+        case .automationLog: AutomationLogView(viewModel: automationLogViewModel)
+        }
     }
 }
 
