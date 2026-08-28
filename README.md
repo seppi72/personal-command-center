@@ -436,3 +436,33 @@ control, the ticket #25 `WorkHoursView` rollup screen, the ticket #39
 Categories/Subcategories screens plus `TransactionFormSheet`'s new pickers,
 and the ticket #40 `FinancesReportingView` screen, `PCCUI`'s first use of
 SwiftUI's `Charts` framework) but not run in a simulator or on-device.
+
+### Local dashboard preview (no Xcode)
+
+`Sources/PCCDesktop` is a dev-only Mac preview app, separate from the real
+Mac/iOS app targets described above — a plain `.executableTarget` (see
+Package.swift) that composes every `PCCUI` screen into one `TabView` window
+and runs via `swift run`/`swift build --product PCCDesktop`. SwiftUI's `App`
+protocol works fine as a bare SPM executable against the macOS SDK the
+Command Line Tools already ship, with no Xcode.app installation required —
+just no app icon, and it can't run on the iOS Simulator (that specifically
+needs `xcrun simctl`, part of full Xcode). It reads `PCC_BASE_URL` (default
+`http://127.0.0.1:8080`) and `PCC_AUTH_TOKEN` (default `mac-token`, must be
+one of the backend's `AUTH_TOKENS` values) from the environment.
+
+To view it with the backend running (`swift run App serve`, see "Local
+setup" above), either run the binary directly:
+
+```sh
+swift build --product PCCDesktop && .build/debug/PCCDesktop
+```
+
+or use `scripts/dev-dashboard.sh`, which watches `Sources/PCCUI` and
+`Sources/PCCDesktop` and rebuilds + relaunches the app window on every
+save — not a true hot-swap (each change is a fresh process launch, so
+in-window state resets), but a save-and-see-it loop of a few seconds with
+nothing to install:
+
+```sh
+PCC_AUTH_TOKEN=mac-token ./scripts/dev-dashboard.sh
+```
