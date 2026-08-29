@@ -3,9 +3,10 @@ import Foundation
 /// Talks to the backend's Finances Reporting endpoints (see
 /// `Sources/App/Controllers/FinancesReportingController.swift`) — Net Worth
 /// (current figure + trend), Account Balance history, expense-per-day, and
-/// Projected Balance (`CONTEXT.md`). A protocol so the view model can be
-/// exercised against a fake in previews/manual testing without a running
-/// backend, the same seam every other `PCCUI` API client already has.
+/// Projected Balance (`CONTEXT.md`). A protocol so a different
+/// implementation could stand in during previews/manual testing without a
+/// running backend — no such fake exists in this package yet, but the seam
+/// is here for one.
 public protocol FinancesReportingAPIClient: Sendable {
     /// The current Net Worth figure, computed live.
     func fetchCurrentNetWorth() async throws -> Double
@@ -27,105 +28,69 @@ public enum FinancesReportingAPIClientError: Error {
 
 /// The real client: same bearer-token auth as every other route
 /// (`BearerTokenAuthMiddleware`) — one token per device, issued out of band.
+/// Transport (request construction, encoding/decoding, status validation) is
+/// `PCCHTTPTransport`'s; this struct owns only its own endpoints and payload
+/// shapes.
 public struct URLSessionFinancesReportingAPIClient: FinancesReportingAPIClient {
-    private let baseURL: URL
-    private let bearerToken: String
-    private let session: URLSession
-    private let decoder: JSONDecoder
+    private let transport: PCCHTTPTransport
 
     public init(baseURL: URL, bearerToken: String, session: URLSession = .shared) {
-        self.baseURL = baseURL
-        self.bearerToken = bearerToken
-        self.session = session
-        self.decoder = JSONDecoder()
-        // Matches the backend's `ContentConfiguration` (Vapor's default),
-        // which encodes/decodes a JSON body's `Date` as an ISO 8601 string
-        // rather than `JSONDecoder`'s own default of seconds-since-1970.
-        self.decoder.dateDecodingStrategy = .iso8601
+        self.transport = PCCHTTPTransport(baseURL: baseURL, bearerToken: bearerToken, session: session)
     }
 
     public func fetchCurrentNetWorth() async throws -> Double {
-        let request = makeRequest(path: "v1/net-worth")
+        let request = try makeRequest(path: "v1/net-worth", method: "GET")
         let response: NetWorthPayload = try await send(request)
         return response.netWorth
     }
 
     public func fetchNetWorthTrend(start: Date, end: Date) async throws -> [DailyFigure] {
-        let request = try makeRangeRequest(path: "v1/net-worth/trend", start: start, end: end)
-        return try await send(request)
+        try await send(makeRangeRequest(path: "v1/net-worth/trend", start: start, end: end))
     }
 
     public func fetchAccountBalanceHistory(accountID: UUID, start: Date, end: Date) async throws -> [DailyFigure] {
-        let request = try makeRangeRequest(path: "v1/accounts/\(accountID)/balance-history", start: start, end: end)
-        return try await send(request)
+        try await send(makeRangeRequest(path: "v1/accounts/\(accountID)/balance-history", start: start, end: end))
     }
 
     public func fetchExpensesPerDay(start: Date, end: Date) async throws -> [ExpensesPerDayRow] {
-        let request = try makeRangeRequest(path: "v1/expenses-per-day", start: start, end: end)
-        return try await send(request)
+        try await send(makeRangeRequest(path: "v1/expenses-per-day", start: start, end: end))
     }
 
     public func fetchProjectedBalance(accountID: UUID, period: ProjectedBalancePeriod) async throws -> ProjectedBalance {
-        var components = URLComponents(
-            url: baseURL.appendingPathComponent("v1/accounts/\(accountID)/projected-balance"),
-            resolvingAgainstBaseURL: false
+        let request = try makeRequest(
+            path: "v1/accounts/\(accountID)/projected-balance",
+            method: "GET",
+            query: ["period": .string(period.rawValue)]
         )
-        components?.queryItems = [URLQueryItem(name: "period", value: period.rawValue)]
-        guard let url = components?.url else {
-            throw FinancesReportingAPIClientError.unexpectedResponse
-        }
-        return try await send(makeRequest(url: url))
+        return try await send(request)
     }
 
     private struct NetWorthPayload: Decodable {
         let netWorth: Double
     }
 
-    /// `start`/`end` are formatted as plain ISO 8601 strings via
-    /// `URLComponents`/`URLQueryItem`, not left to `URLQueryItem`'s own
-    /// `Date` handling — same `WorkHoursController.validatedRange` reasoning
-    /// this client shares with `URLSessionWorkHoursAPIClient`:
-    /// `FinancesReportingController.validatedRange` parses the query string
-    /// by hand with `ISO8601DateFormatter`, not Vapor's query decoder's own
-    /// seconds-since-1970 default. `appendingPathComponent` alone (used for
-    /// a plain path elsewhere in this client) percent-escapes "?", so a query
-    /// string needs `URLComponents` instead.
+    /// `start`/`end` are sent as plain ISO 8601 strings (`PCCHTTPTransport`'s
+    /// `.date` query value) — matching `FinancesReportingController.validatedRange`'s
+    /// own hand-parsed query-date format, the same reasoning
+    /// `WorkHoursController.validatedRange`/`URLSessionWorkHoursAPIClient`
+    /// share.
     private func makeRangeRequest(path: String, start: Date, end: Date) throws -> URLRequest {
-        // Built locally rather than stored on `self` — `ISO8601DateFormatter`
-        // doesn't conform to `Sendable` (same reasoning
-        // `URLSessionWorkHoursAPIClient.fetchWorkHours` already has for its
-        // own local formatter), which a stored property on this
-        // `Sendable`-conforming struct can't hold.
-        let formatter = ISO8601DateFormatter()
-        var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)
-        components?.queryItems = [
-            URLQueryItem(name: "start", value: formatter.string(from: start)),
-            URLQueryItem(name: "end", value: formatter.string(from: end)),
-        ]
-        guard let url = components?.url else {
-            throw FinancesReportingAPIClientError.unexpectedResponse
-        }
-        return makeRequest(url: url)
+        try makeRequest(path: path, method: "GET", query: ["start": .date(start), "end": .date(end)])
+    }
+
+    private func makeRequest(
+        path: String,
+        method: String,
+        query: [String: PCCHTTPTransport.QueryValue?] = [:]
+    ) throws -> URLRequest {
+        try transport.makeRequest(path: path, method: method, query: query)
     }
 
     private func send<Response: Decodable>(_ request: URLRequest) async throws -> Response {
-        let (data, response) = try await session.data(for: request)
-        try HTTPResponseValidation.checkStatus(
-            response,
+        try await transport.send(
+            request,
             unexpectedResponse: FinancesReportingAPIClientError.unexpectedResponse,
             serverError: FinancesReportingAPIClientError.serverError
         )
-        return try decoder.decode(Response.self, from: data)
-    }
-
-    private func makeRequest(path: String) -> URLRequest {
-        makeRequest(url: baseURL.appendingPathComponent(path))
-    }
-
-    private func makeRequest(url: URL) -> URLRequest {
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
-        return request
     }
 }

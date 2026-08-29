@@ -1,9 +1,10 @@
 import Foundation
 
 /// Talks to the backend's read-only `/v1/automation-logs` endpoint (see
-/// `Sources/App/Controllers/AutomationLogController.swift`). A protocol so
-/// the view model can be exercised against a fake in previews/manual testing
-/// without a running backend. No create/update/delete methods — the log
+/// `Sources/App/Controllers/AutomationLogController.swift`). A protocol so a
+/// different implementation could stand in during previews/manual testing
+/// without a running backend — no such fake exists in this package yet, but
+/// the seam is here for one. No create/update/delete methods — the log
 /// isn't owner-editable.
 public protocol AutomationLogsAPIClient: Sendable {
     func listAutomationLogs() async throws -> AutomationLogsPage
@@ -16,33 +17,34 @@ public enum AutomationLogsAPIClientError: Error {
 
 /// The real client: same bearer-token auth as every other route
 /// (`BearerTokenAuthMiddleware`) — one token per device, issued out of band.
+/// Transport (request construction, encoding/decoding, status validation) is
+/// `PCCHTTPTransport`'s; this struct owns only its own endpoints and payload
+/// shapes.
 public struct URLSessionAutomationLogsAPIClient: AutomationLogsAPIClient {
-    private let baseURL: URL
-    private let bearerToken: String
-    private let session: URLSession
-    private let decoder: JSONDecoder
+    private let transport: PCCHTTPTransport
 
     public init(baseURL: URL, bearerToken: String, session: URLSession = .shared) {
-        self.baseURL = baseURL
-        self.bearerToken = bearerToken
-        self.session = session
-        self.decoder = JSONDecoder()
-        // Matches the backend's `ContentConfiguration` (Vapor's default),
-        // which encodes/decodes `Date` as an ISO 8601 string rather than
-        // `JSONDecoder`'s own default of seconds-since-1970.
-        self.decoder.dateDecodingStrategy = .iso8601
+        self.transport = PCCHTTPTransport(baseURL: baseURL, bearerToken: bearerToken, session: session)
     }
 
     public func listAutomationLogs() async throws -> AutomationLogsPage {
-        var request = URLRequest(url: baseURL.appendingPathComponent("v1/automation-logs"))
-        request.httpMethod = "GET"
-        request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await session.data(for: request)
-        try HTTPResponseValidation.checkStatus(
-            response,
+        let request = try makeRequest(path: "v1/automation-logs", method: "GET")
+        return try await send(request)
+    }
+
+    private func makeRequest(
+        path: String,
+        method: String,
+        query: [String: PCCHTTPTransport.QueryValue?] = [:]
+    ) throws -> URLRequest {
+        try transport.makeRequest(path: path, method: method, query: query)
+    }
+
+    private func send<Response: Decodable>(_ request: URLRequest) async throws -> Response {
+        try await transport.send(
+            request,
             unexpectedResponse: AutomationLogsAPIClientError.unexpectedResponse,
             serverError: AutomationLogsAPIClientError.serverError
         )
-        return try decoder.decode(AutomationLogsPage.self, from: data)
     }
 }

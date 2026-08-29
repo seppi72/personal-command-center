@@ -1,9 +1,10 @@
 import Foundation
 
 /// Talks to the backend's `/v1/notifications` endpoints (see
-/// `Sources/App/Controllers/NotificationController.swift`). A protocol so
-/// the view model can be exercised against a fake in previews/manual testing
-/// without a running backend. No create/update/delete methods — nothing on
+/// `Sources/App/Controllers/NotificationController.swift`). A protocol so a
+/// different implementation could stand in during previews/manual testing
+/// without a running backend — no such fake exists in this package yet, but
+/// the seam is here for one. No create/update/delete methods — nothing on
 /// this screen creates a Notification; only `dismiss` is owner-editable.
 public protocol NotificationsAPIClient: Sendable {
     func listNotifications() async throws -> [NotificationItem]
@@ -17,21 +18,14 @@ public enum NotificationsAPIClientError: Error {
 
 /// The real client: same bearer-token auth as every other route
 /// (`BearerTokenAuthMiddleware`) — one token per device, issued out of band.
+/// Transport (request construction, encoding/decoding, status validation) is
+/// `PCCHTTPTransport`'s; this struct owns only its own endpoints and payload
+/// shapes.
 public struct URLSessionNotificationsAPIClient: NotificationsAPIClient {
-    private let baseURL: URL
-    private let bearerToken: String
-    private let session: URLSession
-    private let decoder: JSONDecoder
+    private let transport: PCCHTTPTransport
 
     public init(baseURL: URL, bearerToken: String, session: URLSession = .shared) {
-        self.baseURL = baseURL
-        self.bearerToken = bearerToken
-        self.session = session
-        self.decoder = JSONDecoder()
-        // Matches the backend's `ContentConfiguration` (Vapor's default),
-        // which encodes/decodes `Date` as an ISO 8601 string rather than
-        // `JSONDecoder`'s own default of seconds-since-1970.
-        self.decoder.dateDecodingStrategy = .iso8601
+        self.transport = PCCHTTPTransport(baseURL: baseURL, bearerToken: bearerToken, session: session)
     }
 
     public func listNotifications() async throws -> [NotificationItem] {
@@ -42,20 +36,19 @@ public struct URLSessionNotificationsAPIClient: NotificationsAPIClient {
         try await send(makeRequest(path: "v1/notifications/\(id)/dismiss", method: "POST"))
     }
 
+    private func makeRequest(
+        path: String,
+        method: String,
+        query: [String: PCCHTTPTransport.QueryValue?] = [:]
+    ) throws -> URLRequest {
+        try transport.makeRequest(path: path, method: method, query: query)
+    }
+
     private func send<Response: Decodable>(_ request: URLRequest) async throws -> Response {
-        let (data, response) = try await session.data(for: request)
-        try HTTPResponseValidation.checkStatus(
-            response,
+        try await transport.send(
+            request,
             unexpectedResponse: NotificationsAPIClientError.unexpectedResponse,
             serverError: NotificationsAPIClientError.serverError
         )
-        return try decoder.decode(Response.self, from: data)
-    }
-
-    private func makeRequest(path: String, method: String) -> URLRequest {
-        var request = URLRequest(url: baseURL.appendingPathComponent(path))
-        request.httpMethod = method
-        request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
-        return request
     }
 }
