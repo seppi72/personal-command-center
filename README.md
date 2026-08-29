@@ -231,6 +231,10 @@ A pull writes one `AutomationLog` entry (`actionType: "calendar.pull"`) per `Mir
 
 ## Consumers (Mac/iOS)
 
+### PCCHTTPTransport (ticket #54)
+
+Every `URLSessionXAPIClient` below (17 of them, one per domain) composes a private `PCCHTTPTransport` rather than hand-rolling its own request construction, JSON encoding/decoding, query-string building, and status-code validation — the transport plumbing that used to be duplicated across all 17 files (and, before this ticket, only partially shared via a since-deleted `HTTPResponseValidation` that just covered the status check). Each domain client keeps its own public `init(baseURL:bearerToken:session:)` and its own `XAPIClientError` enum — `PCCHTTPTransport`'s `send`/`checkStatus` take `unexpectedResponse`/`serverError` closures so a domain client still throws its own error type rather than a shared one. `Tests/PCCUITests/PCCHTTPTransportTests.swift` covers `PCCHTTPTransport` itself (request/query construction, encoding, status validation, and a couple of full round-trips against a stubbed `URLProtocol`) — the one exception to `PCCUI` otherwise having no automated tests, since this module is pure logic with no view involved (`Package.swift`'s own comment on why the rest of `PCCUI` stays untested).
+
 `Sources/PCCUI` is a shared SwiftUI library for the Projects screen
 (`ProjectsView` + `ProjectsViewModel` + `URLSessionProjectsAPIClient`), the
 Tasks screen (`TasksView` + `TasksViewModel` + `URLSessionTasksAPIClient`),

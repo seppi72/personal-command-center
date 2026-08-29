@@ -1,9 +1,10 @@
 import Foundation
 
 /// Talks to the backend's `/v1/courses` REST endpoints (see
-/// `Sources/App/Controllers/CourseController.swift`). A protocol so the view
-/// model can be exercised against a fake in previews/manual testing without
-/// a running backend.
+/// `Sources/App/Controllers/CourseController.swift`). A protocol so a
+/// different implementation could stand in during previews/manual testing
+/// without a running backend — no such fake exists in this package yet, but
+/// the seam is here for one.
 public protocol CoursesAPIClient: Sendable {
     func listCourses() async throws -> [Course]
     func createCourse(name: String, termMonth: Int, termYear: Int) async throws -> Course
@@ -20,55 +21,40 @@ public enum CoursesAPIClientError: Error {
 
 /// The real client: same bearer-token auth as every other route
 /// (`BearerTokenAuthMiddleware`) — one token per device, issued out of band.
+/// Transport (request construction, encoding/decoding, status validation) is
+/// `PCCHTTPTransport`'s; this struct owns only its own endpoints and payload
+/// shapes.
 public struct URLSessionCoursesAPIClient: CoursesAPIClient {
-    private let baseURL: URL
-    private let bearerToken: String
-    private let session: URLSession
-    private let decoder: JSONDecoder
-    private let encoder: JSONEncoder
+    private let transport: PCCHTTPTransport
 
     public init(baseURL: URL, bearerToken: String, session: URLSession = .shared) {
-        self.baseURL = baseURL
-        self.bearerToken = bearerToken
-        self.session = session
-        self.decoder = JSONDecoder()
-        // Matches the backend's `ContentConfiguration` (Vapor's default),
-        // which encodes/decodes `Date` as an ISO 8601 string rather than
-        // `JSONDecoder`'s own default of seconds-since-1970.
-        self.decoder.dateDecodingStrategy = .iso8601
-        self.encoder = JSONEncoder()
-        self.encoder.dateEncodingStrategy = .iso8601
+        self.transport = PCCHTTPTransport(baseURL: baseURL, bearerToken: bearerToken, session: session)
     }
 
     public func listCourses() async throws -> [Course] {
-        let request = makeRequest(path: "v1/courses", method: "GET")
+        let request = try makeRequest(path: "v1/courses", method: "GET")
         return try await send(request)
     }
 
     public func createCourse(name: String, termMonth: Int, termYear: Int) async throws -> Course {
-        var request = makeRequest(path: "v1/courses", method: "POST")
+        var request = try makeRequest(path: "v1/courses", method: "POST")
         try attach(SaveCoursePayload(name: name, termMonth: termMonth, termYear: termYear), to: &request)
         return try await send(request)
     }
 
     public func updateCourse(id: UUID, name: String, termMonth: Int, termYear: Int) async throws -> Course {
-        var request = makeRequest(path: "v1/courses/\(id)", method: "PUT")
+        var request = try makeRequest(path: "v1/courses/\(id)", method: "PUT")
         try attach(SaveCoursePayload(name: name, termMonth: termMonth, termYear: termYear), to: &request)
         return try await send(request)
     }
 
     public func deleteCourse(id: UUID) async throws {
-        let request = makeRequest(path: "v1/courses/\(id)", method: "DELETE")
-        let (_, response) = try await session.data(for: request)
-        try HTTPResponseValidation.checkStatus(
-            response,
-            unexpectedResponse: CoursesAPIClientError.unexpectedResponse,
-            serverError: CoursesAPIClientError.serverError
-        )
+        let request = try makeRequest(path: "v1/courses/\(id)", method: "DELETE")
+        try await sendNoBody(request)
     }
 
     public func setCourseDeadline(id: UUID, dueDate: Date?) async throws -> Course {
-        var request = makeRequest(path: "v1/courses/\(id)/deadline", method: "PUT")
+        var request = try makeRequest(path: "v1/courses/\(id)/deadline", method: "PUT")
         try attach(SetCourseDeadlinePayload(dueDate: dueDate), to: &request)
         return try await send(request)
     }
@@ -83,25 +69,31 @@ public struct URLSessionCoursesAPIClient: CoursesAPIClient {
         let dueDate: Date?
     }
 
+    private func makeRequest(
+        path: String,
+        method: String,
+        query: [String: PCCHTTPTransport.QueryValue?] = [:]
+    ) throws -> URLRequest {
+        try transport.makeRequest(path: path, method: method, query: query)
+    }
+
     private func attach<Body: Encodable>(_ body: Body, to request: inout URLRequest) throws {
-        request.httpBody = try encoder.encode(body)
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try transport.attach(body, to: &request)
     }
 
     private func send<Response: Decodable>(_ request: URLRequest) async throws -> Response {
-        let (data, response) = try await session.data(for: request)
-        try HTTPResponseValidation.checkStatus(
-            response,
+        try await transport.send(
+            request,
             unexpectedResponse: CoursesAPIClientError.unexpectedResponse,
             serverError: CoursesAPIClientError.serverError
         )
-        return try decoder.decode(Response.self, from: data)
     }
 
-    private func makeRequest(path: String, method: String) -> URLRequest {
-        var request = URLRequest(url: baseURL.appendingPathComponent(path))
-        request.httpMethod = method
-        request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
-        return request
+    private func sendNoBody(_ request: URLRequest) async throws {
+        try await transport.sendExpectingNoBody(
+            request,
+            unexpectedResponse: CoursesAPIClientError.unexpectedResponse,
+            serverError: CoursesAPIClientError.serverError
+        )
     }
 }

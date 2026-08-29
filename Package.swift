@@ -34,11 +34,19 @@ let package = Package(
         // No Vapor/Fluent dependency — this is a plain client of the `App`
         // backend's HTTP API, not a server-side target. Not yet wrapped in
         // an Xcode app target; see README for how to drop it into one.
-        // No tests here: the v1 spec (#1) defers SwiftUI view-level tests
-        // until there's a stable API to build against and calls for manual
-        // verification instead — the API itself is what's integration-tested.
+        // No view-level tests here: the v1 spec (#1) defers those until
+        // there's a stable API to build against and calls for manual
+        // verification instead. `PCCUITests` (below) is narrower than that
+        // deferral — it covers `PCCHTTPTransport` only, a pure-logic module
+        // with no view involved (ticket #54).
         .target(
             name: "PCCUI"
+        ),
+        .testTarget(
+            name: "PCCUITests",
+            dependencies: [
+                .target(name: "PCCUI"),
+            ]
         ),
         // Dev-only Mac preview app: a plain SPM executable (not an Xcode
         // app target) that composes every `PCCUI` screen into one window,

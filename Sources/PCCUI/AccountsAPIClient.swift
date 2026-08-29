@@ -1,9 +1,10 @@
 import Foundation
 
 /// Talks to the backend's `/v1/accounts` REST endpoints (see
-/// `Sources/App/Controllers/AccountController.swift`). A protocol so the
-/// view model can be exercised against a fake in previews/manual testing
-/// without a running backend.
+/// `Sources/App/Controllers/AccountController.swift`). A protocol so a
+/// different implementation could stand in during previews/manual testing
+/// without a running backend — no such fake exists in this package yet, but
+/// the seam is here for one.
 ///
 /// `updateAccount` takes no `openingBalance` parameter at all — matching
 /// `UpdateAccountRequest`'s own shape, `openingBalance` is immutable after
@@ -23,49 +24,36 @@ public enum AccountsAPIClientError: Error {
 
 /// The real client: same bearer-token auth as every other route
 /// (`BearerTokenAuthMiddleware`) — one token per device, issued out of band.
+/// Transport (request construction, encoding/decoding, status validation) is
+/// `PCCHTTPTransport`'s; this struct owns only its own endpoints and payload
+/// shapes.
 public struct URLSessionAccountsAPIClient: AccountsAPIClient {
-    private let baseURL: URL
-    private let bearerToken: String
-    private let session: URLSession
-    private let decoder: JSONDecoder
-    private let encoder: JSONEncoder
+    private let transport: PCCHTTPTransport
 
     public init(baseURL: URL, bearerToken: String, session: URLSession = .shared) {
-        self.baseURL = baseURL
-        self.bearerToken = bearerToken
-        self.session = session
-        self.decoder = JSONDecoder()
-        // Matches the backend's `ContentConfiguration` (Vapor's default),
-        // which encodes/decodes `Date` as an ISO 8601 string rather than
-        // `JSONDecoder`'s own default of seconds-since-1970. `Account` has
-        // no `Date` field today, but this keeps the same setup as every
-        // other API client rather than a one-off exception.
-        self.decoder.dateDecodingStrategy = .iso8601
-        self.encoder = JSONEncoder()
-        self.encoder.dateEncodingStrategy = .iso8601
+        self.transport = PCCHTTPTransport(baseURL: baseURL, bearerToken: bearerToken, session: session)
     }
 
     public func listAccounts() async throws -> [Account] {
-        let request = makeRequest(path: "v1/accounts", method: "GET")
+        let request = try makeRequest(path: "v1/accounts", method: "GET")
         return try await send(request)
     }
 
     public func createAccount(name: String, type: AccountType, openingBalance: Double) async throws -> Account {
-        var request = makeRequest(path: "v1/accounts", method: "POST")
+        var request = try makeRequest(path: "v1/accounts", method: "POST")
         try attach(CreateAccountPayload(name: name, type: type, openingBalance: openingBalance), to: &request)
         return try await send(request)
     }
 
     public func updateAccount(id: UUID, name: String, type: AccountType) async throws -> Account {
-        var request = makeRequest(path: "v1/accounts/\(id)", method: "PUT")
+        var request = try makeRequest(path: "v1/accounts/\(id)", method: "PUT")
         try attach(UpdateAccountPayload(name: name, type: type), to: &request)
         return try await send(request)
     }
 
     public func deleteAccount(id: UUID) async throws {
-        let request = makeRequest(path: "v1/accounts/\(id)", method: "DELETE")
-        let (_, response) = try await session.data(for: request)
-        try Self.checkStatus(response)
+        let request = try makeRequest(path: "v1/accounts/\(id)", method: "DELETE")
+        try await sendNoBody(request)
     }
 
     private struct CreateAccountPayload: Encodable {
@@ -79,30 +67,31 @@ public struct URLSessionAccountsAPIClient: AccountsAPIClient {
         let type: AccountType
     }
 
+    private func makeRequest(
+        path: String,
+        method: String,
+        query: [String: PCCHTTPTransport.QueryValue?] = [:]
+    ) throws -> URLRequest {
+        try transport.makeRequest(path: path, method: method, query: query)
+    }
+
     private func attach<Body: Encodable>(_ body: Body, to request: inout URLRequest) throws {
-        request.httpBody = try encoder.encode(body)
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try transport.attach(body, to: &request)
     }
 
     private func send<Response: Decodable>(_ request: URLRequest) async throws -> Response {
-        let (data, response) = try await session.data(for: request)
-        try Self.checkStatus(response)
-        return try decoder.decode(Response.self, from: data)
+        try await transport.send(
+            request,
+            unexpectedResponse: AccountsAPIClientError.unexpectedResponse,
+            serverError: AccountsAPIClientError.serverError
+        )
     }
 
-    private func makeRequest(path: String, method: String) -> URLRequest {
-        var request = URLRequest(url: baseURL.appendingPathComponent(path))
-        request.httpMethod = method
-        request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
-        return request
-    }
-
-    private static func checkStatus(_ response: URLResponse) throws {
-        guard let http = response as? HTTPURLResponse else {
-            throw AccountsAPIClientError.unexpectedResponse
-        }
-        guard (200...299).contains(http.statusCode) else {
-            throw AccountsAPIClientError.serverError(status: http.statusCode)
-        }
+    private func sendNoBody(_ request: URLRequest) async throws {
+        try await transport.sendExpectingNoBody(
+            request,
+            unexpectedResponse: AccountsAPIClientError.unexpectedResponse,
+            serverError: AccountsAPIClientError.serverError
+        )
     }
 }

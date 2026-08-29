@@ -1,9 +1,10 @@
 import Foundation
 
 /// Talks to the backend's `/v1/sprints` REST endpoints (see
-/// `Sources/App/Controllers/SprintController.swift`). A protocol so the view
-/// model can be exercised against a fake in previews/manual testing without
-/// a running backend.
+/// `Sources/App/Controllers/SprintController.swift`). A protocol so a
+/// different implementation could stand in during previews/manual testing
+/// without a running backend — no such fake exists in this package yet, but
+/// the seam is here for one.
 public protocol SprintsAPIClient: Sendable {
     /// A Sprint has no meaning outside a Project, so listing is always
     /// scoped to one — there's no "list all Sprints" call, unlike
@@ -21,61 +22,40 @@ public enum SprintsAPIClientError: Error {
 
 /// The real client: same bearer-token auth as every other route
 /// (`BearerTokenAuthMiddleware`) — one token per device, issued out of band.
+/// Transport (request construction, encoding/decoding, status validation) is
+/// `PCCHTTPTransport`'s; this struct owns only its own endpoints and payload
+/// shapes.
 public struct URLSessionSprintsAPIClient: SprintsAPIClient {
-    private let baseURL: URL
-    private let bearerToken: String
-    private let session: URLSession
-    private let decoder: JSONDecoder
-    private let encoder: JSONEncoder
+    private let transport: PCCHTTPTransport
 
     public init(baseURL: URL, bearerToken: String, session: URLSession = .shared) {
-        self.baseURL = baseURL
-        self.bearerToken = bearerToken
-        self.session = session
-        self.decoder = JSONDecoder()
-        // Matches the backend's `ContentConfiguration` (Vapor's default),
-        // which encodes/decodes `Date` as an ISO 8601 string rather than
-        // `JSONDecoder`'s own default of seconds-since-1970.
-        self.decoder.dateDecodingStrategy = .iso8601
-        self.encoder = JSONEncoder()
-        self.encoder.dateEncodingStrategy = .iso8601
+        self.transport = PCCHTTPTransport(baseURL: baseURL, bearerToken: bearerToken, session: session)
     }
 
     public func listSprints(projectID: UUID) async throws -> [Sprint] {
-        // `appendingPathComponent` (used by `makeRequest(path:method:)`)
-        // percent-escapes "?", so a query string needs `URLComponents`
-        // instead (mirrors `URLSessionTasksAPIClient.listTasks`).
-        var components = URLComponents(
-            url: baseURL.appendingPathComponent("v1/sprints"),
-            resolvingAgainstBaseURL: false
+        let request = try makeRequest(
+            path: "v1/sprints",
+            method: "GET",
+            query: ["projectID": .uuid(projectID)]
         )
-        components?.queryItems = [URLQueryItem(name: "projectID", value: projectID.uuidString)]
-        guard let url = components?.url else {
-            throw SprintsAPIClientError.unexpectedResponse
-        }
-        return try await send(makeRequest(url: url, method: "GET"))
+        return try await send(request)
     }
 
     public func createSprint(projectID: UUID, name: String, startDate: Date, endDate: Date) async throws -> Sprint {
-        var request = makeRequest(path: "v1/sprints", method: "POST")
+        var request = try makeRequest(path: "v1/sprints", method: "POST")
         try attach(SaveSprintPayload(projectID: projectID, name: name, startDate: startDate, endDate: endDate), to: &request)
         return try await send(request)
     }
 
     public func updateSprint(id: UUID, name: String, startDate: Date, endDate: Date) async throws -> Sprint {
-        var request = makeRequest(path: "v1/sprints/\(id)", method: "PUT")
+        var request = try makeRequest(path: "v1/sprints/\(id)", method: "PUT")
         try attach(UpdateSprintPayload(name: name, startDate: startDate, endDate: endDate), to: &request)
         return try await send(request)
     }
 
     public func deleteSprint(id: UUID) async throws {
-        let request = makeRequest(path: "v1/sprints/\(id)", method: "DELETE")
-        let (_, response) = try await session.data(for: request)
-        try HTTPResponseValidation.checkStatus(
-            response,
-            unexpectedResponse: SprintsAPIClientError.unexpectedResponse,
-            serverError: SprintsAPIClientError.serverError
-        )
+        let request = try makeRequest(path: "v1/sprints/\(id)", method: "DELETE")
+        try await sendNoBody(request)
     }
 
     private struct SaveSprintPayload: Encodable {
@@ -91,29 +71,31 @@ public struct URLSessionSprintsAPIClient: SprintsAPIClient {
         let endDate: Date
     }
 
+    private func makeRequest(
+        path: String,
+        method: String,
+        query: [String: PCCHTTPTransport.QueryValue?] = [:]
+    ) throws -> URLRequest {
+        try transport.makeRequest(path: path, method: method, query: query)
+    }
+
     private func attach<Body: Encodable>(_ body: Body, to request: inout URLRequest) throws {
-        request.httpBody = try encoder.encode(body)
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try transport.attach(body, to: &request)
     }
 
     private func send<Response: Decodable>(_ request: URLRequest) async throws -> Response {
-        let (data, response) = try await session.data(for: request)
-        try HTTPResponseValidation.checkStatus(
-            response,
+        try await transport.send(
+            request,
             unexpectedResponse: SprintsAPIClientError.unexpectedResponse,
             serverError: SprintsAPIClientError.serverError
         )
-        return try decoder.decode(Response.self, from: data)
     }
 
-    private func makeRequest(path: String, method: String) -> URLRequest {
-        makeRequest(url: baseURL.appendingPathComponent(path), method: method)
-    }
-
-    private func makeRequest(url: URL, method: String) -> URLRequest {
-        var request = URLRequest(url: url)
-        request.httpMethod = method
-        request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
-        return request
+    private func sendNoBody(_ request: URLRequest) async throws {
+        try await transport.sendExpectingNoBody(
+            request,
+            unexpectedResponse: SprintsAPIClientError.unexpectedResponse,
+            serverError: SprintsAPIClientError.serverError
+        )
     }
 }

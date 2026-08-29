@@ -1,9 +1,10 @@
 import Foundation
 
 /// Talks to the backend's `GET /v1/work-hours` endpoint (see
-/// `Sources/App/Controllers/WorkHoursController.swift`). A protocol so the
-/// view model can be exercised against a fake in previews/manual testing
-/// without a running backend.
+/// `Sources/App/Controllers/WorkHoursController.swift`). A protocol so a
+/// different implementation could stand in during previews/manual testing
+/// without a running backend — no such fake exists in this package yet, but
+/// the seam is here for one.
 public protocol WorkHoursAPIClient: Sendable {
     /// The Work Hours rollup for `[start, end)`, grouped by `groupBy`.
     func fetchWorkHours(groupBy: WorkHoursGroupBy, start: Date, end: Date) async throws -> [WorkHoursRow]
@@ -16,55 +17,43 @@ public enum WorkHoursAPIClientError: Error {
 
 /// The real client: same bearer-token auth as every other route
 /// (`BearerTokenAuthMiddleware`) — one token per device, issued out of band.
+/// Transport (request construction, encoding/decoding, status validation) is
+/// `PCCHTTPTransport`'s; this struct owns only its own endpoints and payload
+/// shapes.
 public struct URLSessionWorkHoursAPIClient: WorkHoursAPIClient {
-    private let baseURL: URL
-    private let bearerToken: String
-    private let session: URLSession
-    private let decoder: JSONDecoder
+    private let transport: PCCHTTPTransport
 
     public init(baseURL: URL, bearerToken: String, session: URLSession = .shared) {
-        self.baseURL = baseURL
-        self.bearerToken = bearerToken
-        self.session = session
-        self.decoder = JSONDecoder()
-        // Matches the backend's `ContentConfiguration` (Vapor's default),
-        // which encodes/decodes a JSON body's `Date` as an ISO 8601 string
-        // rather than `JSONDecoder`'s own default of seconds-since-1970.
-        self.decoder.dateDecodingStrategy = .iso8601
+        self.transport = PCCHTTPTransport(baseURL: baseURL, bearerToken: bearerToken, session: session)
     }
 
     public func fetchWorkHours(groupBy: WorkHoursGroupBy, start: Date, end: Date) async throws -> [WorkHoursRow] {
-        // `appendingPathComponent` (used elsewhere in this package's
-        // clients for a plain path) percent-escapes "?", so a query string
-        // needs `URLComponents` instead — same reasoning as
-        // `TasksAPIClient.listTasks`. `start`/`end` are formatted as plain
-        // ISO 8601 strings, not left to `URLQueryItem`'s own `Date`
-        // handling: `WorkHoursController.validatedRange` parses them by
-        // hand with `ISO8601DateFormatter` for the same reason this
-        // client's own query-string dates need to, not Vapor's query
-        // decoder default of seconds-since-1970.
-        var components = URLComponents(
-            url: baseURL.appendingPathComponent("v1/work-hours"),
-            resolvingAgainstBaseURL: false
+        // `start`/`end` are sent as plain ISO 8601 strings
+        // (`PCCHTTPTransport`'s `.date` query value) — matching
+        // `WorkHoursController.validatedRange`'s own hand-parsed query-date
+        // format, not Vapor's query decoder's default of
+        // seconds-since-1970.
+        let request = try makeRequest(
+            path: "v1/work-hours",
+            method: "GET",
+            query: ["groupBy": .string(groupBy.rawValue), "start": .date(start), "end": .date(end)]
         )
-        let formatter = ISO8601DateFormatter()
-        components?.queryItems = [
-            URLQueryItem(name: "groupBy", value: groupBy.rawValue),
-            URLQueryItem(name: "start", value: formatter.string(from: start)),
-            URLQueryItem(name: "end", value: formatter.string(from: end)),
-        ]
-        guard let url = components?.url else {
-            throw WorkHoursAPIClientError.unexpectedResponse
-        }
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await session.data(for: request)
-        try HTTPResponseValidation.checkStatus(
-            response,
+        return try await send(request)
+    }
+
+    private func makeRequest(
+        path: String,
+        method: String,
+        query: [String: PCCHTTPTransport.QueryValue?] = [:]
+    ) throws -> URLRequest {
+        try transport.makeRequest(path: path, method: method, query: query)
+    }
+
+    private func send<Response: Decodable>(_ request: URLRequest) async throws -> Response {
+        try await transport.send(
+            request,
             unexpectedResponse: WorkHoursAPIClientError.unexpectedResponse,
             serverError: WorkHoursAPIClientError.serverError
         )
-        return try decoder.decode([WorkHoursRow].self, from: data)
     }
 }
