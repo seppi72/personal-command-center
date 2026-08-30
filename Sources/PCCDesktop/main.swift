@@ -70,7 +70,10 @@ let financesReportingViewModel = FinancesReportingViewModel(
 let notificationsViewModel = NotificationsViewModel(client: notificationsClient)
 let automationLogViewModel = AutomationLogViewModel(client: automationLogsClient)
 
-/// One case per sidebar row. `CaseIterable` order is display order.
+/// One case per sidebar row. `CaseIterable` order is display order within
+/// whichever `SidebarSection` the screen belongs to (see below) — it no
+/// longer determines the sidebar's overall top-to-bottom order once there's
+/// more than one section.
 enum Screen: String, CaseIterable, Identifiable {
     case projects, tasks, deadlines, calendar, commitments, clients, courses
     case timeEntries, timer, workHours, accounts, transactions, categories
@@ -121,14 +124,47 @@ enum Screen: String, CaseIterable, Identifiable {
     }
 }
 
+/// Groups the sidebar's 16 screens under a handful of headings so the list
+/// is scannable instead of one flat run — purely a presentation grouping,
+/// with no effect on `Screen`'s own identity or on `detail(for:)`.
+enum SidebarSection: CaseIterable {
+    case work, planning, clients, finances, system
+
+    var title: String {
+        switch self {
+        case .work: "Work"
+        case .planning: "Planning"
+        case .clients: "Clients"
+        case .finances: "Finances"
+        case .system: "System"
+        }
+    }
+
+    var screens: [Screen] {
+        switch self {
+        case .work: [.projects, .tasks, .timeEntries, .timer, .workHours]
+        case .planning: [.deadlines, .calendar, .commitments, .courses]
+        case .clients: [.clients]
+        case .finances: [.accounts, .transactions, .categories, .financesReporting]
+        case .system: [.notifications, .automationLog]
+        }
+    }
+}
+
 struct DashboardView: View {
     @State private var selection: Screen? = .projects
 
     var body: some View {
         NavigationSplitView {
-            List(Screen.allCases, selection: $selection) { screen in
-                Label(screen.title, systemImage: screen.systemImage)
-                    .tag(screen)
+            List(selection: $selection) {
+                ForEach(SidebarSection.allCases, id: \.self) { section in
+                    Section(section.title) {
+                        ForEach(section.screens) { screen in
+                            Label(screen.title, systemImage: screen.systemImage)
+                                .tag(screen)
+                        }
+                    }
+                }
             }
             .navigationTitle("Personal Command Center")
         } detail: {
