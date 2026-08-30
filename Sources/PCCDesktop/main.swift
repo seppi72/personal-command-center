@@ -69,12 +69,17 @@ let financesReportingViewModel = FinancesReportingViewModel(
     reportingClient: financesReportingClient, accountsClient: accountsClient)
 let notificationsViewModel = NotificationsViewModel(client: notificationsClient)
 let automationLogViewModel = AutomationLogViewModel(client: automationLogsClient)
+let overviewViewModel = OverviewViewModel(
+    deadlinesClient: deadlinesClient, timeEntriesClient: timeEntriesClient, tasksClient: tasksClient,
+    projectsClient: projectsClient, clientsClient: clientsClient, coursesClient: coursesClient,
+    transactionsClient: transactionsClient, accountsClient: accountsClient)
 
 /// One case per sidebar row. `CaseIterable` order is display order within
 /// whichever `SidebarSection` the screen belongs to (see below) — it no
 /// longer determines the sidebar's overall top-to-bottom order once there's
 /// more than one section.
 enum Screen: String, CaseIterable, Identifiable {
+    case overview
     case projects, tasks, deadlines, calendar, commitments, clients, courses
     case timeEntries, timer, workHours, accounts, transactions, categories
     case financesReporting, notifications, automationLog
@@ -83,6 +88,7 @@ enum Screen: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .overview: "Overview"
         case .projects: "Projects"
         case .tasks: "Tasks"
         case .deadlines: "Deadlines"
@@ -104,6 +110,7 @@ enum Screen: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
+        case .overview: "house"
         case .projects: "folder"
         case .tasks: "checkmark.circle"
         case .deadlines: "clock"
@@ -152,11 +159,17 @@ enum SidebarSection: CaseIterable {
 }
 
 struct DashboardView: View {
-    @State private var selection: Screen? = .projects
+    @State private var selection: Screen? = .overview
 
     var body: some View {
         NavigationSplitView {
             List(selection: $selection) {
+                // Pinned above the grouped sections, not inside a `Section`
+                // of its own — Overview is cross-cutting (it summarizes
+                // every other section at once), not one more category
+                // alongside Work/Planning/Clients/Finances/System.
+                Label(Screen.overview.title, systemImage: Screen.overview.systemImage)
+                    .tag(Screen.overview)
                 ForEach(SidebarSection.allCases, id: \.self) { section in
                     Section(section.title) {
                         ForEach(section.screens) { screen in
@@ -168,7 +181,7 @@ struct DashboardView: View {
             }
             .navigationTitle("Personal Command Center")
         } detail: {
-            detail(for: selection ?? .projects)
+            detail(for: selection ?? .overview)
         }
         .frame(minWidth: 1000, minHeight: 650)
     }
@@ -176,6 +189,13 @@ struct DashboardView: View {
     @ViewBuilder
     private func detail(for screen: Screen) -> some View {
         switch screen {
+        case .overview:
+            OverviewView(
+                viewModel: overviewViewModel,
+                onTapTimer: { selection = .timer },
+                onTapDeadlines: { selection = .deadlines },
+                onTapTransactions: { selection = .transactions }
+            )
         case .projects: ProjectsView(viewModel: projectsViewModel)
         case .tasks: TasksView(viewModel: tasksViewModel)
         case .deadlines: DeadlinesView(viewModel: deadlinesViewModel)
