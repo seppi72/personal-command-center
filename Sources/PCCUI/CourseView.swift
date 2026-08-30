@@ -255,42 +255,10 @@ struct CourseDetailView: View {
                 }
             }
             Section("Tasks") {
-                if tasksViewModel.tasks.isEmpty {
-                    Text("No Tasks yet.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(tasksViewModel.tasks) { task in
-                        HStack {
-                            Button {
-                                Task {
-                                    await tasksViewModel.setCompletion(task, isComplete: !task.isComplete)
-                                }
-                            } label: {
-                                Image(systemName: task.isComplete ? "checkmark.circle.fill" : "circle")
-                            }
-                            #if os(macOS)
-                            .buttonStyle(.plain)
-                            #endif
-
-                            Button {
-                                editingTask = task
-                            } label: {
-                                VStack(alignment: .leading) {
-                                    Text(task.title)
-                                        .strikethrough(task.isComplete)
-                                    if let dueDate = task.dueDate {
-                                        Text(dueDate, style: .date)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                            }
-                            #if os(macOS)
-                            .buttonStyle(.plain)
-                            #endif
-                        }
-                    }
-                    .onDelete { offsets in
+                listRows(
+                    items: tasksViewModel.tasks,
+                    emptyText: "No Tasks yet.",
+                    onDelete: { offsets in
                         let toDelete = offsets.map { tasksViewModel.tasks[$0] }
                         Task {
                             for task in toDelete {
@@ -298,29 +266,27 @@ struct CourseDetailView: View {
                             }
                         }
                     }
-                }
-                Button {
-                    isPresentingNewTaskSheet = true
-                } label: {
-                    Label("Add Task", systemImage: "plus")
-                }
-            }
-            Section("Meetings") {
-                if commitmentsViewModel.commitments.isEmpty {
-                    Text("No Meetings yet.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(commitmentsViewModel.commitments) { commitment in
+                ) { task in
+                    HStack {
                         Button {
-                            editingCommitment = commitment
+                            Task {
+                                await tasksViewModel.setCompletion(task, isComplete: !task.isComplete)
+                            }
                         } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(commitment.title)
-                                Text("\(commitment.startDate, style: .time) – \(commitment.endDate, style: .time)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                if let recurrenceRule = commitment.recurrenceRule {
-                                    Text(recurrenceRule)
+                            Image(systemName: task.isComplete ? "checkmark.circle.fill" : "circle")
+                        }
+                        #if os(macOS)
+                        .buttonStyle(.plain)
+                        #endif
+
+                        Button {
+                            editingTask = task
+                        } label: {
+                            VStack(alignment: .leading) {
+                                Text(task.title)
+                                    .strikethrough(task.isComplete)
+                                if let dueDate = task.dueDate {
+                                    Text(dueDate, style: .date)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -330,7 +296,18 @@ struct CourseDetailView: View {
                         .buttonStyle(.plain)
                         #endif
                     }
-                    .onDelete { offsets in
+                }
+                Button {
+                    isPresentingNewTaskSheet = true
+                } label: {
+                    Label("Add Task", systemImage: "plus")
+                }
+            }
+            Section("Meetings") {
+                listRows(
+                    items: commitmentsViewModel.commitments,
+                    emptyText: "No Meetings yet.",
+                    onDelete: { offsets in
                         let toDelete = offsets.map { commitmentsViewModel.commitments[$0] }
                         Task {
                             for commitment in toDelete {
@@ -338,6 +315,25 @@ struct CourseDetailView: View {
                             }
                         }
                     }
+                ) { commitment in
+                    Button {
+                        editingCommitment = commitment
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(commitment.title)
+                            Text("\(commitment.startDate, style: .time) – \(commitment.endDate, style: .time)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            if let recurrenceRule = commitment.recurrenceRule {
+                                Text(recurrenceRule)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    #if os(macOS)
+                    .buttonStyle(.plain)
+                    #endif
                 }
                 Button {
                     isPresentingNewMeetingSheet = true
@@ -354,16 +350,8 @@ struct CourseDetailView: View {
                 }
             }
         }
-        .task {
-            async let tasksLoad: Void = tasksViewModel.load()
-            async let commitmentsLoad: Void = commitmentsViewModel.load()
-            _ = await (tasksLoad, commitmentsLoad)
-        }
-        .refreshable {
-            async let tasksLoad: Void = tasksViewModel.load()
-            async let commitmentsLoad: Void = commitmentsViewModel.load()
-            _ = await (tasksLoad, commitmentsLoad)
-        }
+        .task { await loadAll() }
+        .refreshable { await loadAll() }
         .alert("Error", isPresented: isShowingTasksError, presenting: tasksViewModel.errorMessage) { _ in
             Button("OK", role: .cancel) {}
         } message: { message in
@@ -453,5 +441,36 @@ struct CourseDetailView: View {
             get: { commitmentsViewModel.errorMessage != nil },
             set: { isShowing in if !isShowing { commitmentsViewModel.errorMessage = nil } }
         )
+    }
+
+    /// Loads the Tasks and Meetings sections concurrently — shared by
+    /// `.task`/`.refreshable` so the two don't each repeat the same
+    /// `async let` pair.
+    private func loadAll() async {
+        async let tasksLoad: Void = tasksViewModel.load()
+        async let commitmentsLoad: Void = commitmentsViewModel.load()
+        _ = await (tasksLoad, commitmentsLoad)
+    }
+
+    /// The "empty text, else a deletable list of rows" shape both the Tasks
+    /// and Meetings sections share — `row` owns each item's own tap
+    /// target(s) (Tasks needs two independent ones, a completion toggle
+    /// plus edit; Meetings needs only one), so only the boilerplate around
+    /// it — the empty state, `ForEach`, and swipe-to-delete — is factored
+    /// out here.
+    @ViewBuilder
+    private func listRows<Item: Identifiable, Row: View>(
+        items: [Item],
+        emptyText: String,
+        onDelete: @escaping (IndexSet) -> Void,
+        @ViewBuilder row: @escaping (Item) -> Row
+    ) -> some View {
+        if items.isEmpty {
+            Text(emptyText)
+                .foregroundStyle(.secondary)
+        } else {
+            ForEach(items, content: row)
+                .onDelete(perform: onDelete)
+        }
     }
 }
