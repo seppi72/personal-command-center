@@ -5,8 +5,12 @@ import Vapor
 /// "CS 301" (`CONTEXT.md`) — analogous to how a Project contains personal
 /// Tasks, down to optionally carrying its own Deadline the same way a
 /// Project can (`dueDate`). Created directly by the owner each Term, not
-/// auto-detected; the Tasks/Deadlines inside it are what auto-populate later,
-/// from a school data source (ticket #20, out of scope here).
+/// auto-detected; its Tasks, Deadlines, Time Entries, and (ticket #56)
+/// Personal Commitments are entered the same way any other Task, Deadline,
+/// Time Entry, or Personal Commitment is — there's no accessible school data
+/// source to auto-populate them from, a deliberate decision, not a
+/// placeholder for a future sync
+/// (`docs/adr/0009-manual-entry-not-lms-integration-for-school.md`).
 ///
 /// Term (the month and year a Course belongs to, e.g. "September 2026") is
 /// modeled as two required integers, `termMonth`/`termYear`, rather than a

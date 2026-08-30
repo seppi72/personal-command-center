@@ -53,6 +53,18 @@ final class PersonalCommitment: Model, @unchecked Sendable {
         set { syncStatusRaw = newValue.rawValue }
     }
 
+    /// The Course (`CONTEXT.md`) this Commitment is a class meeting for, if
+    /// any — ticket #56, a single optional link (not Time Entry's four-way
+    /// container exclusivity, ADR-0004: nothing here requires Personal
+    /// Commitment to also attach to a Task/Project/Client). Guarded the same
+    /// way Time Entry's own containers and Finances' Accounts are:
+    /// `CourseController.delete` rejects deleting a Course while a
+    /// Commitment still references it, rather than either orphaning or
+    /// cascading. Internal to the Command Center only — never serialized
+    /// into the CalDAV event `CalendarSyncService.push` sends out.
+    @OptionalParent(key: "course_id")
+    var course: Course?
+
     init() {}
 
     init(
@@ -62,7 +74,8 @@ final class PersonalCommitment: Model, @unchecked Sendable {
         endDate: Date,
         recurrenceRule: String? = nil,
         externalEventID: String? = nil,
-        syncStatus: SyncStatus = .pending
+        syncStatus: SyncStatus = .pending,
+        courseID: UUID? = nil
     ) {
         self.id = id
         self.title = title
@@ -71,5 +84,6 @@ final class PersonalCommitment: Model, @unchecked Sendable {
         self.recurrenceRule = recurrenceRule
         self.externalEventID = externalEventID ?? UUID().uuidString
         self.syncStatusRaw = syncStatus.rawValue
+        self.$course.id = courseID
     }
 }

@@ -48,10 +48,11 @@ let projectsViewModel = ProjectsViewModel(client: projectsClient, clientsClient:
 let tasksViewModel = TasksViewModel(tasksClient: tasksClient, projectsClient: projectsClient, coursesClient: coursesClient)
 let deadlinesViewModel = DeadlinesViewModel(client: deadlinesClient)
 let calendarViewModel = CalendarViewModel(
-    commitmentsClient: personalCommitmentsClient, mirroredEventsClient: mirroredCalendarEventsClient)
-let personalCommitmentsViewModel = PersonalCommitmentsViewModel(client: personalCommitmentsClient)
+    commitmentsClient: personalCommitmentsClient, mirroredEventsClient: mirroredCalendarEventsClient, coursesClient: coursesClient)
+let personalCommitmentsViewModel = PersonalCommitmentsViewModel(client: personalCommitmentsClient, coursesClient: coursesClient)
 let clientsViewModel = ClientsViewModel(client: clientsClient)
-let coursesViewModel = CoursesViewModel(client: coursesClient, tasksClient: tasksClient, projectsClient: projectsClient)
+let coursesViewModel = CoursesViewModel(
+    client: coursesClient, tasksClient: tasksClient, projectsClient: projectsClient, commitmentsClient: personalCommitmentsClient)
 let timeEntriesViewModel = TimeEntriesViewModel(
     timeEntriesClient: timeEntriesClient, tasksClient: tasksClient, projectsClient: projectsClient,
     clientsClient: clientsClient, coursesClient: coursesClient)

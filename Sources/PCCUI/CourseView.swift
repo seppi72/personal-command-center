@@ -63,7 +63,8 @@ public struct CourseView: View {
                     CourseDetailView(
                         course: course,
                         viewModel: viewModel,
-                        tasksViewModel: viewModel.makeTasksViewModel(for: course)
+                        tasksViewModel: viewModel.makeTasksViewModel(for: course),
+                        commitmentsViewModel: viewModel.makeCommitmentsViewModel(for: course)
                     )
                 } label: {
                     VStack(alignment: .leading) {
@@ -211,20 +212,27 @@ struct CourseFormSheet: View {
 /// A Course's detail screen (ticket #20): the Course's name/Term/due date
 /// read-only at the top (editing moved here from the list row, via the
 /// toolbar's "Edit" button — same `CourseFormSheet`/`onSave` wiring as
-/// before), plus a "Tasks" section listing the Course's Tasks with
+/// before), a "Tasks" section listing the Course's Tasks with
 /// add/edit/complete/delete — the Course-scoped counterpart to
 /// `ProjectDetailView`'s "Sprints" section, backed by the same
 /// `TasksViewModel`/`TaskFormSheet` the top-level Tasks screen uses (just
 /// scoped to this Course via `CoursesViewModel.makeTasksViewModel(for:)`)
-/// rather than a separate, duplicated row/form implementation.
+/// rather than a separate, duplicated row/form implementation — plus a
+/// "Meetings" section (ticket #56) listing the Course's linked Personal
+/// Commitments the same way, backed by `PersonalCommitmentsViewModel`/
+/// `PersonalCommitmentFormSheet` scoped via
+/// `CoursesViewModel.makeCommitmentsViewModel(for:)`.
 struct CourseDetailView: View {
     let course: Course
     @ObservedObject var viewModel: CoursesViewModel
     @ObservedObject var tasksViewModel: TasksViewModel
+    @ObservedObject var commitmentsViewModel: PersonalCommitmentsViewModel
 
     @State private var isPresentingEditSheet = false
     @State private var isPresentingNewTaskSheet = false
     @State private var editingTask: PCCTask?
+    @State private var isPresentingNewMeetingSheet = false
+    @State private var editingCommitment: PersonalCommitment?
 
     /// The freshest known copy of `course` — falls back to the value passed
     /// in if `viewModel.courses` hasn't (yet) reflected an edit.
@@ -297,6 +305,46 @@ struct CourseDetailView: View {
                     Label("Add Task", systemImage: "plus")
                 }
             }
+            Section("Meetings") {
+                if commitmentsViewModel.commitments.isEmpty {
+                    Text("No Meetings yet.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(commitmentsViewModel.commitments) { commitment in
+                        Button {
+                            editingCommitment = commitment
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(commitment.title)
+                                Text("\(commitment.startDate, style: .time) – \(commitment.endDate, style: .time)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                if let recurrenceRule = commitment.recurrenceRule {
+                                    Text(recurrenceRule)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        #if os(macOS)
+                        .buttonStyle(.plain)
+                        #endif
+                    }
+                    .onDelete { offsets in
+                        let toDelete = offsets.map { commitmentsViewModel.commitments[$0] }
+                        Task {
+                            for commitment in toDelete {
+                                await commitmentsViewModel.deleteCommitment(commitment)
+                            }
+                        }
+                    }
+                }
+                Button {
+                    isPresentingNewMeetingSheet = true
+                } label: {
+                    Label("Add Meeting", systemImage: "plus")
+                }
+            }
         }
         .navigationTitle(currentCourse.name)
         .toolbar {
@@ -306,9 +354,22 @@ struct CourseDetailView: View {
                 }
             }
         }
-        .task { await tasksViewModel.load() }
-        .refreshable { await tasksViewModel.load() }
+        .task {
+            async let tasksLoad: Void = tasksViewModel.load()
+            async let commitmentsLoad: Void = commitmentsViewModel.load()
+            _ = await (tasksLoad, commitmentsLoad)
+        }
+        .refreshable {
+            async let tasksLoad: Void = tasksViewModel.load()
+            async let commitmentsLoad: Void = commitmentsViewModel.load()
+            _ = await (tasksLoad, commitmentsLoad)
+        }
         .alert("Error", isPresented: isShowingTasksError, presenting: tasksViewModel.errorMessage) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { message in
+            Text(message)
+        }
+        .alert("Error", isPresented: isShowingCommitmentsError, presenting: commitmentsViewModel.errorMessage) { _ in
             Button("OK", role: .cancel) {}
         } message: { message in
             Text(message)
@@ -352,12 +413,45 @@ struct CourseDetailView: View {
                 await tasksViewModel.updateTask(task, with: values)
             }
         }
+        .sheet(isPresented: $isPresentingNewMeetingSheet) {
+            PersonalCommitmentFormSheet(
+                title: "New Meeting",
+                initialValues: PersonalCommitmentFormValues(
+                    title: "", startDate: Date(), endDate: Date().addingTimeInterval(3600), courseID: currentCourse.id
+                ),
+                courses: commitmentsViewModel.courses
+            ) { values in
+                await commitmentsViewModel.createCommitment(values)
+            }
+        }
+        .sheet(item: $editingCommitment) { commitment in
+            PersonalCommitmentFormSheet(
+                title: "Edit Meeting",
+                initialValues: PersonalCommitmentFormValues(
+                    title: commitment.title,
+                    startDate: commitment.startDate,
+                    endDate: commitment.endDate,
+                    recurrenceRule: commitment.recurrenceRule,
+                    courseID: commitment.courseID
+                ),
+                courses: commitmentsViewModel.courses
+            ) { values in
+                await commitmentsViewModel.updateCommitment(commitment, with: values)
+            }
+        }
     }
 
     private var isShowingTasksError: Binding<Bool> {
         Binding(
             get: { tasksViewModel.errorMessage != nil },
             set: { isShowing in if !isShowing { tasksViewModel.errorMessage = nil } }
+        )
+    }
+
+    private var isShowingCommitmentsError: Binding<Bool> {
+        Binding(
+            get: { commitmentsViewModel.errorMessage != nil },
+            set: { isShowing in if !isShowing { commitmentsViewModel.errorMessage = nil } }
         )
     }
 }

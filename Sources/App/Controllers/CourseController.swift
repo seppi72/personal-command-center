@@ -110,7 +110,9 @@ struct CourseController: RouteCollection {
         guard let course = try await findCourse(req: req) else {
             throw Abort(.notFound)
         }
-        try await Self.verifyNoReferencingTimeEntries(courseID: try course.requireID(), req: req)
+        let courseID = try course.requireID()
+        try await Self.verifyNoReferencingTimeEntries(courseID: courseID, req: req)
+        try await Self.verifyNoReferencingPersonalCommitments(courseID: courseID, req: req)
         try await course.delete(on: req.db)
         return .noContent
     }
@@ -120,6 +122,15 @@ struct CourseController: RouteCollection {
     private static func verifyNoReferencingTimeEntries(courseID: UUID, req: Request) async throws {
         guard try await TimeEntry.query(on: req.db).filter(\.$course.$id == courseID).first() == nil else {
             throw Abort(.badRequest, reason: "cannot delete a Course with Time Entries attached")
+        }
+    }
+
+    /// Ticket #56: a Course can't be deleted while any Personal Commitment
+    /// still references it either — same status and error shape as
+    /// `verifyNoReferencingTimeEntries`, just naming the Commitment side.
+    private static func verifyNoReferencingPersonalCommitments(courseID: UUID, req: Request) async throws {
+        guard try await PersonalCommitment.query(on: req.db).filter(\.$course.$id == courseID).first() == nil else {
+            throw Abort(.badRequest, reason: "cannot delete a Course with Personal Commitments attached")
         }
     }
 

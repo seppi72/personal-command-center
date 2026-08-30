@@ -13,29 +13,41 @@ import Foundation
 @MainActor
 public final class CalendarViewModel: ObservableObject {
     @Published public private(set) var entries: [CalendarEntry] = []
+    @Published public private(set) var courses: [Course] = []
     @Published public var errorMessage: String?
     @Published public private(set) var isLoading = false
 
     private let commitmentsClient: PersonalCommitmentsAPIClient
     private let mirroredEventsClient: MirroredCalendarEventsAPIClient
+    private let coursesClient: CoursesAPIClient
 
-    public init(commitmentsClient: PersonalCommitmentsAPIClient, mirroredEventsClient: MirroredCalendarEventsAPIClient) {
+    public init(
+        commitmentsClient: PersonalCommitmentsAPIClient,
+        mirroredEventsClient: MirroredCalendarEventsAPIClient,
+        coursesClient: CoursesAPIClient
+    ) {
         self.commitmentsClient = commitmentsClient
         self.mirroredEventsClient = mirroredEventsClient
+        self.coursesClient = coursesClient
     }
 
-    /// Loads both sources concurrently and merges them into one list sorted
-    /// by start time — the backend has no combined endpoint of its own
-    /// (`/v1/personal-commitments` and `/v1/calendar-events` are separate),
-    /// so the merge happens here, client-side.
+    /// Loads all three sources concurrently and merges the two calendar
+    /// ones into one list sorted by start time — the backend has no
+    /// combined endpoint of its own (`/v1/personal-commitments` and
+    /// `/v1/calendar-events` are separate), so the merge happens here,
+    /// client-side. `courses` sources the Commitment form's Course picker
+    /// (ticket #56) — the same reason `TasksViewModel`/`TimeEntriesViewModel`
+    /// each load their own copy of it.
     public func load() async {
         isLoading = true
         defer { isLoading = false }
         await run(verb: "load") {
-            async let commitments = commitmentsClient.listPersonalCommitments()
+            async let commitments = commitmentsClient.listPersonalCommitments(courseID: nil)
             async let mirroredEvents = mirroredEventsClient.listMirroredCalendarEvents()
+            async let loadedCourses = coursesClient.listCourses()
             let (loadedCommitments, loadedMirroredEvents) = try await (commitments, mirroredEvents)
             entries = merged(commitments: loadedCommitments, mirroredEvents: loadedMirroredEvents)
+            courses = try await loadedCourses
         }
     }
 

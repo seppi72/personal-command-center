@@ -2,9 +2,11 @@ import Foundation
 
 /// Holds the Courses screen's state and talks to the backend through a
 /// `CoursesAPIClient`, plus a `TasksAPIClient`/`ProjectsAPIClient` to build
-/// each Course's Tasks screen (`makeTasksViewModel(for:)`, ticket #20). Kept
-/// separate from `CourseView` so the view stays a thin rendering of this
-/// state (mirrors `ProjectsViewModel`'s split).
+/// each Course's Tasks screen (`makeTasksViewModel(for:)`, ticket #20) and a
+/// `PersonalCommitmentsAPIClient` to build its "Meetings" screen
+/// (`makeCommitmentsViewModel(for:)`, ticket #56). Kept separate from
+/// `CourseView` so the view stays a thin rendering of this state (mirrors
+/// `ProjectsViewModel`'s split).
 ///
 /// `ObservableObject` rather than the newer `@Observable` macro, since that
 /// macro needs iOS 17/macOS 14 and this package targets iOS 16/macOS 13.
@@ -17,11 +19,18 @@ public final class CoursesViewModel: ObservableObject {
     private let client: CoursesAPIClient
     private let tasksClient: TasksAPIClient
     private let projectsClient: ProjectsAPIClient
+    private let commitmentsClient: PersonalCommitmentsAPIClient
 
-    public init(client: CoursesAPIClient, tasksClient: TasksAPIClient, projectsClient: ProjectsAPIClient) {
+    public init(
+        client: CoursesAPIClient,
+        tasksClient: TasksAPIClient,
+        projectsClient: ProjectsAPIClient,
+        commitmentsClient: PersonalCommitmentsAPIClient
+    ) {
         self.client = client
         self.tasksClient = tasksClient
         self.projectsClient = projectsClient
+        self.commitmentsClient = commitmentsClient
     }
 
     /// Builds the `TasksViewModel` for one Course's detail screen, scoped to
@@ -31,6 +40,13 @@ public final class CoursesViewModel: ObservableObject {
     /// one level over).
     public func makeTasksViewModel(for course: Course) -> TasksViewModel {
         TasksViewModel(tasksClient: tasksClient, projectsClient: projectsClient, coursesClient: client, scopedCourseID: course.id)
+    }
+
+    /// Builds the `PersonalCommitmentsViewModel` for one Course's detail
+    /// screen, scoped to that Course's id — `CourseDetailView`'s "Meetings"
+    /// section (ticket #56), the same shape as `makeTasksViewModel(for:)`.
+    public func makeCommitmentsViewModel(for course: Course) -> PersonalCommitmentsViewModel {
+        PersonalCommitmentsViewModel(client: commitmentsClient, coursesClient: client, scopedCourseID: course.id)
     }
 
     public func load() async {

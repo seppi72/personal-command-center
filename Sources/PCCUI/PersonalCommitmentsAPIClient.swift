@@ -6,7 +6,9 @@ import Foundation
 /// testing without a running backend — no such fake exists in this package
 /// yet, but the seam is here for one.
 public protocol PersonalCommitmentsAPIClient: Sendable {
-    func listPersonalCommitments() async throws -> [PersonalCommitment]
+    /// Lists every Commitment, or Commitments scoped to one Course when
+    /// `courseID` is given (ticket #56).
+    func listPersonalCommitments(courseID: UUID?) async throws -> [PersonalCommitment]
     func createPersonalCommitment(_ values: PersonalCommitmentFormValues) async throws -> PersonalCommitment
     func updatePersonalCommitment(id: UUID, values: PersonalCommitmentFormValues) async throws -> PersonalCommitment
     func deletePersonalCommitment(id: UUID) async throws
@@ -29,8 +31,12 @@ public struct URLSessionPersonalCommitmentsAPIClient: PersonalCommitmentsAPIClie
         self.transport = PCCHTTPTransport(baseURL: baseURL, bearerToken: bearerToken, session: session)
     }
 
-    public func listPersonalCommitments() async throws -> [PersonalCommitment] {
-        try await send(makeRequest(path: "v1/personal-commitments", method: "GET"))
+    public func listPersonalCommitments(courseID: UUID?) async throws -> [PersonalCommitment] {
+        try await send(makeRequest(
+            path: "v1/personal-commitments",
+            method: "GET",
+            query: ["courseID": courseID.map(PCCHTTPTransport.QueryValue.uuid)]
+        ))
     }
 
     public func createPersonalCommitment(_ values: PersonalCommitmentFormValues) async throws -> PersonalCommitment {
@@ -58,12 +64,14 @@ public struct URLSessionPersonalCommitmentsAPIClient: PersonalCommitmentsAPIClie
         let startDate: Date
         let endDate: Date
         let recurrenceRule: String?
+        let courseID: UUID?
 
         init(_ values: PersonalCommitmentFormValues) {
             self.title = values.title
             self.startDate = values.startDate
             self.endDate = values.endDate
             self.recurrenceRule = values.recurrenceRule
+            self.courseID = values.courseID
         }
     }
 
