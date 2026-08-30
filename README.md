@@ -44,6 +44,59 @@ Personal Commitments (ticket #6) push to a specific iCloud calendar via CalDAV (
 
 To find your calendar's collection URL: generate an app-specific password at [appleid.apple.com](https://appleid.apple.com), then issue a CalDAV `PROPFIND` against `https://caldav.icloud.com/` with that Apple ID/password (e.g. via a CalDAV-aware client, or `curl -u "<apple-id>:<app-specific-password>" -X PROPFIND ...` following the `calendar-home-set` property) to locate the calendar you want Commitments pushed to, of the form `https://pXX-caldav.icloud.com/<numeric-id>/calendars/<calendar-name>/`.
 
+## Deployment (daily use on this Mac)
+
+The "Local setup" steps above are for developing against the backend. For
+actually using the app day-to-day, `scripts/redeploy.sh` is the "change
+code at will, then redeploy" entrypoint (`docs/adr/0010`):
+
+```sh
+./scripts/redeploy.sh
+```
+
+Each run rebuilds `App` and `PCCDesktop` in release mode, then:
+
+- (Re)starts the backend as a `launchd` LaunchAgent
+  (`com.seppi72.personal-command-center`, `~/Library/LaunchAgents/`) —
+  it starts automatically at login and restarts itself if it crashes, so
+  there's no terminal window to keep open. Bound to `127.0.0.1` only; it's
+  not reachable from other devices (see ADR-0010 on why, and when to
+  revisit that).
+- Refreshes `/Applications/PCCDesktop.app` — a hand-built (unsigned,
+  no Xcode involved) `.app` bundle wrapping the `PCCDesktop` executable, so
+  it's launchable from Spotlight/Launchpad/Dock like a normal Mac app
+  rather than a binary you `cd` to and run from Terminal. Quit and
+  relaunch it after a redeploy to pick up the new build — the bundle's
+  files are replaced on disk, but a still-running instance keeps its old
+  copy loaded until relaunched.
+
+The backend's secrets (`AUTH_TOKENS`, and `CALDAV_*` if you wire that up
+later) live in `~/.pcc.env`, **outside this repo** — `redeploy.sh` creates
+it with a default `AUTH_TOKENS=mac-token` the first time it runs, and
+leaves it alone on every run after that; edit it by hand for anything
+beyond the default. `scripts/run-backend.sh` (what the LaunchAgent
+actually execs) sources this file before launching `App`.
+
+Useful commands once deployed:
+
+```sh
+# Check whether the backend service is running
+launchctl print "gui/$(id -u)/com.seppi72.personal-command-center" | grep state
+
+# Tail backend logs
+tail -f ~/Library/Logs/personal-command-center/backend.log
+tail -f ~/Library/Logs/personal-command-center/backend.error.log
+
+# Stop the backend service (redeploy.sh will restart it on the next run)
+launchctl bootout "gui/$(id -u)/com.seppi72.personal-command-center"
+```
+
+Not covered by this setup (deliberately deferred, see ADR-0010): Postgres
+backups (only brew's on-disk data-directory durability, no snapshot/export
+routine), CalDAV configuration (Personal Commitments pushes stay a
+documented no-op until you configure it — see "CalDAV setup" above), and
+LAN/iOS reachability (backend is Mac-local only for now).
+
 ## API
 
 All routes require `Authorization: Bearer <token>` and are versioned under `/v1`.
@@ -465,17 +518,27 @@ SwiftUI's `Charts` framework) but not run in a simulator or on-device.
 
 ### Local dashboard preview (no Xcode)
 
-`Sources/PCCDesktop` is a dev-only Mac preview app, separate from the real
-Mac/iOS app targets described above — a plain `.executableTarget` (see
-Package.swift) that composes every `PCCUI` screen into one `NavigationSplitView`
-window — a sidebar listing every screen, with the selected one in the detail
-pane — and runs via `swift run`/`swift build --product PCCDesktop`. SwiftUI's `App`
-protocol works fine as a bare SPM executable against the macOS SDK the
-Command Line Tools already ship, with no Xcode.app installation required —
-just no app icon, and it can't run on the iOS Simulator (that specifically
-needs `xcrun simctl`, part of full Xcode). It reads `PCC_BASE_URL` (default
-`http://127.0.0.1:8080`) and `PCC_AUTH_TOKEN` (default `mac-token`, must be
-one of the backend's `AUTH_TOKENS` values) from the environment.
+`Sources/PCCDesktop` is a Mac client, separate from the real Mac/iOS app
+targets described above — a plain `.executableTarget` (see Package.swift)
+that composes every `PCCUI` screen into one `NavigationSplitView` window —
+a sidebar listing every screen, with the selected one in the detail pane.
+SwiftUI's `App` protocol works fine as a bare SPM executable against the
+macOS SDK the Command Line Tools already ship, with no Xcode.app
+installation required — it just can't run on the iOS Simulator (that
+specifically needs `xcrun simctl`, part of full Xcode). It reads
+`PCC_BASE_URL` (default `http://127.0.0.1:8080`) and `PCC_AUTH_TOKEN`
+(default `mac-token`, must be one of the backend's `AUTH_TOKENS` values)
+from the environment, falling back to those defaults when launched with no
+environment at all — as happens double-clicking the `.app` bundle below.
+
+It started as a dev-only preview for iterating on `PCCUI` without Xcode,
+and per `docs/adr/0010` is now also promoted to the real daily-use Mac
+client — see "Deployment (daily use on this Mac)" above for
+`scripts/redeploy.sh`, which wraps this executable into a launchable
+`/Applications/PCCDesktop.app`. The two loops below (running the raw
+binary, or `dev-dashboard.sh`'s watch-and-relaunch) remain the fast local
+iteration path for `PCCUI` changes; they're separate from — and don't
+touch — the deployed `.app` bundle.
 
 To view it with the backend running (`swift run App serve`, see "Local
 setup" above), either run the binary directly:

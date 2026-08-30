@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Info.plist for the hand-built PCCDesktop.app bundle (docs/adr/0010) —
+  there's no Xcode project to generate one, so scripts/redeploy.sh copies
+  this file in verbatim as Contents/Info.plist alongside the built
+  PCCDesktop executable. Not machine-specific — nothing here changes
+  between redeploys.
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Personal Command Center</string>
+    <key>CFBundleDisplayName</key>
+    <string>Personal Command Center</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.seppi72.personal-command-center.desktop</string>
+    <key>CFBundleExecutable</key>
+    <string>PCCDesktop</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+</dict>
+</plist>

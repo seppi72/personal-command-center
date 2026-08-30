@@ -48,15 +48,17 @@ let package = Package(
                 .target(name: "PCCUI"),
             ]
         ),
-        // Dev-only Mac preview app: a plain SPM executable (not an Xcode
-        // app target) that composes every `PCCUI` screen into one window,
-        // so the client can be viewed and iterated on with just `swift run`
-        // — no Xcode required, since SwiftUI's `App` protocol runs fine as
-        // a bare executable against the Command Line Tools' macOS SDK. Not
-        // a substitute for the real Mac/iOS app targets described in the
-        // README's "Consumers (Mac/iOS)" section (no app icon, no iOS
-        // build — this can't run in the Simulator) — just a fast local
-        // loop for seeing `PCCUI` changes without installing Xcode.
+        // Mac client: a plain SPM executable (not an Xcode app target) that
+        // composes every `PCCUI` screen into one window. Started as a
+        // dev-only preview for iterating on `PCCUI` without Xcode
+        // (`swift run` against the Command Line Tools' macOS SDK), but per
+        // `docs/adr/0010` it's now also promoted to the real daily-use Mac
+        // client — `scripts/redeploy.sh` wraps this executable in a
+        // hand-built (unsigned, non-Xcode) `.app` bundle in
+        // `/Applications`. Still not a substitute for the real Xcode
+        // Mac/iOS app targets described in the README's "Consumers
+        // (Mac/iOS)" section — no iOS build, this can't run in the
+        // Simulator — just the interim client until those exist.
         .executableTarget(
             name: "PCCDesktop",
             dependencies: ["PCCUI"]
