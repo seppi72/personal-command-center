@@ -10,10 +10,21 @@ public struct PersonalCommitmentFormValues: Equatable, Sendable {
     public var endDate: Date
     public var recurrenceRule: String?
 
-    public init(title: String, startDate: Date, endDate: Date, recurrenceRule: String? = nil) {
+    /// The Course this Commitment is a class meeting for, if any (ticket
+    /// #56) — `nil` for an ordinary, non-school Commitment.
+    public var courseID: UUID?
+
+    public init(
+        title: String,
+        startDate: Date,
+        endDate: Date,
+        recurrenceRule: String? = nil,
+        courseID: UUID? = nil
+    ) {
         self.title = title
         self.startDate = startDate
         self.endDate = endDate
         self.recurrenceRule = recurrenceRule
+        self.courseID = courseID
     }
 }

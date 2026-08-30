@@ -53,6 +53,7 @@ public func configure(_ app: Application) async throws {
     app.migrations.add(CreateSubcategory())
     app.migrations.add(AddCategoryToTransaction())
     app.migrations.add(CreateNotification())
+    app.migrations.add(AddCourseToPersonalCommitment())
     try await app.autoMigrate()
 
     let validTokens = Set(

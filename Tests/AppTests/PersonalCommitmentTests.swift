@@ -62,7 +62,8 @@ extension AppTestSuite {
                             title: "Dentist",
                             startDate: start,
                             endDate: end,
-                            recurrenceRule: nil
+                            recurrenceRule: nil,
+                            courseID: nil
                         ))
                     },
                     afterResponse: { res async throws in
@@ -95,6 +96,65 @@ extension AppTestSuite {
             }
         }
 
+        @Test("creates a Commitment with a Course link and round-trips it")
+        func createsACommitmentWithACourse() async throws {
+            try await withCommitmentsApp { app, _ in
+                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026)
+                try await course.save(on: app.db)
+                let courseID = try course.requireID()
+                let start = Date(timeIntervalSince1970: 1_800_000_000)
+
+                try await app.testing().test(
+                    .POST, "/v1/personal-commitments",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(SavePersonalCommitmentRequest(
+                            title: "CS 301 Lecture",
+                            startDate: start,
+                            endDate: start.addingTimeInterval(3600),
+                            recurrenceRule: "FREQ=WEEKLY",
+                            courseID: courseID
+                        ))
+                    },
+                    afterResponse: { res async throws in
+                        #expect(res.status == .ok)
+                        let body = try res.content.decode(PersonalCommitmentResponse.self)
+                        #expect(body.courseID == courseID)
+                    }
+                )
+
+                let stored = try await PersonalCommitment.query(on: app.db).all()
+                #expect(stored.first?.$course.id == courseID)
+
+                try await Course.query(on: app.db).delete()
+            }
+        }
+
+        @Test("rejects creating a Commitment with a Course ID that doesn't exist")
+        func rejectsNonexistentCourseOnCreate() async throws {
+            try await withCommitmentsApp { app, _ in
+                try await app.testing().test(
+                    .POST, "/v1/personal-commitments",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(SavePersonalCommitmentRequest(
+                            title: "Orphaned",
+                            startDate: Date(),
+                            endDate: Date().addingTimeInterval(3600),
+                            recurrenceRule: nil,
+                            courseID: UUID()
+                        ))
+                    },
+                    afterResponse: { res async in
+                        #expect(res.status == .badRequest)
+                    }
+                )
+
+                let stored = try await PersonalCommitment.query(on: app.db).all()
+                #expect(stored.isEmpty)
+            }
+        }
+
         @Test("rejects creating a Commitment with an empty or whitespace-only title")
         func rejectsEmptyCommitmentTitle() async throws {
             try await withCommitmentsApp { app, _ in
@@ -106,7 +166,8 @@ extension AppTestSuite {
                             title: "   ",
                             startDate: Date(),
                             endDate: Date().addingTimeInterval(3600),
-                            recurrenceRule: nil
+                            recurrenceRule: nil,
+                            courseID: nil
                         ))
                     },
                     afterResponse: { res async in
@@ -131,7 +192,8 @@ extension AppTestSuite {
                             title: "Backwards",
                             startDate: sameInstant,
                             endDate: sameInstant,
-                            recurrenceRule: nil
+                            recurrenceRule: nil,
+                            courseID: nil
                         ))
                     },
                     afterResponse: { res async in
@@ -163,7 +225,8 @@ extension AppTestSuite {
                             title: "Renamed",
                             startDate: newStart,
                             endDate: newEnd,
-                            recurrenceRule: "FREQ=WEEKLY"
+                            recurrenceRule: "FREQ=WEEKLY",
+                            courseID: nil
                         ))
                     },
                     afterResponse: { res async throws in
@@ -190,6 +253,96 @@ extension AppTestSuite {
             }
         }
 
+        @Test("attaches a Course to a Commitment on edit, then clears it back to none")
+        func editsACommitmentsCourse() async throws {
+            try await withCommitmentsApp { app, _ in
+                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026)
+                try await course.save(on: app.db)
+                let courseID = try course.requireID()
+
+                let commitment = PersonalCommitment(
+                    title: "Lecture",
+                    startDate: Date(timeIntervalSince1970: 1_800_000_000),
+                    endDate: Date(timeIntervalSince1970: 1_800_003_600)
+                )
+                try await commitment.save(on: app.db)
+                let id = try commitment.requireID()
+
+                try await app.testing().test(
+                    .PUT, "/v1/personal-commitments/\(id)",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(SavePersonalCommitmentRequest(
+                            title: "Lecture",
+                            startDate: commitment.startDate,
+                            endDate: commitment.endDate,
+                            recurrenceRule: nil,
+                            courseID: courseID
+                        ))
+                    },
+                    afterResponse: { res async throws in
+                        #expect(res.status == .ok)
+                        let body = try res.content.decode(PersonalCommitmentResponse.self)
+                        #expect(body.courseID == courseID)
+                    }
+                )
+
+                try await app.testing().test(
+                    .PUT, "/v1/personal-commitments/\(id)",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(SavePersonalCommitmentRequest(
+                            title: "Lecture",
+                            startDate: commitment.startDate,
+                            endDate: commitment.endDate,
+                            recurrenceRule: nil,
+                            courseID: nil
+                        ))
+                    },
+                    afterResponse: { res async throws in
+                        #expect(res.status == .ok)
+                        let body = try res.content.decode(PersonalCommitmentResponse.self)
+                        #expect(body.courseID == nil)
+                    }
+                )
+
+                try await Course.query(on: app.db).delete()
+            }
+        }
+
+        @Test("rejects editing a Commitment with a Course ID that doesn't exist")
+        func rejectsNonexistentCourseOnEdit() async throws {
+            try await withCommitmentsApp { app, _ in
+                let commitment = PersonalCommitment(
+                    title: "Lecture",
+                    startDate: Date(timeIntervalSince1970: 1_800_000_000),
+                    endDate: Date(timeIntervalSince1970: 1_800_003_600)
+                )
+                try await commitment.save(on: app.db)
+                let id = try commitment.requireID()
+
+                try await app.testing().test(
+                    .PUT, "/v1/personal-commitments/\(id)",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(SavePersonalCommitmentRequest(
+                            title: "Lecture",
+                            startDate: commitment.startDate,
+                            endDate: commitment.endDate,
+                            recurrenceRule: nil,
+                            courseID: UUID()
+                        ))
+                    },
+                    afterResponse: { res async in
+                        #expect(res.status == .badRequest)
+                    }
+                )
+
+                let stored = try await PersonalCommitment.find(id, on: app.db)
+                #expect(stored?.$course.id == nil)
+            }
+        }
+
         @Test("editing a Commitment that doesn't exist 404s")
         func editingMissingCommitmentFails() async throws {
             try await withCommitmentsApp { app, _ in
@@ -201,7 +354,8 @@ extension AppTestSuite {
                             title: "Doesn't matter",
                             startDate: Date(),
                             endDate: Date().addingTimeInterval(3600),
-                            recurrenceRule: nil
+                            recurrenceRule: nil,
+                            courseID: nil
                         ))
                     },
                     afterResponse: { res async in
@@ -241,6 +395,42 @@ extension AppTestSuite {
                 #expect(entries.count == 1)
                 #expect(entries.first?.actionType == "personal_commitment.delete")
                 #expect(entries.first?.outcome == .success)
+            }
+        }
+
+        @Test("deletes a Commitment with a Course link the same as one without")
+        func deletesACommitmentWithACourse() async throws {
+            try await withCommitmentsApp { app, _ in
+                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026)
+                try await course.save(on: app.db)
+                let courseID = try course.requireID()
+
+                let commitment = PersonalCommitment(
+                    title: "Lecture",
+                    startDate: Date(timeIntervalSince1970: 1_800_000_000),
+                    endDate: Date(timeIntervalSince1970: 1_800_003_600),
+                    courseID: courseID
+                )
+                try await commitment.save(on: app.db)
+                let id = try commitment.requireID()
+
+                try await app.testing().test(
+                    .DELETE, "/v1/personal-commitments/\(id)",
+                    headers: authHeaders(),
+                    afterResponse: { res async in
+                        #expect(res.status == .noContent)
+                    }
+                )
+
+                let stored = try await PersonalCommitment.find(id, on: app.db)
+                #expect(stored == nil)
+
+                // The Course itself is untouched — only the Commitment
+                // side of the link is deleted.
+                let storedCourse = try await Course.find(courseID, on: app.db)
+                #expect(storedCourse != nil)
+
+                try await Course.query(on: app.db).delete()
             }
         }
 
@@ -326,6 +516,40 @@ extension AppTestSuite {
             }
         }
 
+        @Test("filters Personal Commitments by ?courseID=")
+        func filtersCommitmentsByCourse() async throws {
+            try await withCommitmentsApp { app, _ in
+                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026)
+                try await course.save(on: app.db)
+                let courseID = try course.requireID()
+
+                try await PersonalCommitment(
+                    title: "CS 301 Lecture",
+                    startDate: Date(timeIntervalSince1970: 1_800_000_000),
+                    endDate: Date(timeIntervalSince1970: 1_800_003_600),
+                    courseID: courseID
+                ).save(on: app.db)
+                try await PersonalCommitment(
+                    title: "Dentist",
+                    startDate: Date(timeIntervalSince1970: 1_900_000_000),
+                    endDate: Date(timeIntervalSince1970: 1_900_003_600)
+                ).save(on: app.db)
+
+                try await app.testing().test(
+                    .GET, "/v1/personal-commitments?courseID=\(courseID)",
+                    headers: authHeaders(),
+                    afterResponse: { res async throws in
+                        #expect(res.status == .ok)
+                        let body = try res.content.decode([PersonalCommitmentResponse].self)
+                        #expect(body.count == 1)
+                        #expect(body.first?.title == "CS 301 Lecture")
+                    }
+                )
+
+                try await Course.query(on: app.db).delete()
+            }
+        }
+
         @Test(
             "a CalDAV push failure still saves the Commitment locally, marks it failed, and logs the failure"
         )
@@ -340,7 +564,8 @@ extension AppTestSuite {
                             title: "Will fail to sync",
                             startDate: Date(timeIntervalSince1970: 1_800_000_000),
                             endDate: Date(timeIntervalSince1970: 1_800_003_600),
-                            recurrenceRule: nil
+                            recurrenceRule: nil,
+                            courseID: nil
                         ))
                     },
                     afterResponse: { res async throws in

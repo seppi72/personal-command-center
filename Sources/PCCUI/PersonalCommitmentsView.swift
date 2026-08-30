@@ -40,6 +40,7 @@ public struct PersonalCommitmentsView: View {
             .commitmentEditingSheets(
                 isPresentingNewCommitmentSheet: $isPresentingNewCommitmentSheet,
                 editingCommitment: $editingCommitment,
+                courses: viewModel.courses,
                 onCreate: { values in await viewModel.createCommitment(values) },
                 onUpdate: { commitment, values in await viewModel.updateCommitment(commitment, with: values) }
             )
@@ -100,22 +101,31 @@ public struct PersonalCommitmentsView: View {
 /// recurrence rule (mirrors `TaskFormSheet`/`ProjectFormSheet`).
 struct PersonalCommitmentFormSheet: View {
     let title: String
+    let courses: [Course]
     let onSave: (PersonalCommitmentFormValues) async -> Void
 
     @State private var commitmentTitle: String
     @State private var startDate: Date
     @State private var endDate: Date
     @State private var recurrenceRule: String
+    @State private var courseID: UUID?
     @Environment(\.dismiss) private var dismiss
 
-    init(title: String, initialValues: PersonalCommitmentFormValues?, onSave: @escaping (PersonalCommitmentFormValues) async -> Void) {
+    init(
+        title: String,
+        initialValues: PersonalCommitmentFormValues?,
+        courses: [Course],
+        onSave: @escaping (PersonalCommitmentFormValues) async -> Void
+    ) {
         self.title = title
+        self.courses = courses
         self.onSave = onSave
         let defaultStart = Date()
         self._commitmentTitle = State(initialValue: initialValues?.title ?? "")
         self._startDate = State(initialValue: initialValues?.startDate ?? defaultStart)
         self._endDate = State(initialValue: initialValues?.endDate ?? defaultStart.addingTimeInterval(3600))
         self._recurrenceRule = State(initialValue: initialValues?.recurrenceRule ?? "")
+        self._courseID = State(initialValue: initialValues?.courseID)
     }
 
     private var trimmedTitle: String {
@@ -143,6 +153,15 @@ struct PersonalCommitmentFormSheet: View {
                         .foregroundStyle(.red)
                 }
                 TextField("Recurrence (e.g. FREQ=WEEKLY)", text: $recurrenceRule)
+                // Optional and standalone — unlike `TaskFormSheet`'s
+                // Project/Course pickers, there's no other container this
+                // one is mutually exclusive with (spec #56).
+                Picker("Course", selection: $courseID) {
+                    Text("None").tag(UUID?.none)
+                    ForEach(courses) { course in
+                        Text(course.name).tag(UUID?.some(course.id))
+                    }
+                }
             }
             .navigationTitle(title)
             .toolbar {
@@ -155,7 +174,8 @@ struct PersonalCommitmentFormSheet: View {
                             title: trimmedTitle,
                             startDate: startDate,
                             endDate: endDate,
-                            recurrenceRule: trimmedRecurrenceRule
+                            recurrenceRule: trimmedRecurrenceRule,
+                            courseID: courseID
                         )
                         Task {
                             await onSave(values)

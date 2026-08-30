@@ -18,6 +18,7 @@ extension AppTestSuite {
             }) { app in
                 let result = try await test(app)
                 try await TimeEntry.query(on: app.db).delete()
+                try await PersonalCommitment.query(on: app.db).delete()
                 try await Course.query(on: app.db).delete()
                 return result
             }
@@ -220,6 +221,33 @@ extension AppTestSuite {
                 let start = Date(timeIntervalSince1970: 1_800_000_000)
                 try await TimeEntry(
                     startDate: start, endDate: start.addingTimeInterval(3600), container: .course(id)
+                ).save(on: app.db)
+
+                try await app.testing().test(
+                    .DELETE, "/v1/courses/\(id)",
+                    headers: authHeaders(),
+                    afterResponse: { res async in
+                        #expect(res.status == .badRequest)
+                    }
+                )
+
+                let stored = try await Course.find(id, on: app.db)
+                #expect(stored != nil)
+            }
+        }
+
+        @Test("rejects deleting a Course a Personal Commitment still references")
+        func deletingCourseWithReferencingCommitmentFails() async throws {
+            try await withCoursesApp { app in
+                let course = Course(name: "Referenced", termMonth: 9, termYear: 2026)
+                try await course.save(on: app.db)
+                let id = try course.requireID()
+                let start = Date(timeIntervalSince1970: 1_800_000_000)
+                try await PersonalCommitment(
+                    title: "Lecture",
+                    startDate: start,
+                    endDate: start.addingTimeInterval(3600),
+                    courseID: id
                 ).save(on: app.db)
 
                 try await app.testing().test(

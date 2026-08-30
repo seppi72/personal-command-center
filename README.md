@@ -76,8 +76,8 @@ All routes require `Authorization: Bearer <token>` and are versioned under `/v1`
 | `DELETE` | `/v1/sprints/:sprintID` | Delete a Sprint |
 | `PUT` | `/v1/projects/:projectID/deadline` | Attach/change/remove a Project's Deadline (`{ "dueDate": "<ISO 8601>"? }`, omit or `null` to remove) |
 | `GET` | `/v1/deadlines` | Every Task, Project, and Course together, ordered by Deadline proximity (undated items included, sorted last) |
-| `GET` | `/v1/personal-commitments` | List all Personal Commitments |
-| `POST` | `/v1/personal-commitments` | Create a Personal Commitment (`{ "title": "...", "startDate": "<ISO 8601>", "endDate": "<ISO 8601>", "recurrenceRule": "..."? }`) and push it to CalDAV |
+| `GET` | `/v1/personal-commitments` | List all Personal Commitments; add `?courseID=` to scope to one Course |
+| `POST` | `/v1/personal-commitments` | Create a Personal Commitment (`{ "title": "...", "startDate": "<ISO 8601>", "endDate": "<ISO 8601>", "recurrenceRule": "..."?, "courseID": "..."? }`) and push it to CalDAV |
 | `PUT` | `/v1/personal-commitments/:commitmentID` | Edit a Personal Commitment (same body as create) and re-push it to CalDAV |
 | `DELETE` | `/v1/personal-commitments/:commitmentID` | Delete a Personal Commitment and remove its CalDAV event |
 | `GET` | `/v1/calendar-events` | List every mirrored external Calendar event (read-only — no create/update/delete; see "Calendar sync" below) |
@@ -134,7 +134,7 @@ A Sprint (`CONTEXT.md`) is a time-boxed iteration within one Project that Tasks 
 
 ### Courses (ticket #19)
 
-A Course (`CONTEXT.md`) is a container of related Tasks/Deadlines for a single school class, e.g. "CS 301" — analogous to how a Project contains personal Tasks, down to optionally carrying its own Deadline the same way a Project can (`PUT /v1/courses/:courseID/deadline` mirrors `ProjectController.setDeadline` exactly). Created directly by the owner each Term, not auto-detected; the Tasks/Deadlines inside it are what auto-populate later, from a school data source. `CourseController` is a plain CRUD surface, same shape as `ProjectController`'s/`ClientController`'s — `GET /v1/courses` lists every Course with no scoping, since a Course is top-level, not nested under anything.
+A Course (`CONTEXT.md`) is a container of related Tasks/Deadlines for a single school class, e.g. "CS 301" — analogous to how a Project contains personal Tasks, down to optionally carrying its own Deadline the same way a Project can (`PUT /v1/courses/:courseID/deadline` mirrors `ProjectController.setDeadline` exactly). Created directly by the owner each Term, not auto-detected; its Tasks, Deadlines, Time Entries, and (ticket #56) Personal Commitments are entered the same way any other Task, Deadline, Time Entry, or Personal Commitment is — there's no accessible school data source to auto-populate them from, a deliberate decision, not a placeholder for a future sync (`docs/adr/0009-manual-entry-not-lms-integration-for-school.md`). `CourseController` is a plain CRUD surface, same shape as `ProjectController`'s/`ClientController`'s — `GET /v1/courses` lists every Course with no scoping, since a Course is top-level, not nested under anything.
 
 Term (the month and year a Course belongs to, e.g. "September 2026") is modeled as two required integers, `termMonth`/`termYear`, rather than a `Date` — there's no real day-of-month in a Term, and fabricating one (e.g. the 1st) would misrepresent the domain. The JSON shape keeps `termMonth`/`termYear` flat on `SaveCourseRequest`/`CourseResponse` rather than a nested `{ "term": { ... } }` object, matching every other DTO in this codebase.
 
@@ -213,6 +213,12 @@ A Notification (`CONTEXT.md`) is the owner's "needs you" queue: a surfaced item 
 ### Personal Commitments
 
 A Personal Commitment (`CONTEXT.md`) is canonical — the Command Center owns it, not the external Calendar — so create/edit/delete always succeed locally regardless of whether the CalDAV push succeeds. Each push (or removal) is attempted synchronously in the same request, and its outcome is written to `AutomationLog` and reflected in the Commitment's `syncStatus` (`pending` → `synced` or `failed`) in the response, rather than failing the request. The recurring sync job (below) is what retries a failed push later; browsing `AutomationLog` itself is ticket #8's.
+
+### Personal Commitment ↔ Course link (ticket #56)
+
+A Personal Commitment optionally links to a Course (`CONTEXT.md`) — a class meeting time logged as a Commitment, e.g. a recurring lecture (`docs/adr/0009-manual-entry-not-lms-integration-for-school.md`). It's a single optional link, not Time Entry's four-way container exclusivity (ADR-0004): nothing about a Commitment requires it to also attach to a Task/Project/Client, so `courseID` folds straight into the existing `SavePersonalCommitmentRequest`/`PersonalCommitmentResponse` shapes rather than a separate `PUT .../course` endpoint like Task/Course use. `PersonalCommitmentController.validatedCourseID` checks a non-nil `courseID` against `Course.find` before saving, throwing the same `Abort(.badRequest, reason: "no such Course")` `TaskController.assignCourse` throws for the identical case. `GET /v1/personal-commitments` accepts `?courseID=`, mirroring the same filter Task and Time Entry's own `index` already support.
+
+The link is guarded the same way Time Entry's own containers and Finances' Accounts are (see "Blocking deletion with referencing Time Entries"/"Blocking Account deletion" above): `CourseController.delete` also rejects deleting a Course while any Personal Commitment still references it, alongside its existing Time Entry check. `AddCourseToPersonalCommitment`'s `course_id` foreign key is `.cascade`, not `.setNull` like `PCCTask.course` — since the guard already blocks the delete at the API level, this cascade is a database-level fallback only, never actually reached. The link is Command-Center-internal only: `CalendarSyncService.push` never serializes it into the pushed CalDAV event's title, description, or any other field.
 
 ### Calendar sync (ticket #7)
 
@@ -344,7 +350,15 @@ environment. To use it:
    "Tasks" section: each Task's completion toggle, title, and due date, with
    add/edit/complete/delete via the same `TaskFormSheet`/`TasksViewModel`
    the top-level Tasks screen uses (just scoped to that Course), rather than
-   a separate, duplicated implementation. `DeadlinesView`'s row glyph now has
+   a separate, duplicated implementation. Below it, a "Meetings" section
+   (ticket #56) lists that Course's linked Personal Commitments — title and
+   start/end time/recurrence, with the same tap-to-edit and swipe-to-delete
+   affordances — via the same `PersonalCommitmentFormSheet`/
+   `PersonalCommitmentsViewModel` the top-level Personal Commitments/Calendar
+   screens use, scoped to that Course through `CoursesViewModel`'s new
+   `makeCommitmentsViewModel(for:)` factory (mirrors `makeTasksViewModel(for:)`;
+   `CoursesViewModel`'s `init` now also takes a
+   `commitmentsClient: PersonalCommitmentsAPIClient`). `DeadlinesView`'s row glyph now has
    a third case (`"graduationcap"`) for a Course's own Deadline, alongside
    the existing Task/Project glyphs. `TimeEntriesView` (ticket #27) lists
    Time Entries with add/edit/delete via `TimeEntryFormSheet`, a container
@@ -367,7 +381,15 @@ environment. To use it:
    can create/edit/delete Commitments the same way that screen does.
    `PersonalCommitmentsView` still exists as the Commitment-only screen —
    `CalendarView` is the "everything on my calendar" view on top of it, not
-   a replacement.
+   a replacement. `PersonalCommitmentFormSheet` (shared by both screens via
+   `commitmentEditingSheets`) now also has a Course picker offering "None"
+   plus every Course, optional and standalone — unlike `TaskFormSheet`'s
+   Project/Course pair, nothing else on the form is mutually exclusive with
+   it (ticket #56). `PersonalCommitmentsViewModel`'s `init` now also takes a
+   `coursesClient: CoursesAPIClient` to populate that picker, plus an
+   optional `scopedCourseID` mirroring `TasksViewModel`'s; `CalendarViewModel`
+   likewise now takes a `coursesClient` to populate the same picker on the
+   form it shares.
 5. `AutomationLogView` (ticket #8) is read-only, like `DeadlinesView`: recent
    `AutomationLog` entries, most recent first, with the most recent sync
    failure (if any) shown as a banner at the top of the screen rather than

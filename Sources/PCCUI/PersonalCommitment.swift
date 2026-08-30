@@ -20,6 +20,10 @@ public struct PersonalCommitment: Codable, Identifiable, Equatable, Sendable {
     public var endDate: Date
     public var recurrenceRule: String?
 
+    /// The Course this Commitment is a class meeting for, if any (ticket
+    /// #56) — a single optional link, mirroring `PCCTask.courseID`.
+    public var courseID: UUID?
+
     /// Stored as the raw wire value; `syncStatus` maps an unrecognized one
     /// to `.pending` rather than failing to decode the whole Commitment —
     /// same fallback the backend's own `PersonalCommitment.syncStatus`
@@ -32,7 +36,7 @@ public struct PersonalCommitment: Codable, Identifiable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, startDate, endDate, recurrenceRule
+        case id, title, startDate, endDate, recurrenceRule, courseID
         case syncStatusRaw = "syncStatus"
     }
 
@@ -42,7 +46,8 @@ public struct PersonalCommitment: Codable, Identifiable, Equatable, Sendable {
         startDate: Date,
         endDate: Date,
         recurrenceRule: String? = nil,
-        syncStatus: SyncStatus = .pending
+        syncStatus: SyncStatus = .pending,
+        courseID: UUID? = nil
     ) {
         self.id = id
         self.title = title
@@ -50,5 +55,6 @@ public struct PersonalCommitment: Codable, Identifiable, Equatable, Sendable {
         self.endDate = endDate
         self.recurrenceRule = recurrenceRule
         self.syncStatusRaw = syncStatus.rawValue
+        self.courseID = courseID
     }
 }

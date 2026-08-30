@@ -63,7 +63,8 @@ public struct CourseView: View {
                     CourseDetailView(
                         course: course,
                         viewModel: viewModel,
-                        tasksViewModel: viewModel.makeTasksViewModel(for: course)
+                        tasksViewModel: viewModel.makeTasksViewModel(for: course),
+                        commitmentsViewModel: viewModel.makeCommitmentsViewModel(for: course)
                     )
                 } label: {
                     VStack(alignment: .leading) {
@@ -211,20 +212,27 @@ struct CourseFormSheet: View {
 /// A Course's detail screen (ticket #20): the Course's name/Term/due date
 /// read-only at the top (editing moved here from the list row, via the
 /// toolbar's "Edit" button — same `CourseFormSheet`/`onSave` wiring as
-/// before), plus a "Tasks" section listing the Course's Tasks with
+/// before), a "Tasks" section listing the Course's Tasks with
 /// add/edit/complete/delete — the Course-scoped counterpart to
 /// `ProjectDetailView`'s "Sprints" section, backed by the same
 /// `TasksViewModel`/`TaskFormSheet` the top-level Tasks screen uses (just
 /// scoped to this Course via `CoursesViewModel.makeTasksViewModel(for:)`)
-/// rather than a separate, duplicated row/form implementation.
+/// rather than a separate, duplicated row/form implementation — plus a
+/// "Meetings" section (ticket #56) listing the Course's linked Personal
+/// Commitments the same way, backed by `PersonalCommitmentsViewModel`/
+/// `PersonalCommitmentFormSheet` scoped via
+/// `CoursesViewModel.makeCommitmentsViewModel(for:)`.
 struct CourseDetailView: View {
     let course: Course
     @ObservedObject var viewModel: CoursesViewModel
     @ObservedObject var tasksViewModel: TasksViewModel
+    @ObservedObject var commitmentsViewModel: PersonalCommitmentsViewModel
 
     @State private var isPresentingEditSheet = false
     @State private var isPresentingNewTaskSheet = false
     @State private var editingTask: PCCTask?
+    @State private var isPresentingNewMeetingSheet = false
+    @State private var editingCommitment: PersonalCommitment?
 
     /// The freshest known copy of `course` — falls back to the value passed
     /// in if `viewModel.courses` hasn't (yet) reflected an edit.
@@ -247,42 +255,10 @@ struct CourseDetailView: View {
                 }
             }
             Section("Tasks") {
-                if tasksViewModel.tasks.isEmpty {
-                    Text("No Tasks yet.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(tasksViewModel.tasks) { task in
-                        HStack {
-                            Button {
-                                Task {
-                                    await tasksViewModel.setCompletion(task, isComplete: !task.isComplete)
-                                }
-                            } label: {
-                                Image(systemName: task.isComplete ? "checkmark.circle.fill" : "circle")
-                            }
-                            #if os(macOS)
-                            .buttonStyle(.plain)
-                            #endif
-
-                            Button {
-                                editingTask = task
-                            } label: {
-                                VStack(alignment: .leading) {
-                                    Text(task.title)
-                                        .strikethrough(task.isComplete)
-                                    if let dueDate = task.dueDate {
-                                        Text(dueDate, style: .date)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                            }
-                            #if os(macOS)
-                            .buttonStyle(.plain)
-                            #endif
-                        }
-                    }
-                    .onDelete { offsets in
+                listRows(
+                    items: tasksViewModel.tasks,
+                    emptyText: "No Tasks yet.",
+                    onDelete: { offsets in
                         let toDelete = offsets.map { tasksViewModel.tasks[$0] }
                         Task {
                             for task in toDelete {
@@ -290,11 +266,79 @@ struct CourseDetailView: View {
                             }
                         }
                     }
+                ) { task in
+                    HStack {
+                        Button {
+                            Task {
+                                await tasksViewModel.setCompletion(task, isComplete: !task.isComplete)
+                            }
+                        } label: {
+                            Image(systemName: task.isComplete ? "checkmark.circle.fill" : "circle")
+                        }
+                        #if os(macOS)
+                        .buttonStyle(.plain)
+                        #endif
+
+                        Button {
+                            editingTask = task
+                        } label: {
+                            VStack(alignment: .leading) {
+                                Text(task.title)
+                                    .strikethrough(task.isComplete)
+                                if let dueDate = task.dueDate {
+                                    Text(dueDate, style: .date)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        #if os(macOS)
+                        .buttonStyle(.plain)
+                        #endif
+                    }
                 }
                 Button {
                     isPresentingNewTaskSheet = true
                 } label: {
                     Label("Add Task", systemImage: "plus")
+                }
+            }
+            Section("Meetings") {
+                listRows(
+                    items: commitmentsViewModel.commitments,
+                    emptyText: "No Meetings yet.",
+                    onDelete: { offsets in
+                        let toDelete = offsets.map { commitmentsViewModel.commitments[$0] }
+                        Task {
+                            for commitment in toDelete {
+                                await commitmentsViewModel.deleteCommitment(commitment)
+                            }
+                        }
+                    }
+                ) { commitment in
+                    Button {
+                        editingCommitment = commitment
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(commitment.title)
+                            Text("\(commitment.startDate, style: .time) – \(commitment.endDate, style: .time)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            if let recurrenceRule = commitment.recurrenceRule {
+                                Text(recurrenceRule)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    #if os(macOS)
+                    .buttonStyle(.plain)
+                    #endif
+                }
+                Button {
+                    isPresentingNewMeetingSheet = true
+                } label: {
+                    Label("Add Meeting", systemImage: "plus")
                 }
             }
         }
@@ -306,9 +350,14 @@ struct CourseDetailView: View {
                 }
             }
         }
-        .task { await tasksViewModel.load() }
-        .refreshable { await tasksViewModel.load() }
+        .task { await loadAll() }
+        .refreshable { await loadAll() }
         .alert("Error", isPresented: isShowingTasksError, presenting: tasksViewModel.errorMessage) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { message in
+            Text(message)
+        }
+        .alert("Error", isPresented: isShowingCommitmentsError, presenting: commitmentsViewModel.errorMessage) { _ in
             Button("OK", role: .cancel) {}
         } message: { message in
             Text(message)
@@ -352,6 +401,32 @@ struct CourseDetailView: View {
                 await tasksViewModel.updateTask(task, with: values)
             }
         }
+        .sheet(isPresented: $isPresentingNewMeetingSheet) {
+            PersonalCommitmentFormSheet(
+                title: "New Meeting",
+                initialValues: PersonalCommitmentFormValues(
+                    title: "", startDate: Date(), endDate: Date().addingTimeInterval(3600), courseID: currentCourse.id
+                ),
+                courses: commitmentsViewModel.courses
+            ) { values in
+                await commitmentsViewModel.createCommitment(values)
+            }
+        }
+        .sheet(item: $editingCommitment) { commitment in
+            PersonalCommitmentFormSheet(
+                title: "Edit Meeting",
+                initialValues: PersonalCommitmentFormValues(
+                    title: commitment.title,
+                    startDate: commitment.startDate,
+                    endDate: commitment.endDate,
+                    recurrenceRule: commitment.recurrenceRule,
+                    courseID: commitment.courseID
+                ),
+                courses: commitmentsViewModel.courses
+            ) { values in
+                await commitmentsViewModel.updateCommitment(commitment, with: values)
+            }
+        }
     }
 
     private var isShowingTasksError: Binding<Bool> {
@@ -359,5 +434,43 @@ struct CourseDetailView: View {
             get: { tasksViewModel.errorMessage != nil },
             set: { isShowing in if !isShowing { tasksViewModel.errorMessage = nil } }
         )
+    }
+
+    private var isShowingCommitmentsError: Binding<Bool> {
+        Binding(
+            get: { commitmentsViewModel.errorMessage != nil },
+            set: { isShowing in if !isShowing { commitmentsViewModel.errorMessage = nil } }
+        )
+    }
+
+    /// Loads the Tasks and Meetings sections concurrently — shared by
+    /// `.task`/`.refreshable` so the two don't each repeat the same
+    /// `async let` pair.
+    private func loadAll() async {
+        async let tasksLoad: Void = tasksViewModel.load()
+        async let commitmentsLoad: Void = commitmentsViewModel.load()
+        _ = await (tasksLoad, commitmentsLoad)
+    }
+
+    /// The "empty text, else a deletable list of rows" shape both the Tasks
+    /// and Meetings sections share — `row` owns each item's own tap
+    /// target(s) (Tasks needs two independent ones, a completion toggle
+    /// plus edit; Meetings needs only one), so only the boilerplate around
+    /// it — the empty state, `ForEach`, and swipe-to-delete — is factored
+    /// out here.
+    @ViewBuilder
+    private func listRows<Item: Identifiable, Row: View>(
+        items: [Item],
+        emptyText: String,
+        onDelete: @escaping (IndexSet) -> Void,
+        @ViewBuilder row: @escaping (Item) -> Row
+    ) -> some View {
+        if items.isEmpty {
+            Text(emptyText)
+                .foregroundStyle(.secondary)
+        } else {
+            ForEach(items, content: row)
+                .onDelete(perform: onDelete)
+        }
     }
 }

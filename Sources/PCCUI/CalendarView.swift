@@ -46,6 +46,7 @@ public struct CalendarView: View {
             .commitmentEditingSheets(
                 isPresentingNewCommitmentSheet: $isPresentingNewCommitmentSheet,
                 editingCommitment: $editingCommitment,
+                courses: viewModel.courses,
                 onCreate: { values in await viewModel.createCommitment(values) },
                 onUpdate: { commitment, values in await viewModel.updateCommitment(commitment, with: values) }
             )

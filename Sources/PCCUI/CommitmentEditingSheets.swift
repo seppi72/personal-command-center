@@ -8,13 +8,14 @@ import SwiftUI
 private struct CommitmentEditingSheetsModifier: ViewModifier {
     @Binding var isPresentingNewCommitmentSheet: Bool
     @Binding var editingCommitment: PersonalCommitment?
+    let courses: [Course]
     let onCreate: (PersonalCommitmentFormValues) async -> Void
     let onUpdate: (PersonalCommitment, PersonalCommitmentFormValues) async -> Void
 
     func body(content: Content) -> some View {
         content
             .sheet(isPresented: $isPresentingNewCommitmentSheet) {
-                PersonalCommitmentFormSheet(title: "New Commitment", initialValues: nil) { values in
+                PersonalCommitmentFormSheet(title: "New Commitment", initialValues: nil, courses: courses) { values in
                     await onCreate(values)
                 }
             }
@@ -25,8 +26,10 @@ private struct CommitmentEditingSheetsModifier: ViewModifier {
                         title: commitment.title,
                         startDate: commitment.startDate,
                         endDate: commitment.endDate,
-                        recurrenceRule: commitment.recurrenceRule
-                    )
+                        recurrenceRule: commitment.recurrenceRule,
+                        courseID: commitment.courseID
+                    ),
+                    courses: courses
                 ) { values in
                     await onUpdate(commitment, values)
                 }
@@ -37,12 +40,14 @@ private struct CommitmentEditingSheetsModifier: ViewModifier {
 extension View {
     /// Attaches the shared "New Commitment" / "Edit Commitment" sheet pair.
     /// `isPresentingNewCommitmentSheet`/`editingCommitment` are the calling
-    /// screen's own `@State`; `onCreate`/`onUpdate` forward to whichever
-    /// view model owns that screen's Commitments
-    /// (`PersonalCommitmentsViewModel` or `CalendarViewModel`).
+    /// screen's own `@State`; `courses` sources the form's Course picker
+    /// (ticket #56); `onCreate`/`onUpdate` forward to whichever view model
+    /// owns that screen's Commitments (`PersonalCommitmentsViewModel` or
+    /// `CalendarViewModel`).
     func commitmentEditingSheets(
         isPresentingNewCommitmentSheet: Binding<Bool>,
         editingCommitment: Binding<PersonalCommitment?>,
+        courses: [Course],
         onCreate: @escaping (PersonalCommitmentFormValues) async -> Void,
         onUpdate: @escaping (PersonalCommitment, PersonalCommitmentFormValues) async -> Void
     ) -> some View {
@@ -50,6 +55,7 @@ extension View {
             CommitmentEditingSheetsModifier(
                 isPresentingNewCommitmentSheet: isPresentingNewCommitmentSheet,
                 editingCommitment: editingCommitment,
+                courses: courses,
                 onCreate: onCreate,
                 onUpdate: onUpdate
             )
