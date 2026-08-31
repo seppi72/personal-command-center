@@ -9,18 +9,37 @@ import SwiftUI
 public struct WorkHoursView: View {
     @ObservedObject private var viewModel: WorkHoursViewModel
 
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.screenTheme) private var theme
-
     public init(viewModel: WorkHoursViewModel) {
         self.viewModel = viewModel
     }
 
     public var body: some View {
+        WorkHoursContent(viewModel: viewModel)
+            .screenTheme(.greenLedger)
+    }
+}
+
+/// The screen's actual content — split out from `WorkHoursView` itself so
+/// `.screenTheme(.greenLedger)` (applied in that struct's body, above) is
+/// genuinely in effect by the time this struct's own `body` reads
+/// `@Environment(\.screenTheme)`. See `View.screenTheme(_:)`'s doc comment
+/// in `PCCChassis.swift` for why the split is required.
+private struct WorkHoursContent: View {
+    @ObservedObject var viewModel: WorkHoursViewModel
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
+
+    var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 controls
-                totalStrip
+                    .padding(.horizontal, PCCChassis.outerMargin)
+                    .padding(.top, PCCChassis.outerMargin)
+                totalLine
+                    .padding(.horizontal, PCCChassis.outerMargin)
+                    .padding(.top, 14)
+                    .padding(.bottom, 14)
                 if viewModel.rows.isEmpty && !viewModel.isLoading {
                     emptyState
                 } else {
@@ -35,33 +54,35 @@ public struct WorkHoursView: View {
         }
     }
 
-    private var readoutColor: Color {
-        theme.accent(colorScheme)
-    }
+    // MARK: - Total line
 
-    /// A mono readout of the rollup's grand total — the one figure worth a
-    /// glance before reading every individual row, the same "hero number
-    /// above the rows" device `AccountsView`/`TasksView`'s status strips
-    /// use, just carrying a readout instead of a StatusDot since a Work
-    /// Hours total has no urgency threshold to flag.
-    private var totalStrip: some View {
-        HStack(alignment: .lastTextBaseline, spacing: 6) {
-            Text(Self.formattedDuration(totalSeconds))
-                .font(.pccReadout(18))
-                .foregroundStyle(readoutColor)
+    /// This screen's signature: a boxed, double-ruled grand total — the
+    /// bottom line of a real accounting ledger — in place of the shared
+    /// chassis's plain mono readout strip every other screen's hero number
+    /// uses.
+    private var totalLine: some View {
+        HStack(alignment: .lastTextBaseline) {
             Text("Total")
                 .pccPanelLabel()
                 .foregroundStyle(.secondary)
             Spacer()
+            Text(Self.formattedDuration(totalSeconds))
+                .font(.pccReadout(22))
+                .foregroundStyle(theme.accent(colorScheme))
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(theme.panelSurface(colorScheme))
         .overlay(
-            Rectangle()
-                .fill(theme.panelLine(colorScheme))
-                .frame(height: 1),
-            alignment: .bottom
+            Rectangle().fill(theme.accent(colorScheme)).frame(height: 2),
+            alignment: .top
         )
+        .overlay(alignment: .bottom) {
+            VStack(spacing: 2) {
+                Rectangle().fill(theme.accent(colorScheme)).frame(height: 1.5)
+                Rectangle().fill(theme.accent(colorScheme)).frame(height: 1.5)
+            }
+        }
     }
 
     private var totalSeconds: Double {
@@ -88,21 +109,40 @@ public struct WorkHoursView: View {
             }
             Spacer()
         }
-        .padding(12)
     }
 
+    // MARK: - Rows
+
+    /// Alternating "green-bar" row stripes — classic tractor-feed
+    /// accounting paper — rather than the shared chassis's per-row bordered
+    /// cards (`panelRows()`); a faint accent-tinted wash over every other
+    /// row instead of a dedicated theme color, since `ScreenTheme` has no
+    /// field of its own for a striping color and this is the only screen
+    /// that wants one.
     private var rowList: some View {
-        List(Array(viewModel.rows.enumerated()), id: \.offset) { _, row in
+        List(Array(viewModel.rows.enumerated()), id: \.offset) { index, row in
             HStack {
                 Text(Self.label(for: row))
                 Spacer()
                 Text(Self.formattedDuration(row.totalSeconds))
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(.system(size: 13, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
+            .padding(.vertical, 4)
+            .listRowBackground(rowBackground(index: index))
+            .listRowSeparatorTint(theme.panelLine(colorScheme))
         }
-        .panelRows()
+        .listStyle(.plain)
         .scrollContentBackground(.hidden)
+    }
+
+    private func rowBackground(index: Int) -> some View {
+        ZStack {
+            theme.panelSurface(colorScheme)
+            if index % 2 == 1 {
+                theme.accent(colorScheme).opacity(colorScheme == .dark ? 0.16 : 0.10)
+            }
+        }
     }
 
     private var emptyState: some View {
@@ -144,4 +184,23 @@ public struct WorkHoursView: View {
         }
         return "\(minutes)m"
     }
+}
+
+// MARK: - Green Ledger theme
+
+extension ScreenTheme {
+    /// `WorkHoursView`'s own vibe: a green-bar accounting ledger — pale
+    /// mint-and-white striped paper in Light Mode, a green-phosphor
+    /// accounting-terminal read of the same numbers in Dark Mode (glowing
+    /// after hours rather than printed on stock). Signal colors left as
+    /// `ScreenTheme.default`'s.
+    fileprivate static let greenLedger = ScreenTheme(
+        panelVoid: { $0 == .dark ? Color(hex: 0x10201A) : Color(hex: 0xF4F5EF) },
+        panelSurface: { $0 == .dark ? Color(hex: 0x17251D) : Color(hex: 0xFFFFFF) },
+        panelLine: { $0 == .dark ? Color(hex: 0x2C4536) : Color(hex: 0xC4D1C0) },
+        accent: { $0 == .dark ? Color(hex: 0x7FE0A0) : Color(hex: 0x2E5C3E) },
+        signalGreen: ScreenTheme.default.signalGreen,
+        signalAmber: ScreenTheme.default.signalAmber,
+        signalRed: ScreenTheme.default.signalRed
+    )
 }
