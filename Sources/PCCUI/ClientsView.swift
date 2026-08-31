@@ -9,6 +9,8 @@ public struct ClientsView: View {
     @State private var isPresentingNewClientSheet = false
     @State private var editingClient: PCCClient?
 
+    @Environment(\.colorScheme) private var colorScheme
+
     public init(viewModel: ClientsViewModel) {
         self.viewModel = viewModel
     }
@@ -54,27 +56,67 @@ public struct ClientsView: View {
 
     private var clientList: some View {
         List {
-            ForEach(viewModel.clients) { client in
-                Button {
-                    editingClient = client
-                } label: {
-                    Text(client.name)
-                }
-                #if os(macOS)
-                .buttonStyle(.plain)
-                #endif
+            Section {
+                statusStrip
             }
-            .onDelete { offsets in
-                let toDelete = offsets.map { viewModel.clients[$0] }
-                Task {
-                    for client in toDelete {
-                        await viewModel.deleteClient(client)
+            Section {
+                ForEach(viewModel.clients) { client in
+                    Button {
+                        editingClient = client
+                    } label: {
+                        Text(client.name)
+                    }
+                    #if os(macOS)
+                    .buttonStyle(.plain)
+                    #endif
+                }
+                .onDelete { offsets in
+                    let toDelete = offsets.map { viewModel.clients[$0] }
+                    Task {
+                        for client in toDelete {
+                            await viewModel.deleteClient(client)
+                        }
                     }
                 }
+                .glassRows()
             }
-            .glassRows()
         }
         .glassScreenBackground()
+    }
+
+    // MARK: - Status strip
+
+    /// `.idle` rather than `.nominal`/`.critical` — a Client roster has no
+    /// urgency signal of its own to flag (`PanelStatus.idle`'s own doc
+    /// comment: "no signal to show," not "nothing wrong"). Kept for layout
+    /// consistency with every other list screen's strip rather than
+    /// inventing a fake threshold this data has no basis for.
+    private var statusStrip: some View {
+        HStack(spacing: 10) {
+            StatusDot(.idle)
+            Text(statusStripText)
+                .pccPanelLabel()
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 10)
+        .overlay(
+            Rectangle()
+                .fill(GlassStyle.panelLine(for: colorScheme))
+                .frame(height: 1),
+            alignment: .bottom
+        )
+        .listRowInsets(EdgeInsets())
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+
+    private var statusStripText: String {
+        let count = viewModel.clients.count
+        let noun = count == 1 ? "CLIENT" : "CLIENTS"
+        return "\(count) \(noun)"
     }
 
     private var emptyState: some View {
