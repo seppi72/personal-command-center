@@ -93,3 +93,25 @@ public final class TimerViewModel: ObservableObject {
         }
     }
 }
+
+/// The four kinds of container a Time Entry can attach to (ADR-0004) — as a
+/// `CaseIterable` enum so a container-kind tab row can enumerate them,
+/// rather than four separately-tracked optional ids each needing its own
+/// "clear the other three" logic (`TimeEntryFormSheet`'s own shape). Lives
+/// alongside `TimerViewModel` rather than in either view that uses it,
+/// since both `TimeEntriesView`'s own hero timer and `OverviewView`'s
+/// compact mini Timer share this one copy.
+enum ContainerKind: CaseIterable, Identifiable {
+    case task, project, client, course
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .task: return "Task"
+        case .project: return "Project"
+        case .client: return "Client"
+        case .course: return "Course"
+        }
+    }
+}

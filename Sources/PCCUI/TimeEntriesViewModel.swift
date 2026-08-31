@@ -80,6 +80,62 @@ public final class TimeEntriesViewModel: ObservableObject {
         }
     }
 
+    /// `timeEntries` bucketed by whichever single Task/Project/Client/Course
+    /// each one is attached to (ADR-0004) and totaled — the Punch Clock
+    /// screen's own reason for existing: "how many hours for each Task"
+    /// rather than a flat log of individual entries. Sorted by total
+    /// duration, most-logged first, so the roster doubles as a quick
+    /// leaderboard of where time actually went. Recomputed on every access
+    /// rather than cached, since it's cheap for the data volumes this app
+    /// deals in and staying correct after any mutation matters more than
+    /// the cost of re-bucketing.
+    public var groupedTimeEntries: [TimeEntryGroup] {
+        var order: [String] = []
+        var entriesByKey: [String: [TimeEntry]] = [:]
+        var labelByKey: [String: String] = [:]
+        for entry in timeEntries {
+            let key = containerKey(for: entry)
+            if entriesByKey[key] == nil {
+                order.append(key)
+                labelByKey[key] = containerLabel(for: entry)
+            }
+            entriesByKey[key, default: []].append(entry)
+        }
+        return order
+            .map { TimeEntryGroup(id: $0, label: labelByKey[$0] ?? $0, entries: entriesByKey[$0] ?? []) }
+            .sorted { $0.totalDuration > $1.totalDuration }
+    }
+
+    private func containerKey(for entry: TimeEntry) -> String {
+        if let taskID = entry.taskID { return "task:\(taskID)" }
+        if let projectID = entry.projectID { return "project:\(projectID)" }
+        if let clientID = entry.clientID { return "client:\(clientID)" }
+        if let courseID = entry.courseID { return "course:\(courseID)" }
+        return "unattached"
+    }
+
+    /// The name of whichever Task/Project/Client/Course `entry` is attached
+    /// to, looked up from the already-loaded picker lists — falls back to a
+    /// placeholder rather than crashing if the referenced item isn't in
+    /// those lists (e.g. deleted between loads). Public, not just an
+    /// internal helper for `groupedTimeEntries`, since `TimeEntriesView`
+    /// also renders it directly for the New/Edit Time Entry flow.
+    public func containerLabel(for entry: TimeEntry) -> String {
+        if let taskID = entry.taskID {
+            return tasks.first { $0.id == taskID }?.title ?? "Unknown Task"
+        }
+        if let projectID = entry.projectID {
+            return projects.first { $0.id == projectID }?.name ?? "Unknown Project"
+        }
+        if let clientID = entry.clientID {
+            return clients.first { $0.id == clientID }?.name ?? "Unknown Client"
+        }
+        if let courseID = entry.courseID {
+            return courses.first { $0.id == courseID }?.name ?? "Unknown Course"
+        }
+        return "Unattached"
+    }
+
     /// Runs a mutation against `timeEntries`, keeping every method's
     /// success/failure handling (clear the error; on failure surface a
     /// message) in one shape instead of four copies.
@@ -90,5 +146,26 @@ public final class TimeEntriesViewModel: ObservableObject {
         } catch {
             errorMessage = "Couldn't \(verb) Time Entry: \(error.localizedDescription)"
         }
+    }
+}
+
+/// One container's worth of Time Entries, bucketed together by
+/// `TimeEntriesViewModel.groupedTimeEntries` — `id` is an opaque grouping
+/// key (e.g. `"task:<uuid>"`), not a domain identifier of its own.
+public struct TimeEntryGroup: Identifiable, Equatable {
+    public let id: String
+    public let label: String
+    public let entries: [TimeEntry]
+
+    /// The sum of every entry's own span — a running entry (`endDate ==
+    /// nil`) counts through "now" rather than being excluded, so a group
+    /// with an active timer keeps growing as time passes, not just once
+    /// the timer stops.
+    public var totalDuration: TimeInterval {
+        entries.reduce(0) { $0 + ($1.endDate ?? Date()).timeIntervalSince($1.startDate) }
+    }
+
+    public var containsRunning: Bool {
+        entries.contains(where: \.isRunning)
     }
 }

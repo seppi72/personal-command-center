@@ -284,7 +284,8 @@ private struct PanelSurface: View {
 
 /// Wraps `content` in a standalone panel — `OverviewView`'s dashboard is
 /// built entirely out of these, one per widget (Finances, Work,
-/// Productivity), and `TimerView` uses the same shape for its own cards.
+/// Productivity), and `TimeEntriesView` uses the same shape for its own
+/// hero timer cards.
 /// Fills the full width it's given (`maxWidth: .infinity`) and grows past
 /// `minHeight` if its content needs more (`maxHeight: .infinity`), rather
 /// than shrinking to its content's own size — `LazyVGrid` does *not*

@@ -82,7 +82,7 @@ let overviewViewModel = OverviewViewModel(
 enum Screen: String, CaseIterable, Identifiable {
     case overview
     case projects, tasks, deadlines, calendar, commitments, clients, courses
-    case timeEntries, timer, workHours, accounts, transactions, categories
+    case timeEntries, workHours, accounts, transactions, categories
     case financesReporting, notifications, automationLog
 
     var id: String { rawValue }
@@ -98,7 +98,6 @@ enum Screen: String, CaseIterable, Identifiable {
         case .clients: "Clients"
         case .courses: "Courses"
         case .timeEntries: "Time Entries"
-        case .timer: "Timer"
         case .workHours: "Work Hours"
         case .accounts: "Accounts"
         case .transactions: "Transactions"
@@ -120,7 +119,6 @@ enum Screen: String, CaseIterable, Identifiable {
         case .clients: "building.2"
         case .courses: "graduationcap"
         case .timeEntries: "stopwatch"
-        case .timer: "play.circle"
         case .workHours: "hourglass"
         case .accounts: "dollarsign.circle"
         case .transactions: "creditcard"
@@ -132,7 +130,7 @@ enum Screen: String, CaseIterable, Identifiable {
     }
 }
 
-/// Groups the sidebar's 16 screens under a handful of headings so the list
+/// Groups the sidebar's 15 screens under a handful of headings so the list
 /// is scannable instead of one flat run — purely a presentation grouping,
 /// with no effect on `Screen`'s own identity or on `detail(for:)`.
 enum SidebarSection: CaseIterable {
@@ -150,7 +148,7 @@ enum SidebarSection: CaseIterable {
 
     var screens: [Screen] {
         switch self {
-        case .work: [.projects, .tasks, .timeEntries, .timer, .workHours]
+        case .work: [.projects, .tasks, .timeEntries, .workHours]
         case .planning: [.deadlines, .calendar, .commitments, .courses]
         case .clients: [.clients]
         case .finances: [.accounts, .transactions, .categories, .financesReporting]
@@ -224,8 +222,7 @@ struct DashboardView: View {
         case .commitments: PersonalCommitmentsView(viewModel: personalCommitmentsViewModel)
         case .clients: ClientsView(viewModel: clientsViewModel)
         case .courses: CourseView(viewModel: coursesViewModel)
-        case .timeEntries: TimeEntriesView(viewModel: timeEntriesViewModel)
-        case .timer: TimerView(viewModel: timerViewModel)
+        case .timeEntries: TimeEntriesView(viewModel: timeEntriesViewModel, timerViewModel: timerViewModel)
         case .workHours: WorkHoursView(viewModel: workHoursViewModel)
         case .accounts: AccountsView(viewModel: accountsViewModel)
         case .transactions: TransactionsView(viewModel: transactionsViewModel)

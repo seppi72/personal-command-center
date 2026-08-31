@@ -29,8 +29,9 @@ import SwiftUI
 /// Mostly a glance, with one deliberate exception: the Productivity panel's
 /// mini Timer lets the owner pick a Task/Project/Client/Course and
 /// start/stop right from here, reading and mutating the same shared
-/// `TimerViewModel` instance the full Timer screen uses — every other panel
-/// stays read-only, handing off to its full screen via a tappable header.
+/// `TimerViewModel` instance the Time Entries screen's own hero timer
+/// uses — every other panel stays read-only, handing off to its full
+/// screen via a tappable header.
 ///
 /// `Screen` (the sidebar's navigation enum) lives in the `PCCDesktop`
 /// executable target, not in this package, so this view can't reference it
@@ -45,10 +46,11 @@ public struct OverviewView: View {
     private let onTapProjects: () -> Void
     private let onTapTasks: () -> Void
 
-    /// The mini Timer's own pending selection, separate from the full
-    /// `TimerView`'s own identical `@State` — each screen owns its own
-    /// in-progress pick before `timerViewModel.start(container:)` commits
-    /// it, the same way two independent forms would.
+    /// The mini Timer's own pending selection, separate from
+    /// `TimeEntriesView`'s own identical `@State` for its hero timer — each
+    /// screen owns its own in-progress pick before
+    /// `timerViewModel.start(container:)` commits it, the same way two
+    /// independent forms would.
     @State private var timerSelectedKind: ContainerKind = .task
     @State private var timerSelectedItemID: UUID?
 
@@ -535,7 +537,8 @@ public struct OverviewView: View {
     }
 
     /// The mini Timer's compact Task/Project/Client/Course tab row — reuses
-    /// `TimerView`'s own `ContainerKind` enum rather than a second copy.
+    /// the shared `ContainerKind` enum (`TimerViewModel.swift`) rather than
+    /// a second copy.
     /// Switching tabs clears `timerSelectedItemID`: an id from the old
     /// kind's list wouldn't mean anything against the new kind's items.
     private var miniKindTabs: some View {
@@ -580,7 +583,10 @@ public struct OverviewView: View {
         }
     }
 
-    /// Mirrors `TimerView.containerLabel(for:)`.
+    /// Mirrors `TimeEntriesViewModel.containerLabel(for:)`, against
+    /// `timerViewModel`'s own copies of the same picker lists rather than
+    /// `TimeEntriesViewModel`'s, since this panel only ever observes
+    /// `timerViewModel`.
     private func timerContainerLabel(for entry: TimeEntry) -> String {
         if let taskID = entry.taskID {
             return timerViewModel.tasks.first { $0.id == taskID }?.title ?? "Unknown Task"
@@ -597,7 +603,7 @@ public struct OverviewView: View {
         return "Unattached"
     }
 
-    /// Mirrors `TimerView.formattedElapsed(_:)`.
+    /// Mirrors `TimeEntriesView.formattedElapsed(_:)`.
     private static func formattedElapsed(_ seconds: TimeInterval) -> String {
         let total = max(0, Int(seconds))
         let hours = total / 3600
