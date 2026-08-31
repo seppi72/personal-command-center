@@ -12,6 +12,8 @@ public struct CourseView: View {
     @ObservedObject private var viewModel: CoursesViewModel
     @State private var isPresentingNewCourseSheet = false
 
+    @Environment(\.colorScheme) private var colorScheme
+
     public init(viewModel: CoursesViewModel) {
         self.viewModel = viewModel
     }
@@ -58,39 +60,88 @@ public struct CourseView: View {
 
     private var courseList: some View {
         List {
-            ForEach(viewModel.courses) { course in
-                NavigationLink {
-                    CourseDetailView(
-                        course: course,
-                        viewModel: viewModel,
-                        tasksViewModel: viewModel.makeTasksViewModel(for: course),
-                        commitmentsViewModel: viewModel.makeCommitmentsViewModel(for: course)
-                    )
-                } label: {
-                    VStack(alignment: .leading) {
-                        Text(course.name)
-                        Text(Self.termLabel(month: course.termMonth, year: course.termYear))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        if let dueDate = course.dueDate {
-                            Text(dueDate, style: .date)
+            Section {
+                statusStrip
+            }
+            Section {
+                ForEach(viewModel.courses) { course in
+                    NavigationLink {
+                        CourseDetailView(
+                            course: course,
+                            viewModel: viewModel,
+                            tasksViewModel: viewModel.makeTasksViewModel(for: course),
+                            commitmentsViewModel: viewModel.makeCommitmentsViewModel(for: course)
+                        )
+                    } label: {
+                        VStack(alignment: .leading) {
+                            Text(course.name)
+                            Text(Self.termLabel(month: course.termMonth, year: course.termYear))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                            if let dueDate = course.dueDate {
+                                Text(dueDate, style: .date)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(Self.isOverdue(course) ? GlassStyle.signalRed(for: colorScheme) : .secondary)
+                            }
                         }
                     }
                 }
-            }
-            .onDelete { offsets in
-                let toDelete = offsets.map { viewModel.courses[$0] }
-                Task {
-                    for course in toDelete {
-                        await viewModel.deleteCourse(course)
+                .onDelete { offsets in
+                    let toDelete = offsets.map { viewModel.courses[$0] }
+                    Task {
+                        for course in toDelete {
+                            await viewModel.deleteCourse(course)
+                        }
                     }
                 }
+                .glassRows()
             }
-            .glassRows()
         }
         .glassScreenBackground()
+    }
+
+    // MARK: - Status strip
+
+    private var statusStrip: some View {
+        HStack(spacing: 10) {
+            StatusDot(overallStatus)
+            Text(statusStripText)
+                .pccPanelLabel()
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 10)
+        .overlay(
+            Rectangle()
+                .fill(GlassStyle.panelLine(for: colorScheme))
+                .frame(height: 1),
+            alignment: .bottom
+        )
+        .listRowInsets(EdgeInsets())
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+
+    private var overallStatus: PanelStatus {
+        overdueCount > 0 ? .critical : .nominal
+    }
+
+    private var overdueCount: Int {
+        viewModel.courses.filter(Self.isOverdue).count
+    }
+
+    private static func isOverdue(_ course: Course) -> Bool {
+        guard let dueDate = course.dueDate else { return false }
+        return dueDate < Date()
+    }
+
+    private var statusStripText: String {
+        let count = viewModel.courses.count
+        let noun = count == 1 ? "COURSE" : "COURSES"
+        let flagText = overdueCount > 0 ? "\(overdueCount) OVERDUE" : "ON TRACK"
+        return "\(count) \(noun)   ·   \(flagText)"
     }
 
     private var emptyState: some View {
@@ -242,6 +293,8 @@ struct CourseDetailView: View {
     @State private var isPresentingNewMeetingSheet = false
     @State private var editingCommitment: PersonalCommitment?
 
+    @Environment(\.colorScheme) private var colorScheme
+
     /// The freshest known copy of `course` — falls back to the value passed
     /// in if `viewModel.courses` hasn't (yet) reflected an edit.
     private var currentCourse: Course {
@@ -283,6 +336,7 @@ struct CourseDetailView: View {
                             }
                         } label: {
                             Image(systemName: task.isComplete ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(task.isComplete ? GlassStyle.signalGreen(for: colorScheme) : Color.secondary)
                         }
                         #if os(macOS)
                         .buttonStyle(.plain)
