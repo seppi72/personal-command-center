@@ -8,6 +8,8 @@ import SwiftUI
 struct SyncStatusBadge: View {
     let syncStatus: PersonalCommitment.SyncStatus
 
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         switch syncStatus {
         case .synced:
@@ -15,7 +17,7 @@ struct SyncStatusBadge: View {
         case .failed:
             Label("Sync failed", systemImage: "exclamationmark.triangle.fill")
                 .labelStyle(.iconOnly)
-                .foregroundStyle(.red)
+                .foregroundStyle(GlassStyle.signalRed(for: colorScheme))
         case .pending:
             Label("Syncing", systemImage: "arrow.triangle.2.circlepath")
                 .labelStyle(.iconOnly)
