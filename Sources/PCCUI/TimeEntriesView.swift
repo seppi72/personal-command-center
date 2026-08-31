@@ -10,6 +10,8 @@ public struct TimeEntriesView: View {
     @State private var isPresentingNewEntrySheet = false
     @State private var editingEntry: TimeEntry?
 
+    @Environment(\.colorScheme) private var colorScheme
+
     public init(viewModel: TimeEntriesViewModel) {
         self.viewModel = viewModel
     }
@@ -79,42 +81,89 @@ public struct TimeEntriesView: View {
 
     private var entryList: some View {
         List {
-            ForEach(viewModel.timeEntries) { entry in
-                Button {
-                    editingEntry = entry
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(containerLabel(for: entry))
-                        Text(entry.startDate, style: .date)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        if entry.isRunning {
-                            Text("Running")
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                        }
-                        if let notes = entry.notes {
-                            Text(notes)
-                                .font(.caption)
+            Section {
+                statusStrip
+            }
+            Section {
+                ForEach(viewModel.timeEntries) { entry in
+                    Button {
+                        editingEntry = entry
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(containerLabel(for: entry))
+                            Text(entry.startDate, style: .date)
+                                .font(.subheadline)
                                 .foregroundStyle(.secondary)
+                            if entry.isRunning {
+                                HStack(spacing: 5) {
+                                    StatusDot(.active)
+                                    Text("Running")
+                                        .pccPanelLabel()
+                                        .foregroundStyle(GlassStyle.signalCyan(for: colorScheme))
+                                }
+                            }
+                            if let notes = entry.notes {
+                                Text(notes)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    #if os(macOS)
+                    .buttonStyle(.plain)
+                    #endif
+                }
+                .onDelete { offsets in
+                    let toDelete = offsets.map { viewModel.timeEntries[$0] }
+                    Task {
+                        for entry in toDelete {
+                            await viewModel.deleteTimeEntry(entry)
                         }
                     }
                 }
-                #if os(macOS)
-                .buttonStyle(.plain)
-                #endif
+                .glassRows()
             }
-            .onDelete { offsets in
-                let toDelete = offsets.map { viewModel.timeEntries[$0] }
-                Task {
-                    for entry in toDelete {
-                        await viewModel.deleteTimeEntry(entry)
-                    }
-                }
-            }
-            .glassRows()
         }
         .glassScreenBackground()
+    }
+
+    // MARK: - Status strip
+
+    private var statusStrip: some View {
+        HStack(spacing: 10) {
+            StatusDot(overallStatus)
+            Text(statusStripText)
+                .pccPanelLabel()
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 10)
+        .overlay(
+            Rectangle()
+                .fill(GlassStyle.panelLine(for: colorScheme))
+                .frame(height: 1),
+            alignment: .bottom
+        )
+        .listRowInsets(EdgeInsets())
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+
+    private var runningCount: Int {
+        viewModel.timeEntries.filter(\.isRunning).count
+    }
+
+    private var overallStatus: PanelStatus {
+        runningCount > 0 ? .active : .idle
+    }
+
+    private var statusStripText: String {
+        let count = viewModel.timeEntries.count
+        let noun = count == 1 ? "ENTRY" : "ENTRIES"
+        let flagText = runningCount > 0 ? "\(runningCount) RUNNING" : "NONE RUNNING"
+        return "\(count) \(noun)   ·   \(flagText)"
     }
 
     private var emptyState: some View {
