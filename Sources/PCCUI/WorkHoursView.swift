@@ -9,6 +9,8 @@ import SwiftUI
 public struct WorkHoursView: View {
     @ObservedObject private var viewModel: WorkHoursViewModel
 
+    @Environment(\.colorScheme) private var colorScheme
+
     public init(viewModel: WorkHoursViewModel) {
         self.viewModel = viewModel
     }
@@ -17,7 +19,7 @@ public struct WorkHoursView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 controls
-                Divider()
+                totalStrip
                 if viewModel.rows.isEmpty && !viewModel.isLoading {
                     emptyState
                 } else {
@@ -30,6 +32,39 @@ public struct WorkHoursView: View {
             .refreshable { await viewModel.load() }
             .errorAlert($viewModel.errorMessage)
         }
+    }
+
+    private var readoutColor: Color {
+        GlassStyle.signalCyan(for: colorScheme)
+    }
+
+    /// A mono readout of the rollup's grand total — the one figure worth a
+    /// glance before reading every individual row, the same "hero number
+    /// above the rows" device `AccountsView`/`TasksView`'s status strips
+    /// use, just carrying a readout instead of a StatusDot since a Work
+    /// Hours total has no urgency threshold to flag.
+    private var totalStrip: some View {
+        HStack(alignment: .lastTextBaseline, spacing: 6) {
+            Text(Self.formattedDuration(totalSeconds))
+                .font(.pccReadout(18))
+                .foregroundStyle(readoutColor)
+            Text("Total")
+                .pccPanelLabel()
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .overlay(
+            Rectangle()
+                .fill(GlassStyle.panelLine(for: colorScheme))
+                .frame(height: 1),
+            alignment: .bottom
+        )
+    }
+
+    private var totalSeconds: Double {
+        viewModel.rows.reduce(0) { $0 + $1.totalSeconds }
     }
 
     /// A compact filter bar — reloads on every control change rather than
@@ -61,6 +96,7 @@ public struct WorkHoursView: View {
                 Text(Self.label(for: row))
                 Spacer()
                 Text(Self.formattedDuration(row.totalSeconds))
+                    .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
         }
