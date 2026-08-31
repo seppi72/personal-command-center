@@ -51,7 +51,7 @@ let deadlinesViewModel = DeadlinesViewModel(client: deadlinesClient)
 let calendarViewModel = CalendarViewModel(
     commitmentsClient: personalCommitmentsClient, mirroredEventsClient: mirroredCalendarEventsClient, coursesClient: coursesClient)
 let personalCommitmentsViewModel = PersonalCommitmentsViewModel(client: personalCommitmentsClient, coursesClient: coursesClient)
-let clientsViewModel = ClientsViewModel(client: clientsClient)
+let clientsViewModel = ClientsViewModel(client: clientsClient, projectsClient: projectsClient)
 let coursesViewModel = CoursesViewModel(
     client: coursesClient, tasksClient: tasksClient, projectsClient: projectsClient, commitmentsClient: personalCommitmentsClient)
 let timeEntriesViewModel = TimeEntriesViewModel(
