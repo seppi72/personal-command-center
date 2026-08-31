@@ -11,6 +11,8 @@ public struct PersonalCommitmentsView: View {
     @State private var isPresentingNewCommitmentSheet = false
     @State private var editingCommitment: PersonalCommitment?
 
+    @Environment(\.colorScheme) private var colorScheme
+
     public init(viewModel: PersonalCommitmentsViewModel) {
         self.viewModel = viewModel
     }
@@ -49,41 +51,85 @@ public struct PersonalCommitmentsView: View {
 
     private var commitmentList: some View {
         List {
-            ForEach(viewModel.commitments) { commitment in
-                Button {
-                    editingCommitment = commitment
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack {
-                            Text(commitment.title)
-                            Spacer()
-                            SyncStatusBadge(syncStatus: commitment.syncStatus)
-                        }
-                        Text(commitment.startDate, style: .date)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        if let recurrenceRule = commitment.recurrenceRule {
-                            Text(recurrenceRule)
-                                .font(.caption)
+            Section {
+                statusStrip
+            }
+            Section {
+                ForEach(viewModel.commitments) { commitment in
+                    Button {
+                        editingCommitment = commitment
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text(commitment.title)
+                                Spacer()
+                                SyncStatusBadge(syncStatus: commitment.syncStatus)
+                            }
+                            Text(commitment.startDate, style: .date)
+                                .font(.subheadline)
                                 .foregroundStyle(.secondary)
+                            if let recurrenceRule = commitment.recurrenceRule {
+                                Text(recurrenceRule)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    #if os(macOS)
+                    .buttonStyle(.plain)
+                    #endif
+                }
+                .onDelete { offsets in
+                    let toDelete = offsets.map { viewModel.commitments[$0] }
+                    Task {
+                        for commitment in toDelete {
+                            await viewModel.deleteCommitment(commitment)
                         }
                     }
                 }
-                #if os(macOS)
-                .buttonStyle(.plain)
-                #endif
+                .glassRows()
             }
-            .onDelete { offsets in
-                let toDelete = offsets.map { viewModel.commitments[$0] }
-                Task {
-                    for commitment in toDelete {
-                        await viewModel.deleteCommitment(commitment)
-                    }
-                }
-            }
-            .glassRows()
         }
         .glassScreenBackground()
+    }
+
+    // MARK: - Status strip
+
+    private var statusStrip: some View {
+        HStack(spacing: 10) {
+            StatusDot(overallStatus)
+            Text(statusStripText)
+                .pccPanelLabel()
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 10)
+        .overlay(
+            Rectangle()
+                .fill(GlassStyle.panelLine(for: colorScheme))
+                .frame(height: 1),
+            alignment: .bottom
+        )
+        .listRowInsets(EdgeInsets())
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+
+    private var failedSyncCount: Int {
+        viewModel.commitments.filter { $0.syncStatus == .failed }.count
+    }
+
+    private var overallStatus: PanelStatus {
+        failedSyncCount > 0 ? .critical : .nominal
+    }
+
+    private var statusStripText: String {
+        let count = viewModel.commitments.count
+        let noun = count == 1 ? "COMMITMENT" : "COMMITMENTS"
+        let flagText = failedSyncCount > 0 ? "\(failedSyncCount) SYNC FAILED" : "ALL SYNCED"
+        return "\(count) \(noun)   ·   \(flagText)"
     }
 
     private var emptyState: some View {
