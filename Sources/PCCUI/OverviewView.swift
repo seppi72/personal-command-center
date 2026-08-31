@@ -16,6 +16,16 @@ import SwiftUI
 /// a glance at the top of the screen (or the status strip above the panels
 /// entirely) says what needs attention before you've read a single number.
 ///
+/// "Command Deck": this screen's own signature on top of the shared
+/// chassis, chosen for the one screen whose whole job is "am I in control
+/// right now" — `HUDCorners` frames the content in viewfinder/targeting-
+/// reticle brackets (you're watching a live instrument, not reading a
+/// static report), and the status strip's date is a real ticking clock
+/// rather than a static string, reinforcing that the panels below are
+/// live telemetry. Reuses the chassis's existing cyan/green/amber/red
+/// palette as-is (`ScreenTheme.default`) — the signature here is entirely
+/// in framing and motion, not a new color story.
+///
 /// Mostly a glance, with one deliberate exception: the Productivity panel's
 /// mini Timer lets the owner pick a Task/Project/Client/Course and
 /// start/stop right from here, reading and mutating the same shared
@@ -68,25 +78,41 @@ public struct OverviewView: View {
     public var body: some View {
         NavigationStack {
             GeometryReader { proxy in
-                ScrollView {
-                    VStack(spacing: 16) {
-                        statusStrip
-                        financesCard
-                        if proxy.size.width > Self.wideLayoutThreshold {
-                            HStack(alignment: .top, spacing: 16) {
+                ZStack {
+                    ScrollView {
+                        VStack(spacing: 16) {
+                            statusStrip
+                            financesCard
+                            if proxy.size.width > Self.wideLayoutThreshold {
+                                HStack(alignment: .top, spacing: 16) {
+                                    workCard
+                                    productivityCard
+                                }
+                            } else {
                                 workCard
                                 productivityCard
                             }
-                        } else {
-                            workCard
-                            productivityCard
                         }
+                        .padding(PCCChassis.outerMargin)
+                        .frame(maxWidth: 900)
+                        .frame(maxWidth: .infinity)
                     }
-                    .padding(16)
-                    .frame(maxWidth: 900)
-                    .frame(maxWidth: .infinity)
+                    .panelScreenBackground()
+
+                    // Framed to the viewport, not the scroll content — sits
+                    // in its own ZStack layer rather than as a ScrollView
+                    // overlay so it stays put as a fixed frame instead of
+                    // scrolling away with the panels underneath.
+                    // Accent-colored, not the neutral hairline `panelLine`
+                    // divider color uses — a real HUD's reticle marks are
+                    // drawn in the display's own accent, and at panelLine's
+                    // contrast against the light-mode void these were
+                    // effectively invisible (caught on the first real
+                    // screenshot: no brackets visible at all).
+                    HUDCorners(color: theme.accent(colorScheme).opacity(0.55))
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                        .allowsHitTesting(false)
                 }
-                .panelScreenBackground()
             }
             .navigationTitle("Overview")
             .task { await viewModel.load() }
@@ -113,7 +139,11 @@ public struct OverviewView: View {
     /// A one-line summary above every panel — the first thing read on this
     /// screen, before any individual panel's own detail. Answers "does
     /// anything need me right now?" without requiring a glance at three
-    /// separate panels to find out.
+    /// separate panels to find out. The right-hand side ticks a real clock
+    /// (`clockText(at:)`) rather than showing a static date — a still
+    /// timestamp reads as a report generated once; a moving one reads as
+    /// telemetry you're watching live, which is the whole point of the
+    /// "Command Deck" framing this screen carries.
     private var statusStrip: some View {
         HStack(spacing: 10) {
             StatusDot(overallStatus)
@@ -121,9 +151,11 @@ public struct OverviewView: View {
                 .pccPanelLabel()
                 .foregroundStyle(.secondary)
             Spacer()
-            Text(Self.dateStripText())
-                .pccPanelLabel()
-                .foregroundStyle(.secondary)
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Text(Self.clockText(at: context.date))
+                    .pccPanelLabel()
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(.bottom, 10)
         .overlay(
@@ -145,10 +177,10 @@ public struct OverviewView: View {
         return "\(overdueText)   ·   \(timerText)"
     }
 
-    private static func dateStripText() -> String {
+    private static func clockText(at date: Date) -> String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "EEE, MMM d"
-        return formatter.string(from: Date()).uppercased()
+        formatter.dateFormat = "EEE, MMM d — HH:mm:ss"
+        return formatter.string(from: date).uppercased()
     }
 
     // MARK: - Panel header
@@ -626,5 +658,59 @@ public struct OverviewView: View {
 
     private static func currency(_ amount: Double) -> String {
         amount.formatted(.currency(code: "PHP"))
+    }
+}
+
+// MARK: - HUD corners
+
+/// This screen's signature framing device: four independent viewfinder/
+/// targeting-reticle corner marks around the content area, rather than a
+/// single full-rectangle border stroke — a complete border reads as a
+/// panel outline (decoration); four open corners read as a frame you're
+/// looking *through*, the same device a camera viewfinder or a HUD uses to
+/// say "this is what's being tracked" without boxing it in on every side.
+/// Scoped to `OverviewView` alone, not promoted to the shared chassis —
+/// this is Overview's own vibe, not a device every screen should reach
+/// for.
+private struct HUDCorners: View {
+    var color: Color
+
+    private let length: CGFloat = 22
+    private let thickness: CGFloat = 2
+
+    var body: some View {
+        ZStack {
+            mark(top: true, leading: true)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            mark(top: true, leading: false)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            mark(top: false, leading: true)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            mark(top: false, leading: false)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+        }
+    }
+
+    /// One "L": a vertical stroke on whichever side (`leading`) plus a
+    /// horizontal stroke on whichever edge (`top`), meeting at that
+    /// corner. Built as a *single* continuous subpath (moveTo once, two
+    /// addLines through the shared corner vertex) rather than two
+    /// separate move/line pairs — the two-subpath version silently
+    /// dropped its vertical arm specifically for the top-leading corner,
+    /// where both subpaths' `move(to:)` happened to land on the exact
+    /// same point (0, 0); one continuous path has no duplicate moveTo to
+    /// trip over, for any corner.
+    private func mark(top: Bool, leading: Bool) -> some View {
+        let cornerX: CGFloat = leading ? 0 : length
+        let cornerY: CGFloat = top ? 0 : length
+        let verticalFarY: CGFloat = top ? length : 0
+        let horizontalFarX: CGFloat = leading ? length : 0
+        return Path { path in
+            path.move(to: CGPoint(x: cornerX, y: verticalFarY))
+            path.addLine(to: CGPoint(x: cornerX, y: cornerY))
+            path.addLine(to: CGPoint(x: horizontalFarX, y: cornerY))
+        }
+        .stroke(color, style: StrokeStyle(lineWidth: thickness, lineCap: .square, lineJoin: .miter))
+        .frame(width: length, height: length)
     }
 }
