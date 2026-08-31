@@ -1,5 +1,23 @@
 import SwiftUI
 
+/// A slim progress bar plus a percent label — a Project's "% of Tasks done"
+/// indicator, shared by `ProjectsView`'s row and `ProjectDetailView`'s
+/// header (a free function, not a method, since both types need it).
+/// `ProgressView` rather than a `Chart` here: a full chart per row would be
+/// visual noise in a list this dense — the real chart lives on the Overview
+/// dashboard's "Projects Progress" widget, which shows every Project at
+/// once.
+func projectProgressBar(_ fraction: Double) -> some View {
+    HStack(spacing: 8) {
+        ProgressView(value: fraction)
+            .tint(.accentColor)
+        Text(fraction, format: .percent.precision(.fractionLength(0)))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(minWidth: 36, alignment: .trailing)
+    }
+}
+
 /// Minimal Mac/iOS screen for ticket #3: lists Projects, and supports
 /// creating, editing (renaming, setting/clearing a Deadline — ticket #5),
 /// and deleting one. One shared SwiftUI view for both platforms — no
@@ -58,7 +76,7 @@ public struct ProjectsView: View {
                         sprintsViewModel: viewModel.makeSprintsViewModel(for: project)
                     )
                 } label: {
-                    VStack(alignment: .leading) {
+                    VStack(alignment: .leading, spacing: 6) {
                         Text(project.name)
                         if let clientName = viewModel.clientName(for: project) {
                             Text(clientName)
@@ -70,7 +88,11 @@ public struct ProjectsView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+                        if let fraction = viewModel.completionFraction(for: project) {
+                            projectProgressBar(fraction)
+                        }
                     }
+                    .padding(.vertical, 4)
                 }
             }
             .onDelete { offsets in
@@ -81,8 +103,11 @@ public struct ProjectsView: View {
                     }
                 }
             }
+            .glassRows()
         }
+        .glassScreenBackground()
     }
+
 
     private var emptyState: some View {
         VStack(spacing: 8) {
@@ -135,14 +160,20 @@ struct ProjectFormSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                TextField("Name", text: $name)
+                Section {
+                    TextField("Name", text: $name)
+                        .pccField()
+                }
+                .glassRows()
                 Section("Deadline") {
                     Toggle("Has deadline", isOn: $hasDeadline)
                     if hasDeadline {
                         DatePicker("Due", selection: $dueDate, displayedComponents: .date)
                     }
                 }
+                .glassRows()
             }
+            .glassScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -193,7 +224,11 @@ struct ProjectDetailView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
+                if let fraction = viewModel.completionFraction(for: currentProject) {
+                    projectProgressBar(fraction)
+                }
             }
+            .glassRows()
             Section("Sprints") {
                 if sprintsViewModel.sprints.isEmpty {
                     Text("No Sprints yet.")
@@ -229,7 +264,9 @@ struct ProjectDetailView: View {
                     Label("Add Sprint", systemImage: "plus")
                 }
             }
+            .glassRows()
         }
+        .glassScreenBackground()
         .navigationTitle(currentProject.name)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -317,10 +354,15 @@ struct SprintFormSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                TextField("Name", text: $name)
-                DatePicker("Start", selection: $startDate, displayedComponents: .date)
-                DatePicker("End", selection: $endDate, displayedComponents: .date)
+                Section {
+                    TextField("Name", text: $name)
+                        .pccField()
+                    DatePicker("Start", selection: $startDate, displayedComponents: .date)
+                    DatePicker("End", selection: $endDate, displayedComponents: .date)
+                }
+                .glassRows()
             }
+            .glassScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

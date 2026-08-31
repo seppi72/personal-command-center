@@ -37,13 +37,16 @@ public struct AutomationLogView: View {
                 Section {
                     failureBanner(mostRecentFailure)
                 }
+                .glassRows()
             }
             Section("Recent Activity") {
                 ForEach(viewModel.entries) { entry in
                     row(for: entry)
                 }
             }
+            .glassRows()
         }
+        .glassScreenBackground()
     }
 
     /// The "surfaced clearly" element this ticket asks for: unmissable at

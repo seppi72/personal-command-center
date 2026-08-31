@@ -11,8 +11,12 @@ import Foundation
 /// macro needs iOS 17/macOS 14 and this package targets iOS 16/macOS 13.
 @MainActor
 public final class FinancesReportingViewModel: ObservableObject {
-    @Published public var start: Date
-    @Published public var end: Date
+    /// The screen's shared date range — `PCCDateRangeControl`
+    /// (`FormControls.swift`) reads/writes this directly. `start`/`end`
+    /// below are this range's resolved bounds, kept as computed properties
+    /// so `load()`/`loadSelectedAccountFigures()` read them exactly as
+    /// before.
+    @Published public var dateRange: DateRangeSelection
     @Published public private(set) var currentNetWorth: Double = 0
     @Published public private(set) var netWorthTrend: [DailyFigure] = []
     @Published public private(set) var expensesPerDay: [ExpensesPerDayRow] = []
@@ -27,22 +31,22 @@ public final class FinancesReportingViewModel: ObservableObject {
     private let reportingClient: FinancesReportingAPIClient
     private let accountsClient: AccountsAPIClient
 
-    /// Defaults (ticket #40): the trailing 30 days through now — a Net
-    /// Worth/Balance trend or expense-per-day chart reads more informatively
-    /// over a month than `WorkHoursViewModel`'s own current-week default,
-    /// since a handful of days makes a thin chart. A caller can override
-    /// either via `start`/`end`.
-    public init(
-        reportingClient: FinancesReportingAPIClient, accountsClient: AccountsAPIClient,
-        start: Date? = nil, end: Date? = nil
-    ) {
+    /// The trailing 30 days through now by default — a Net Worth/Balance
+    /// trend or expense-per-day chart reads more informatively over a month
+    /// than `WorkHoursViewModel`'s own current-week default, since a
+    /// handful of days makes a thin chart. No preset in `DateRangeOption`
+    /// means exactly 30 days, so this starts on `.custom` with that range
+    /// rather than approximating it with `.thisMonth`/`.lastMonth`.
+    public init(reportingClient: FinancesReportingAPIClient, accountsClient: AccountsAPIClient) {
         self.reportingClient = reportingClient
         self.accountsClient = accountsClient
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        self.start = start ?? (calendar.date(byAdding: .day, value: -30, to: today) ?? today)
-        self.end = end ?? Date()
+        let today = Calendar.current.startOfDay(for: Date())
+        let thirtyDaysAgo = Calendar.current.date(byAdding: .day, value: -30, to: today) ?? today
+        self.dateRange = DateRangeSelection(option: .custom, customStart: thirtyDaysAgo, customEnd: Date())
     }
+
+    private var start: Date { dateRange.resolvedRange.start }
+    private var end: Date { dateRange.resolvedRange.end }
 
     /// Loads every Account-independent figure (current Net Worth, its
     /// trend, expense-per-day) plus the Account list the two per-Account

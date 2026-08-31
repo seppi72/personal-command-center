@@ -87,7 +87,9 @@ public struct AccountsView: View {
                     }
                 }
             }
+            .glassRows()
         }
+        .glassScreenBackground()
     }
 
     private var emptyState: some View {
@@ -156,28 +158,33 @@ struct AccountFormSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                TextField("Name", text: $name)
-                Picker("Type", selection: $type) {
-                    ForEach(AccountType.allCases, id: \.self) { type in
-                        Text(type.displayName).tag(type)
+                Section {
+                    TextField("Name", text: $name)
+                        .pccField()
+                    PCCMenuPicker("Type", selection: $type, options: AccountType.allCases.map { ($0, $0.displayName) })
+                    if isCreating {
+                        #if os(iOS)
+                        TextField("Opening Balance", text: $openingBalanceText)
+                            .keyboardType(.decimalPad)
+                            .pccField()
+                        #else
+                        TextField("Opening Balance", text: $openingBalanceText)
+                            .pccField()
+                        #endif
                     }
                 }
-                if isCreating {
-                    #if os(iOS)
-                    TextField("Opening Balance", text: $openingBalanceText)
-                        .keyboardType(.decimalPad)
-                    #else
-                    TextField("Opening Balance", text: $openingBalanceText)
-                    #endif
-                } else {
+                .glassRows()
+                if !isCreating {
                     Section {
                         Text(openingBalanceText)
                             .foregroundStyle(.secondary)
                     } footer: {
                         Text("Opening balance can't be changed after an Account is created.")
                     }
+                    .glassRows()
                 }
             }
+            .glassScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

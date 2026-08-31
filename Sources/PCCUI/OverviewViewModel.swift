@@ -1,134 +1,215 @@
 import Foundation
 
-/// Holds the Overview screen's state — a fixed, read-only glance at three
-/// things: the active Timer, today's-and-overdue Deadlines, and the last
-/// week's Transactions. Composes several existing `APIClient`s directly
-/// (mirrors `TimerViewModel`'s own "compose several clients" shape) rather
-/// than wrapping the three existing screen-level view models, so this
-/// screen's own filtering/capping logic ("just today's items", "just the
-/// last 5") stays out of the general-purpose `DeadlinesViewModel`/
-/// `TimerViewModel`/`TransactionsViewModel` that every other screen relies
-/// on unfiltered.
+/// One point of the Finances card's income/expense/net chart — a period
+/// (day, week, or month, depending on how wide the selected range is; see
+/// `OverviewViewModel.bucket(_:start:end:)`) paired with that period's total
+/// income and expense. Purely a client-side computed presentation type, not
+/// a mirror of any backend response — unlike `FinancesReporting.swift`'s
+/// `DailyFigure`/`ExpensesPerDayRow`, which really are backend rollups.
+public struct FinanceBucket: Identifiable, Sendable {
+    public let periodStart: Date
+    public let income: Double
+    public let expense: Double
+
+    public var id: Date { periodStart }
+    /// What's left over for the period — income minus expense. Can be
+    /// negative.
+    public var net: Double { income - expense }
+}
+
+/// Holds the Overview screen's state — a fixed glance at three cards:
+/// Finances (Net Worth + an income/expense/net chart over a selectable
+/// range), Work (Projects Progress, today's-and-overdue Tasks, and an
+/// on-time completion rate), and Productivity (a mini Timer — the one place
+/// this screen breaks its own "just a glance" rule, since starting/stopping
+/// a Timer from here is the point — plus this week's Work Hours). Composes
+/// several existing `APIClient`s directly (mirrors `TimerViewModel`'s own
+/// "compose several clients" shape) rather than wrapping the equivalent
+/// screen-level view models, so this screen's own filtering/bucketing logic
+/// stays out of the general-purpose `TasksViewModel`/`FinancesReportingViewModel`
+/// every other screen relies on unfiltered. The Timer itself is a partial
+/// exception: the Productivity card reads and mutates the same shared
+/// `TimerViewModel` instance the full Timer screen uses (passed into
+/// `OverviewView.init` separately), rather than this view model owning any
+/// Timer state of its own.
 ///
 /// `ObservableObject` rather than the newer `@Observable` macro, since that
 /// macro needs iOS 17/macOS 14 and this package targets iOS 16/macOS 13
 /// (mirrors every other view model in this package).
 @MainActor
 public final class OverviewViewModel: ObservableObject {
-    /// Today's-and-overdue Deadlines, capped to the 5 nearest — see `load()`.
-    @Published public private(set) var upcomingDeadlines: [DeadlineItem] = []
-    /// How many items `upcomingDeadlines` was capped down from, so the view
-    /// can show a "+N more" row; `0` when nothing was cut.
-    @Published public private(set) var additionalDeadlinesCount = 0
-
-    @Published public private(set) var activeTimer: TimeEntry?
-    /// The active timer's container picker data — only fetched/needed to
-    /// label `activeTimer`, same four lists `TimerViewModel` already loads.
+    /// Every Task, loaded unfiltered — backs `projectCompletion`,
+    /// `tasksDueToday`/`tasksOverdue`, and `taskCompletionRateWithinDeadline`,
+    /// all computed from this one fetch rather than each needing its own.
     @Published public private(set) var tasks: [PCCTask] = []
     @Published public private(set) var projects: [Project] = []
-    @Published public private(set) var clients: [PCCClient] = []
-    @Published public private(set) var courses: [Course] = []
-
-    /// The last 7 days' Transactions, capped to the 5 most recent — see
-    /// `load()`.
-    @Published public private(set) var recentTransactions: [Transaction] = []
-    /// How many items `recentTransactions` was capped down from; `0` when
-    /// nothing was cut.
-    @Published public private(set) var additionalTransactionsCount = 0
-    /// Only fetched/needed to label a Transaction's Account, same as
-    /// `TransactionsView.accountName(for:)`.
+    /// Only fetched/needed to populate `financeBuckets`' underlying
+    /// Transactions query — kept for parity with `AccountsAPIClient` calls
+    /// elsewhere, though the Finances card itself only shows the current
+    /// Net Worth figure and the chart, not a per-Account breakdown.
     @Published public private(set) var accounts: [Account] = []
+
+    /// This week's Work Hours, grouped by day, for the Productivity card's
+    /// bar chart.
+    @Published public private(set) var workHoursThisWeek: [WorkHoursRow] = []
+
+    @Published public private(set) var currentNetWorth: Double = 0
+    /// The Finances card's chart data for whichever range is currently
+    /// selected — see `loadFinancesCard()`.
+    @Published public private(set) var financeBuckets: [FinanceBucket] = []
+    /// The calendar unit `financeBuckets` is grouped by (day/week/month) —
+    /// published alongside `financeBuckets` so `OverviewView`'s chart can
+    /// pass the right `unit:` to each mark without re-deriving it from
+    /// `resolvedRange` itself.
+    @Published public private(set) var financeBucketUnit: Calendar.Component = .day
+    /// The Finances card's date-range control — `PCCDateRangeControl`
+    /// (`FormControls.swift`) reads/writes this directly.
+    @Published public var financesDateRange = DateRangeSelection(option: .last7Days)
 
     @Published public var errorMessage: String?
     @Published public private(set) var isLoading = false
 
-    /// Each section is capped to this many rows, with the rest surfaced as a
-    /// "+N more" count instead — an unbounded overdue-Deadlines or
-    /// busy-week-of-Transactions list would defeat the point of a glance
-    /// screen.
-    private static let sectionCap = 5
-    /// The Transactions section's time window.
-    private static let recentTransactionsWindow: TimeInterval = 7 * 24 * 60 * 60
-
-    private let deadlinesClient: DeadlinesAPIClient
-    private let timeEntriesClient: TimeEntriesAPIClient
     private let tasksClient: TasksAPIClient
     private let projectsClient: ProjectsAPIClient
-    private let clientsClient: ClientsAPIClient
-    private let coursesClient: CoursesAPIClient
-    private let transactionsClient: TransactionsAPIClient
     private let accountsClient: AccountsAPIClient
+    private let transactionsClient: TransactionsAPIClient
+    private let financesReportingClient: FinancesReportingAPIClient
+    private let workHoursClient: WorkHoursAPIClient
 
     public init(
-        deadlinesClient: DeadlinesAPIClient,
-        timeEntriesClient: TimeEntriesAPIClient,
         tasksClient: TasksAPIClient,
         projectsClient: ProjectsAPIClient,
-        clientsClient: ClientsAPIClient,
-        coursesClient: CoursesAPIClient,
+        accountsClient: AccountsAPIClient,
         transactionsClient: TransactionsAPIClient,
-        accountsClient: AccountsAPIClient
+        financesReportingClient: FinancesReportingAPIClient,
+        workHoursClient: WorkHoursAPIClient
     ) {
-        self.deadlinesClient = deadlinesClient
-        self.timeEntriesClient = timeEntriesClient
         self.tasksClient = tasksClient
         self.projectsClient = projectsClient
-        self.clientsClient = clientsClient
-        self.coursesClient = coursesClient
-        self.transactionsClient = transactionsClient
         self.accountsClient = accountsClient
+        self.transactionsClient = transactionsClient
+        self.financesReportingClient = financesReportingClient
+        self.workHoursClient = workHoursClient
+    }
+
+    /// Each Project paired with the fraction (0–1) of its own Tasks that are
+    /// complete — `nil` for a Project with no Tasks yet, since "0 of 0" isn't
+    /// meaningfully 0% or 100% done. Backs the Work card's chart. Computed
+    /// from `tasks`/`projects`, both already loaded unfiltered, rather than
+    /// a separate fetch.
+    public var projectCompletion: [(project: Project, fraction: Double)] {
+        projects.compactMap { project in
+            let projectTasks = tasks.filter { $0.projectID == project.id }
+            guard !projectTasks.isEmpty else { return nil }
+            let doneCount = projectTasks.filter(\.isComplete).count
+            return (project, Double(doneCount) / Double(projectTasks.count))
+        }
+    }
+
+    /// Incomplete Tasks due today specifically — not overdue (see
+    /// `tasksOverdue` for that), the Work card's "Today" list.
+    public var tasksDueToday: [PCCTask] {
+        tasks.filter { task in
+            guard let dueDate = task.dueDate else { return false }
+            return Calendar.current.isDateInToday(dueDate) && !task.isComplete
+        }
+    }
+
+    /// Incomplete Tasks whose due date has already passed — the Work card's
+    /// "Overdue" list, kept separate from `tasksDueToday` per the dashboard's
+    /// own layout (distinct from the old combined "today or overdue" shape
+    /// a single Deadlines widget used).
+    public var tasksOverdue: [PCCTask] {
+        tasks.filter { task in
+            guard let dueDate = task.dueDate else { return false }
+            return dueDate < Self.startOfToday && !task.isComplete
+        }
+    }
+
+    /// Of complete Tasks that had both a Deadline and a `completedAt`
+    /// timestamp, the fraction completed on or before that Deadline —
+    /// `nil` when there's no such Task yet (mirrors `projectCompletion`'s
+    /// own "don't claim a rate from zero data" reasoning). `completedAt`
+    /// only exists for Tasks completed after that field was introduced
+    /// (`PCCTask.completedAt`'s own doc comment), so this rate only reflects
+    /// completions from that point forward.
+    public var taskCompletionRateWithinDeadline: Double? {
+        let eligible = tasks.filter { $0.isComplete && $0.dueDate != nil && $0.completedAt != nil }
+        guard !eligible.isEmpty else { return nil }
+        let onTime = eligible.filter { $0.completedAt! <= $0.dueDate! }.count
+        return Double(onTime) / Double(eligible.count)
     }
 
     public func load() async {
         isLoading = true
         defer { isLoading = false }
         await run(verb: "load") {
-            let windowStart = Date().addingTimeInterval(-Self.recentTransactionsWindow)
-            async let loadedDeadlines = deadlinesClient.listDeadlines()
-            async let loadedTimer = timeEntriesClient.getActiveTimer()
+            let now = Date()
+            let startOfWeek = Calendar.current.dateInterval(of: .weekOfYear, for: now)?.start ?? now
+
             async let loadedTasks = tasksClient.listTasks(projectID: nil, courseID: nil)
             async let loadedProjects = projectsClient.listProjects()
-            async let loadedClients = clientsClient.listClients()
-            async let loadedCourses = coursesClient.listCourses()
-            async let loadedTransactions = transactionsClient.listTransactions(
-                accountID: nil, start: windowStart, end: nil)
             async let loadedAccounts = accountsClient.listAccounts()
-
-            let deadlines = try await loadedDeadlines
-            activeTimer = try await loadedTimer
+            async let loadedNetWorth = financesReportingClient.fetchCurrentNetWorth()
+            async let loadedWorkHours = workHoursClient.fetchWorkHours(groupBy: .day, start: startOfWeek, end: now)
             tasks = try await loadedTasks
             projects = try await loadedProjects
-            clients = try await loadedClients
-            courses = try await loadedCourses
-            let transactions = try await loadedTransactions
             accounts = try await loadedAccounts
+            currentNetWorth = try await loadedNetWorth
+            workHoursThisWeek = try await loadedWorkHours
+        }
+        await loadFinancesCard()
+    }
 
-            let dueTodayOrOverdue = Self.dueTodayOrOverdue(deadlines)
-            upcomingDeadlines = Array(dueTodayOrOverdue.prefix(Self.sectionCap))
-            additionalDeadlinesCount = max(0, dueTodayOrOverdue.count - Self.sectionCap)
-
-            let sortedTransactions = transactions.sorted { $0.date > $1.date }
-            recentTransactions = Array(sortedTransactions.prefix(Self.sectionCap))
-            additionalTransactionsCount = max(0, sortedTransactions.count - Self.sectionCap)
+    /// Reloads just the Finances card's chart — called on its own whenever
+    /// `financesDateRange` changes, the same "reload on every control
+    /// change, no separate Apply step" shape
+    /// `FinancesReportingViewModel.loadSelectedAccountFigures()` already
+    /// uses, kept separate from `load()`'s do/catch so a range change
+    /// doesn't re-fetch Tasks/Projects/Accounts/Net Worth too.
+    public func loadFinancesCard() async {
+        do {
+            let range = financesDateRange.resolvedRange
+            let transactions = try await transactionsClient.listTransactions(
+                accountID: nil, start: range.start, end: range.end)
+            let unit = Self.bucketUnit(start: range.start, end: range.end)
+            financeBucketUnit = unit
+            financeBuckets = Self.bucket(transactions, unit: unit)
+            errorMessage = nil
+        } catch {
+            errorMessage = "Couldn't load Finances: \(error.localizedDescription)"
         }
     }
 
-    /// `items` filtered to what's due today or already past due, and not
-    /// already complete — the backend already orders `items` by Deadline
-    /// proximity with undated items included (`DeadlinesViewModel`'s own
-    /// comment on `DeadlinesAPIClient.listDeadlines()`), so this only needs
-    /// to filter, not re-sort. `isComplete` is `nil` for a Project/Course
-    /// (no such concept at that level, per `DeadlineItem`'s own doc comment)
-    /// so those never get excluded here — an overdue Project/Course has no
-    /// way to stop being "overdue" except by its Deadline being edited or
-    /// cleared on the Projects/Courses screen, the same as the standalone
-    /// Deadlines screen already behaves; not a gap this screen introduces.
-    private static func dueTodayOrOverdue(_ items: [DeadlineItem]) -> [DeadlineItem] {
-        let endOfToday = Calendar.current.startOfDay(for: Date()).addingTimeInterval(24 * 60 * 60)
-        return items.filter { item in
-            guard let dueDate = item.dueDate else { return false }
-            return dueDate < endOfToday && item.isComplete != true
+    /// Day for a range of a month or less, week for up to ~4 months, month
+    /// for anything wider (e.g. "last year") — keeps the chart from turning
+    /// into 365 unreadable daily bars for a year-long range while staying
+    /// granular for a short one.
+    private static func bucketUnit(start: Date, end: Date) -> Calendar.Component {
+        let days = Calendar.current.dateComponents([.day], from: start, to: end).day ?? 0
+        return days <= 31 ? .day : (days <= 120 ? .weekOfYear : .month)
+    }
+
+    private static func bucket(_ transactions: [Transaction], unit: Calendar.Component) -> [FinanceBucket] {
+        let calendar = Calendar.current
+        var totals: [Date: (income: Double, expense: Double)] = [:]
+        for transaction in transactions {
+            guard let periodStart = calendar.dateInterval(of: unit, for: transaction.date)?.start else { continue }
+            var entry = totals[periodStart] ?? (income: 0, expense: 0)
+            switch transaction.type {
+            case .income: entry.income += transaction.amount
+            case .expense: entry.expense += transaction.amount
+            }
+            totals[periodStart] = entry
         }
+        return totals.keys.sorted().map { periodStart in
+            let entry = totals[periodStart]!
+            return FinanceBucket(periodStart: periodStart, income: entry.income, expense: entry.expense)
+        }
+    }
+
+    private static var startOfToday: Date {
+        Calendar.current.startOfDay(for: Date())
     }
 
     /// Runs a fetch against every published property this view model owns,

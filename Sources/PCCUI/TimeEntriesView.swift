@@ -112,7 +112,9 @@ public struct TimeEntriesView: View {
                     }
                 }
             }
+            .glassRows()
         }
+        .glassScreenBackground()
     }
 
     private var emptyState: some View {
@@ -213,49 +215,45 @@ struct TimeEntryFormSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                DatePicker("Starts", selection: $startDate)
-                DatePicker("Ends", selection: $endDate)
-                if !isEndAfterStart {
-                    Text("End time must be after start time.")
-                        .font(.caption)
-                        .foregroundStyle(.red)
+                Section {
+                    DatePicker("Starts", selection: $startDate)
+                    DatePicker("Ends", selection: $endDate)
+                    if !isEndAfterStart {
+                        Text("End time must be after start time.")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                    TextField("Notes", text: $notes)
+                        .pccField()
                 }
-                TextField("Notes", text: $notes)
+                .glassRows()
 
                 Section("Attached to") {
-                    Picker("Task", selection: $taskID) {
-                        Text("None").tag(UUID?.none)
-                        ForEach(tasks) { task in
-                            Text(task.title).tag(UUID?.some(task.id))
-                        }
-                    }
+                    PCCMenuPicker(
+                        "Task", selection: $taskID,
+                        options: [(UUID?.none, "None")] + tasks.map { (Optional($0.id), $0.title) }
+                    )
                     .onChange(of: taskID) { newValue in
                         if newValue != nil { clearContainer(except: \Self.taskID) }
                     }
-                    Picker("Project", selection: $projectID) {
-                        Text("None").tag(UUID?.none)
-                        ForEach(projects) { project in
-                            Text(project.name).tag(UUID?.some(project.id))
-                        }
-                    }
+                    PCCMenuPicker(
+                        "Project", selection: $projectID,
+                        options: [(UUID?.none, "None")] + projects.map { (Optional($0.id), $0.name) }
+                    )
                     .onChange(of: projectID) { newValue in
                         if newValue != nil { clearContainer(except: \Self.projectID) }
                     }
-                    Picker("Client", selection: $clientID) {
-                        Text("None").tag(UUID?.none)
-                        ForEach(clients) { client in
-                            Text(client.name).tag(UUID?.some(client.id))
-                        }
-                    }
+                    PCCMenuPicker(
+                        "Client", selection: $clientID,
+                        options: [(UUID?.none, "None")] + clients.map { (Optional($0.id), $0.name) }
+                    )
                     .onChange(of: clientID) { newValue in
                         if newValue != nil { clearContainer(except: \Self.clientID) }
                     }
-                    Picker("Course", selection: $courseID) {
-                        Text("None").tag(UUID?.none)
-                        ForEach(courses) { course in
-                            Text(course.name).tag(UUID?.some(course.id))
-                        }
-                    }
+                    PCCMenuPicker(
+                        "Course", selection: $courseID,
+                        options: [(UUID?.none, "None")] + courses.map { (Optional($0.id), $0.name) }
+                    )
                     .onChange(of: courseID) { newValue in
                         if newValue != nil { clearContainer(except: \Self.courseID) }
                     }
@@ -265,7 +263,9 @@ struct TimeEntryFormSheet: View {
                             .foregroundStyle(.red)
                     }
                 }
+                .glassRows()
             }
+            .glassScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

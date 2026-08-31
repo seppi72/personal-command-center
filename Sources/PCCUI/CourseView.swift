@@ -88,7 +88,9 @@ public struct CourseView: View {
                     }
                 }
             }
+            .glassRows()
         }
+        .glassScreenBackground()
     }
 
     private var emptyState: some View {
@@ -168,22 +170,28 @@ struct CourseFormSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                TextField("Name", text: $name)
+                Section {
+                    TextField("Name", text: $name)
+                        .pccField()
+                }
+                .glassRows()
                 Section("Term") {
-                    Picker("Month", selection: $termMonth) {
-                        ForEach(1...12, id: \.self) { month in
-                            Text(Self.monthSymbols[month - 1]).tag(month)
-                        }
-                    }
+                    PCCMenuPicker(
+                        "Month", selection: $termMonth,
+                        options: (1...12).map { ($0, Self.monthSymbols[$0 - 1]) }
+                    )
                     Stepper("Year: \(termYear)", value: $termYear, in: 1900...3000)
                 }
+                .glassRows()
                 Section("Deadline") {
                     Toggle("Has deadline", isOn: $hasDeadline)
                     if hasDeadline {
                         DatePicker("Due", selection: $dueDate, displayedComponents: .date)
                     }
                 }
+                .glassRows()
             }
+            .glassScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -254,6 +262,7 @@ struct CourseDetailView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .glassRows()
             Section("Tasks") {
                 listRows(
                     items: tasksViewModel.tasks,
@@ -303,6 +312,7 @@ struct CourseDetailView: View {
                     Label("Add Task", systemImage: "plus")
                 }
             }
+            .glassRows()
             Section("Meetings") {
                 listRows(
                     items: commitmentsViewModel.commitments,
@@ -341,7 +351,9 @@ struct CourseDetailView: View {
                     Label("Add Meeting", systemImage: "plus")
                 }
             }
+            .glassRows()
         }
+        .glassScreenBackground()
         .navigationTitle(currentCourse.name)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {

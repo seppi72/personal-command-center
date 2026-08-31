@@ -70,7 +70,9 @@ public struct CategoriesView: View {
                     }
                 }
             }
+            .glassRows()
         }
+        .glassScreenBackground()
     }
 
     private var emptyState: some View {
@@ -114,8 +116,13 @@ struct CategoryFormSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                TextField("Name", text: $name)
+                Section {
+                    TextField("Name", text: $name)
+                        .pccField()
+                }
+                .glassRows()
             }
+            .glassScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -163,6 +170,7 @@ struct CategoryDetailView: View {
                 Text(currentCategory.name)
                     .font(.title3)
             }
+            .glassRows()
             Section("Subcategories") {
                 if subcategoriesViewModel.subcategories.isEmpty {
                     Text("No Subcategories yet.")
@@ -193,7 +201,9 @@ struct CategoryDetailView: View {
                     Label("Add Subcategory", systemImage: "plus")
                 }
             }
+            .glassRows()
         }
+        .glassScreenBackground()
         .navigationTitle(currentCategory.name)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -258,8 +268,13 @@ struct SubcategoryFormSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                TextField("Name", text: $name)
+                Section {
+                    TextField("Name", text: $name)
+                        .pccField()
+                }
+                .glassRows()
             }
+            .glassScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

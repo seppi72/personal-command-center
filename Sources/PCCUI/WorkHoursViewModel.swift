@@ -10,39 +10,30 @@ import Foundation
 @MainActor
 public final class WorkHoursViewModel: ObservableObject {
     @Published public var groupBy: WorkHoursGroupBy
-    @Published public var start: Date
-    @Published public var end: Date
+    /// `PCCDateRangeControl` (`FormControls.swift`) reads/writes this
+    /// directly — defaults to `.thisWeek`, the same "current week, Monday
+    /// through now" default this view model always had, now resolved by
+    /// `DateRangeSelection` (`.thisWeek`'s own doc comment carries the
+    /// Monday-anchored calculation this file used to duplicate) instead of
+    /// computed here.
+    @Published public var dateRange = DateRangeSelection(option: .thisWeek)
     @Published public private(set) var rows: [WorkHoursRow] = []
     @Published public var errorMessage: String?
     @Published public private(set) var isLoading = false
 
     private let client: WorkHoursAPIClient
 
-    /// Defaults (ticket #25): `groupBy = .day`, current week (Monday
-    /// through now) — a caller can override either via `start`/`end`, but
-    /// nothing in this ticket's scope needs to.
-    public init(client: WorkHoursAPIClient, start: Date? = nil, end: Date? = nil) {
+    public init(client: WorkHoursAPIClient) {
         self.client = client
         self.groupBy = .day
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        // `Calendar.current.component(.weekday, from:)` is 1 = Sunday ...
-        // 7 = Saturday (this package already assumes the Gregorian
-        // calendar elsewhere, e.g. `CourseView`'s Term picker) — days
-        // since Monday is `weekday - 2`, except Sunday, which needs 6
-        // rather than the `-1` that formula would give it.
-        let weekday = calendar.component(.weekday, from: today)
-        let daysSinceMonday = weekday == 1 ? 6 : weekday - 2
-        let monday = calendar.date(byAdding: .day, value: -daysSinceMonday, to: today) ?? today
-        self.start = start ?? monday
-        self.end = end ?? Date()
     }
 
     public func load() async {
         isLoading = true
         defer { isLoading = false }
         do {
-            rows = try await client.fetchWorkHours(groupBy: groupBy, start: start, end: end)
+            let range = dateRange.resolvedRange
+            rows = try await client.fetchWorkHours(groupBy: groupBy, start: range.start, end: range.end)
             errorMessage = nil
         } catch {
             errorMessage = "Couldn't load Work Hours: \(error.localizedDescription)"

@@ -52,6 +52,8 @@ public struct DeadlinesView: View {
                 }
             }
         }
+        .glassRows()
+        .glassScreenBackground()
     }
 
     private var emptyState: some View {
