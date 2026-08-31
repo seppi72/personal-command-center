@@ -170,7 +170,7 @@ public struct TransactionsView: View {
 
     private static func formattedAmount(_ transaction: Transaction) -> String {
         let signed = transaction.type == .expense ? -transaction.amount : transaction.amount
-        return signed.formatted(.currency(code: "USD").sign(strategy: .always()))
+        return signed.formatted(.currency(code: "PHP").sign(strategy: .always()))
     }
 }
 

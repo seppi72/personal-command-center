@@ -111,7 +111,7 @@ public struct AccountsView: View {
     }
 
     private static func formattedBalance(_ balance: Double) -> String {
-        balance.formatted(.currency(code: "USD"))
+        balance.formatted(.currency(code: "PHP"))
     }
 }
 

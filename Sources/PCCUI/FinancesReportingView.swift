@@ -153,6 +153,6 @@ public struct FinancesReportingView: View {
     }
 
     private static func currency(_ amount: Double) -> String {
-        amount.formatted(.currency(code: "USD"))
+        amount.formatted(.currency(code: "PHP"))
     }
 }
