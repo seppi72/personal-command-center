@@ -11,6 +11,8 @@ public struct TasksView: View {
     @State private var isPresentingNewTaskSheet = false
     @State private var editingTask: PCCTask?
 
+    @Environment(\.colorScheme) private var colorScheme
+
     public init(viewModel: TasksViewModel) {
         self.viewModel = viewModel
     }
@@ -74,53 +76,103 @@ public struct TasksView: View {
 
     private var taskList: some View {
         List {
-            ForEach(viewModel.tasks) { task in
-                HStack {
-                    Button {
-                        Task {
-                            await viewModel.setCompletion(task, isComplete: !task.isComplete)
+            Section {
+                statusStrip
+            }
+            Section {
+                ForEach(viewModel.tasks) { task in
+                    HStack {
+                        Button {
+                            Task {
+                                await viewModel.setCompletion(task, isComplete: !task.isComplete)
+                            }
+                        } label: {
+                            Image(systemName: task.isComplete ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(task.isComplete ? GlassStyle.signalGreen(for: colorScheme) : Color.secondary)
                         }
-                    } label: {
-                        Image(systemName: task.isComplete ? "checkmark.circle.fill" : "circle")
-                    }
-                    #if os(macOS)
-                    .buttonStyle(.plain)
-                    #endif
+                        #if os(macOS)
+                        .buttonStyle(.plain)
+                        #endif
 
-                    Button {
-                        editingTask = task
-                    } label: {
-                        VStack(alignment: .leading) {
-                            Text(task.title)
-                                .strikethrough(task.isComplete)
-                            if let notes = task.notes {
-                                Text(notes)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                            if let dueDate = task.dueDate {
-                                Text(dueDate, style: .date)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                        Button {
+                            editingTask = task
+                        } label: {
+                            VStack(alignment: .leading) {
+                                Text(task.title)
+                                    .strikethrough(task.isComplete)
+                                if let notes = task.notes {
+                                    Text(notes)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+                                if let dueDate = task.dueDate {
+                                    Text(dueDate, style: .date)
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .foregroundStyle(Self.isOverdue(task) ? GlassStyle.signalRed(for: colorScheme) : .secondary)
+                                }
                             }
                         }
-                    }
-                    #if os(macOS)
-                    .buttonStyle(.plain)
-                    #endif
-                }
-            }
-            .onDelete { offsets in
-                let toDelete = offsets.map { viewModel.tasks[$0] }
-                Task {
-                    for task in toDelete {
-                        await viewModel.deleteTask(task)
+                        #if os(macOS)
+                        .buttonStyle(.plain)
+                        #endif
                     }
                 }
+                .onDelete { offsets in
+                    let toDelete = offsets.map { viewModel.tasks[$0] }
+                    Task {
+                        for task in toDelete {
+                            await viewModel.deleteTask(task)
+                        }
+                    }
+                }
+                .glassRows()
             }
-            .glassRows()
         }
         .glassScreenBackground()
+    }
+
+    // MARK: - Status strip
+
+    private var statusStrip: some View {
+        HStack(spacing: 10) {
+            StatusDot(overallStatus)
+            Text(statusStripText)
+                .pccPanelLabel()
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 10)
+        .overlay(
+            Rectangle()
+                .fill(GlassStyle.panelLine(for: colorScheme))
+                .frame(height: 1),
+            alignment: .bottom
+        )
+        .listRowInsets(EdgeInsets())
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+
+    private var overallStatus: PanelStatus {
+        overdueCount > 0 ? .critical : .nominal
+    }
+
+    private var overdueCount: Int {
+        viewModel.tasks.filter(Self.isOverdue).count
+    }
+
+    private static func isOverdue(_ task: PCCTask) -> Bool {
+        guard let dueDate = task.dueDate, !task.isComplete else { return false }
+        return dueDate < Date()
+    }
+
+    private var statusStripText: String {
+        let count = viewModel.tasks.count
+        let noun = count == 1 ? "TASK" : "TASKS"
+        let flagText = overdueCount > 0 ? "\(overdueCount) OVERDUE" : "ALL CLEAR"
+        return "\(count) \(noun)   ·   \(flagText)"
     }
 
     private var emptyState: some View {
