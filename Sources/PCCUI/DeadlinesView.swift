@@ -8,14 +8,28 @@ import SwiftUI
 public struct DeadlinesView: View {
     @ObservedObject private var viewModel: DeadlinesViewModel
 
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.screenTheme) private var theme
-
     public init(viewModel: DeadlinesViewModel) {
         self.viewModel = viewModel
     }
 
     public var body: some View {
+        DeadlinesContent(viewModel: viewModel)
+            .screenTheme(.countdownClock)
+    }
+}
+
+/// The screen's actual content — split out from `DeadlinesView` itself so
+/// `.screenTheme(.countdownClock)` (applied in that struct's body, above)
+/// is genuinely in effect by the time this struct's own `body` reads
+/// `@Environment(\.screenTheme)`. See `View.screenTheme(_:)`'s doc comment
+/// in `PCCChassis.swift` for why the split is required.
+private struct DeadlinesContent: View {
+    @ObservedObject var viewModel: DeadlinesViewModel
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
+
+    var body: some View {
         NavigationStack {
             Group {
                 if viewModel.items.isEmpty && !viewModel.isLoading {
@@ -24,6 +38,7 @@ public struct DeadlinesView: View {
                     itemList
                 }
             }
+            .background(PanelBackground())
             .navigationTitle("Deadlines")
             .task { await viewModel.load() }
             .refreshable { await viewModel.load() }
@@ -58,12 +73,17 @@ public struct DeadlinesView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        if let dueDate = item.dueDate {
+                            CountdownBadge(dueDate: dueDate, isComplete: item.isComplete == true)
+                        }
                     }
+                    .padding(.vertical, 6)
                 }
             }
             .panelRows()
         }
-        .panelScreenBackground()
+        .scrollContentBackground(.hidden)
     }
 
     // MARK: - Status strip
@@ -137,5 +157,86 @@ public struct DeadlinesView: View {
         case .project: return "folder"
         case .course: return "graduationcap"
         }
+    }
+}
+
+// MARK: - Countdown Clock theme
+
+extension ScreenTheme {
+    /// `DeadlinesView`'s own vibe: an alarm-clock countdown console. No
+    /// separate neutral accent hue — every number on this screen is
+    /// itself an urgency signal, so `accent` is just set to the same LED
+    /// red `signalRed` already uses, rather than introducing a fourth hue
+    /// with no distinct job to do. Signal green/amber/red are left as
+    /// `ScreenTheme.default`'s — this screen's whole point is reading
+    /// those tiers correctly, no reason to shift them.
+    fileprivate static let countdownClock = ScreenTheme(
+        panelVoid: { $0 == .dark ? Color(hex: 0x180A0A) : Color(hex: 0xFAF4F2) },
+        panelSurface: { $0 == .dark ? Color(hex: 0x241210) : Color(hex: 0xFFFFFF) },
+        panelLine: { $0 == .dark ? Color(hex: 0x4A2420) : Color(hex: 0xECD9D4) },
+        accent: ScreenTheme.default.signalRed,
+        signalGreen: ScreenTheme.default.signalGreen,
+        signalAmber: ScreenTheme.default.signalAmber,
+        signalRed: ScreenTheme.default.signalRed
+    )
+}
+
+// MARK: - Countdown badge
+
+/// This screen's signature device: a big mono days-remaining readout,
+/// colored by urgency tier — the whole point of this screen is "how much
+/// time is left," so that answer gets the loudest number in the row,
+/// not the due date text next to it.
+private struct CountdownBadge: View {
+    let dueDate: Date
+    let isComplete: Bool
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
+
+    /// Calendar-day difference between today and `dueDate`, not a raw
+    /// time-interval division — comparing by calendar day avoids an
+    /// off-by-one read near midnight that a `/ 86400` would risk.
+    private var daysRemaining: Int {
+        let calendar = Calendar.current
+        let startOfToday = calendar.startOfDay(for: Date())
+        let startOfDue = calendar.startOfDay(for: dueDate)
+        return calendar.dateComponents([.day], from: startOfToday, to: startOfDue).day ?? 0
+    }
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            Text(numberText)
+                .font(.pccReadout(20))
+                .foregroundStyle(color)
+            Text(unitText)
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .tracking(1.0)
+                .textCase(.uppercase)
+                .foregroundStyle(color)
+        }
+        .frame(minWidth: 58, alignment: .trailing)
+    }
+
+    private var numberText: String {
+        "\(abs(daysRemaining))D"
+    }
+
+    private var unitText: String {
+        if isComplete { return "Done" }
+        if daysRemaining < 0 { return "Overdue" }
+        if daysRemaining == 0 { return "Today" }
+        return "Left"
+    }
+
+    /// Green past the 3-day mark, amber inside it (including "today"),
+    /// red once overdue — the same three-tier urgency vocabulary
+    /// `PanelStatus` uses elsewhere in the chassis, applied directly to
+    /// this screen's own hero number instead of a header lamp.
+    private var color: Color {
+        if isComplete { return .secondary }
+        if daysRemaining < 0 { return theme.signalRed(colorScheme) }
+        if daysRemaining <= 3 { return theme.signalAmber(colorScheme) }
+        return theme.signalGreen(colorScheme)
     }
 }
