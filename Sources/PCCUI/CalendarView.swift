@@ -69,7 +69,9 @@ public struct CalendarView: View {
                     }
                 }
             }
+            .glassRows()
         }
+        .glassScreenBackground()
     }
 
     @ViewBuilder

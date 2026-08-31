@@ -115,7 +115,9 @@ public struct TransactionsView: View {
                     }
                 }
             }
+            .glassRows()
         }
+        .glassScreenBackground()
     }
 
     private var emptyState: some View {
@@ -248,42 +250,41 @@ struct TransactionFormSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Picker("Account", selection: $accountID) {
-                    Text("Choose an Account").tag(UUID?.none)
-                    ForEach(accounts) { account in
-                        Text(account.name).tag(UUID?.some(account.id))
-                    }
+                Section {
+                    PCCMenuPicker(
+                        "Account", selection: $accountID,
+                        options: accounts.map { (Optional($0.id), $0.name) },
+                        placeholder: "Choose an Account"
+                    )
+                    #if os(iOS)
+                    TextField("Amount", text: $amountText)
+                        .keyboardType(.decimalPad)
+                        .pccField()
+                    #else
+                    TextField("Amount", text: $amountText)
+                        .pccField()
+                    #endif
+                    PCCMenuPicker("Type", selection: $type, options: TransactionType.allCases.map { ($0, $0.displayName) })
+                    DatePicker("Date", selection: $date, displayedComponents: .date)
+                    TextField("Notes", text: $notes)
+                        .pccField()
                 }
-                #if os(iOS)
-                TextField("Amount", text: $amountText)
-                    .keyboardType(.decimalPad)
-                #else
-                TextField("Amount", text: $amountText)
-                #endif
-                Picker("Type", selection: $type) {
-                    ForEach(TransactionType.allCases, id: \.self) { type in
-                        Text(type.displayName).tag(type)
-                    }
-                }
-                DatePicker("Date", selection: $date, displayedComponents: .date)
-                TextField("Notes", text: $notes)
+                .glassRows()
                 Section("Category") {
-                    Picker("Category", selection: $categoryID) {
-                        Text("None").tag(UUID?.none)
-                        ForEach(categories) { category in
-                            Text(category.name).tag(UUID?.some(category.id))
-                        }
-                    }
+                    PCCMenuPicker(
+                        "Category", selection: $categoryID,
+                        options: [(UUID?.none, "None")] + categories.map { (Optional($0.id), $0.name) }
+                    )
                     if categoryID != nil {
-                        Picker("Subcategory", selection: $subcategoryID) {
-                            Text("None").tag(UUID?.none)
-                            ForEach(availableSubcategories) { subcategory in
-                                Text(subcategory.name).tag(UUID?.some(subcategory.id))
-                            }
-                        }
+                        PCCMenuPicker(
+                            "Subcategory", selection: $subcategoryID,
+                            options: [(UUID?.none, "None")] + availableSubcategories.map { (Optional($0.id), $0.name) }
+                        )
                     }
                 }
+                .glassRows()
             }
+            .glassScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

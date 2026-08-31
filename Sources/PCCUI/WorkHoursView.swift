@@ -24,6 +24,7 @@ public struct WorkHoursView: View {
                     rowList
                 }
             }
+            .background(GlassBackground())
             .navigationTitle("Work Hours")
             .task { await viewModel.load() }
             .refreshable { await viewModel.load() }
@@ -31,31 +32,27 @@ public struct WorkHoursView: View {
         }
     }
 
-    /// Reloads on every control change rather than needing an explicit
-    /// "Apply" button — a Work Hours rollup is cheap to recompute and has
-    /// no unsaved-state concept the way `TimeEntryFormSheet` does.
+    /// A compact filter bar — reloads on every control change rather than
+    /// needing an explicit "Apply" button, since a Work Hours rollup is
+    /// cheap to recompute and has no unsaved-state concept the way
+    /// `TimeEntryFormSheet` does.
     private var controls: some View {
-        Form {
-            Picker("Group by", selection: $viewModel.groupBy) {
-                ForEach(WorkHoursGroupBy.allCases, id: \.self) { groupBy in
-                    Text(groupBy.displayName).tag(groupBy)
-                }
-            }
+        HStack(spacing: 10) {
+            PCCMenuPicker(
+                "Group by",
+                selection: $viewModel.groupBy,
+                options: WorkHoursGroupBy.allCases.map { ($0, $0.displayName) },
+                style: .boxed
+            )
             .onChange(of: viewModel.groupBy) { _ in
                 Task { await viewModel.load() }
             }
-            DatePicker("Start", selection: $viewModel.start, displayedComponents: .date)
-                .onChange(of: viewModel.start) { _ in
-                    Task { await viewModel.load() }
-                }
-            DatePicker("End", selection: $viewModel.end, displayedComponents: .date)
-                .onChange(of: viewModel.end) { _ in
-                    Task { await viewModel.load() }
-                }
+            PCCDateRangeControl(selection: $viewModel.dateRange) {
+                Task { await viewModel.load() }
+            }
+            Spacer()
         }
-        #if os(iOS)
-        .frame(height: 180)
-        #endif
+        .padding(12)
     }
 
     private var rowList: some View {
@@ -67,6 +64,8 @@ public struct WorkHoursView: View {
                     .foregroundStyle(.secondary)
             }
         }
+        .glassRows()
+        .scrollContentBackground(.hidden)
     }
 
     private var emptyState: some View {

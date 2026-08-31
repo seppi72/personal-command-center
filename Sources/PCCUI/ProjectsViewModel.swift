@@ -13,17 +13,37 @@ import Foundation
 public final class ProjectsViewModel: ObservableObject {
     @Published public private(set) var projects: [Project] = []
     @Published public private(set) var clients: [PCCClient] = []
+    /// Every Task across every Project, fetched unfiltered — only needed to
+    /// compute `completionFraction(for:)` for the row-level progress chart,
+    /// the same "load a second list just to derive a label/figure" shape
+    /// `clients` already has for `clientName(for:)`.
+    @Published public private(set) var tasks: [PCCTask] = []
     @Published public var errorMessage: String?
     @Published public private(set) var isLoading = false
 
     private let client: ProjectsAPIClient
     private let clientsClient: ClientsAPIClient
     private let sprintsClient: SprintsAPIClient
+    private let tasksClient: TasksAPIClient
 
-    public init(client: ProjectsAPIClient, clientsClient: ClientsAPIClient, sprintsClient: SprintsAPIClient) {
+    public init(
+        client: ProjectsAPIClient, clientsClient: ClientsAPIClient, sprintsClient: SprintsAPIClient,
+        tasksClient: TasksAPIClient
+    ) {
         self.client = client
         self.clientsClient = clientsClient
         self.sprintsClient = sprintsClient
+        self.tasksClient = tasksClient
+    }
+
+    /// The fraction (0–1) of `project`'s own Tasks that are complete, or
+    /// `nil` if it has no Tasks yet — what `ProjectsView` renders as each
+    /// row's progress bar. Mirrors `OverviewViewModel.projectCompletion`'s
+    /// same "0 of 0 isn't meaningfully 0% or 100%" reasoning.
+    public func completionFraction(for project: Project) -> Double? {
+        let projectTasks = tasks.filter { $0.projectID == project.id }
+        guard !projectTasks.isEmpty else { return nil }
+        return Double(projectTasks.filter(\.isComplete).count) / Double(projectTasks.count)
     }
 
     /// Builds the `SprintsViewModel` for one Project's detail screen,
@@ -48,8 +68,10 @@ public final class ProjectsViewModel: ObservableObject {
         await run(verb: "load") {
             async let loadedProjects = client.listProjects()
             async let loadedClients = clientsClient.listClients()
+            async let loadedTasks = tasksClient.listTasks(projectID: nil, courseID: nil)
             projects = try await loadedProjects
             clients = try await loadedClients
+            tasks = try await loadedTasks
         }
     }
 

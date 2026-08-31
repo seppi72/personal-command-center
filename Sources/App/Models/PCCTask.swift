@@ -36,6 +36,15 @@ final class PCCTask: Model, @unchecked Sendable {
     @OptionalField(key: "due_date")
     var dueDate: Date?
 
+    /// When this Task was last marked complete — `nil` while incomplete, and
+    /// cleared back to `nil` if marked incomplete again, so a Task
+    /// re-completed later gets a fresh timestamp rather than keeping a stale
+    /// one from a prior completion (`TaskController.setCompletion`). Backs
+    /// the dashboard's on-time completion rate: whether this is on/before
+    /// `dueDate`.
+    @OptionalField(key: "completed_at")
+    var completedAt: Date?
+
     /// The Sprint (`CONTEXT.md`) this Task is grouped into, if any — optional
     /// since a Project's use of Sprints is optional and a Task can be listed
     /// unscoped within its Project. Cleared automatically when the Task

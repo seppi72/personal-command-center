@@ -118,7 +118,9 @@ public struct TasksView: View {
                     }
                 }
             }
+            .glassRows()
         }
+        .glassScreenBackground()
     }
 
     private var emptyState: some View {
@@ -198,36 +200,39 @@ struct TaskFormSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                TextField("Title", text: $taskTitle)
-                TextField("Notes", text: $notes)
-                // A Task belongs to at most one of {Project, Course}
-                // (ADR-0003) — picking one clears the other rather than
-                // leaving both pickers free to disagree.
-                Picker("Project", selection: $projectID) {
-                    Text("None").tag(UUID?.none)
-                    ForEach(projects) { project in
-                        Text(project.name).tag(UUID?.some(project.id))
+                Section {
+                    TextField("Title", text: $taskTitle)
+                        .pccField()
+                    TextField("Notes", text: $notes)
+                        .pccField()
+                    // A Task belongs to at most one of {Project, Course}
+                    // (ADR-0003) — picking one clears the other rather than
+                    // leaving both pickers free to disagree.
+                    PCCMenuPicker(
+                        "Project", selection: $projectID,
+                        options: [(UUID?.none, "None")] + projects.map { (Optional($0.id), $0.name) }
+                    )
+                    .onChange(of: projectID) { newValue in
+                        if newValue != nil { courseID = nil }
+                    }
+                    PCCMenuPicker(
+                        "Course", selection: $courseID,
+                        options: [(UUID?.none, "None")] + courses.map { (Optional($0.id), $0.name) }
+                    )
+                    .onChange(of: courseID) { newValue in
+                        if newValue != nil { projectID = nil }
                     }
                 }
-                .onChange(of: projectID) { newValue in
-                    if newValue != nil { courseID = nil }
-                }
-                Picker("Course", selection: $courseID) {
-                    Text("None").tag(UUID?.none)
-                    ForEach(courses) { course in
-                        Text(course.name).tag(UUID?.some(course.id))
-                    }
-                }
-                .onChange(of: courseID) { newValue in
-                    if newValue != nil { projectID = nil }
-                }
+                .glassRows()
                 Section("Deadline") {
                     Toggle("Has deadline", isOn: $hasDeadline)
                     if hasDeadline {
                         DatePicker("Due", selection: $dueDate, displayedComponents: .date)
                     }
                 }
+                .glassRows()
             }
+            .glassScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

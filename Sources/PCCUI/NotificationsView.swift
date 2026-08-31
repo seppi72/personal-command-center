@@ -46,7 +46,9 @@ public struct NotificationsView: View {
                     }
                 }
             }
+            .glassRows()
         }
+        .glassScreenBackground()
     }
 
     private func row(for notification: NotificationItem) -> some View {

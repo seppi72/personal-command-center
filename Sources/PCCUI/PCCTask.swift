@@ -17,6 +17,11 @@ public struct PCCTask: Codable, Identifiable, Equatable, Sendable {
     public var projectID: UUID?
     public var dueDate: Date?
     public var courseID: UUID?
+    /// When this Task was last marked complete — `nil` while incomplete.
+    /// Backs the Overview dashboard's on-time completion rate (whether this
+    /// is on/before `dueDate`); only accurate for Tasks completed after this
+    /// field was introduced, since nothing backfills it retroactively.
+    public var completedAt: Date?
 
     public init(
         id: UUID,
@@ -25,7 +30,8 @@ public struct PCCTask: Codable, Identifiable, Equatable, Sendable {
         isComplete: Bool = false,
         projectID: UUID? = nil,
         dueDate: Date? = nil,
-        courseID: UUID? = nil
+        courseID: UUID? = nil,
+        completedAt: Date? = nil
     ) {
         self.id = id
         self.title = title
@@ -34,5 +40,6 @@ public struct PCCTask: Codable, Identifiable, Equatable, Sendable {
         self.projectID = projectID
         self.dueDate = dueDate
         self.courseID = courseID
+        self.completedAt = completedAt
     }
 }

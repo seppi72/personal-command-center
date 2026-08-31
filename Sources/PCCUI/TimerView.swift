@@ -2,15 +2,24 @@ import SwiftUI
 
 /// Minimal Mac/iOS live-timer control for ticket #28: shows the currently
 /// running timer (what it's attached to, and since when) with Stop/Cancel
-/// controls, or — when none is running — a container picker and a Start
-/// button. One shared view for both platforms, no platform-specific chrome,
-/// per this repo's "minimal" scope (mirrors `TimeEntriesView`).
+/// controls, or — when none is running — a container-kind picker and a
+/// Start button. One shared view for both platforms, no platform-specific
+/// chrome, per this repo's "minimal" scope (mirrors `TimeEntriesView`).
+///
+/// Laid out as one big hero card — segmented Task/Project/Client/Course
+/// tabs, giant monospaced elapsed time, a large Start/Stop button — with a
+/// second card below it listing that kind's items to attach to, rather than
+/// the four stacked `Picker`s a plain `Form` would use: a large, focused
+/// timer screen (glassmorphism dashboard pass) instead of one more settings
+/// form. `TimeEntryContainer`'s "exactly one of four" rule (ADR-0004) falls
+/// out of this shape for free — only one kind's item list is ever shown, so
+/// only one id can ever be selected at a time, rather than needing the
+/// four-Picker "picking one clears the other three" dance
+/// `TimeEntryFormSheet` still uses.
 public struct TimerView: View {
     @ObservedObject private var viewModel: TimerViewModel
-    @State private var taskID: UUID?
-    @State private var projectID: UUID?
-    @State private var clientID: UUID?
-    @State private var courseID: UUID?
+    @State private var selectedKind: ContainerKind = .task
+    @State private var selectedItemID: UUID?
 
     public init(viewModel: TimerViewModel) {
         self.viewModel = viewModel
@@ -18,13 +27,20 @@ public struct TimerView: View {
 
     public var body: some View {
         NavigationStack {
-            Form {
-                if let activeTimer = viewModel.activeTimer {
-                    runningSection(for: activeTimer)
-                } else {
-                    startSection
+            ScrollView {
+                VStack(spacing: 20) {
+                    if let activeTimer = viewModel.activeTimer {
+                        runningCard(for: activeTimer)
+                    } else {
+                        idleCard
+                        itemPickerCard
+                    }
                 }
+                .padding(24)
+                .frame(maxWidth: 640)
+                .frame(maxWidth: .infinity)
             }
+            .glassScreenBackground()
             .navigationTitle("Timer")
             .task { await viewModel.load() }
             .refreshable { await viewModel.load() }
@@ -32,80 +48,163 @@ public struct TimerView: View {
         }
     }
 
-    private func runningSection(for entry: TimeEntry) -> some View {
-        Section("Running") {
-            Text(containerLabel(for: entry))
-                .font(.headline)
-            // No cap or warning on how long a timer has been running
-            // (ticket #28's AC) — this is purely a display of elapsed time,
-            // not a limit.
-            Text("Started \(entry.startDate, style: .relative) ago")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            HStack {
-                Button("Stop") {
+    // MARK: - Running
+
+    private func runningCard(for entry: TimeEntry) -> some View {
+        GlassCard(minHeight: 360) {
+            VStack(spacing: 20) {
+                Text(containerLabel(for: entry))
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+                TimelineView(.periodic(from: entry.startDate, by: 1)) { context in
+                    Text(Self.formattedElapsed(context.date.timeIntervalSince(entry.startDate)))
+                        .font(.system(size: 72, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                }
+                Text("Started \(entry.startDate, style: .relative) ago")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                bigButton("Stop") {
                     Task { await viewModel.stop() }
                 }
-                .buttonStyle(.borderedProminent)
-                Button("Cancel", role: .destructive) {
+                Button("Cancel Timer", role: .destructive) {
                     Task { await viewModel.cancel() }
+                }
+                .font(.subheadline)
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    // MARK: - Idle
+
+    private var idleCard: some View {
+        GlassCard(minHeight: 360) {
+            VStack(spacing: 20) {
+                kindTabs
+                Text(Self.formattedElapsed(0))
+                    .font(.system(size: 72, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary.opacity(0.4))
+                Text(selectedItemID == nil ? "Choose a \(selectedKind.title) below to start" : "Ready to start")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                bigButton("Start") {
+                    guard let container else { return }
+                    Task { await viewModel.start(container: container) }
+                }
+                .disabled(container == nil)
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    /// The segmented Task/Project/Client/Course tab row — the reference
+    /// layout's mode tabs, repurposed here to pick which of `TimeEntry`'s
+    /// four possible containers this Timer attaches to (ADR-0004) instead
+    /// of a session type. Switching tabs clears `selectedItemID`: an id
+    /// from the old kind's list wouldn't mean anything against the new
+    /// kind's items.
+    private var kindTabs: some View {
+        HStack(spacing: 4) {
+            ForEach(ContainerKind.allCases) { kind in
+                Button {
+                    guard kind != selectedKind else { return }
+                    selectedKind = kind
+                    selectedItemID = nil
+                } label: {
+                    Text(kind.title)
+                        .font(.subheadline.weight(kind == selectedKind ? .bold : .regular))
+                        .foregroundStyle(kind == selectedKind ? Color.primary : Color.secondary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(
+                            Capsule().fill(kind == selectedKind ? Color.primary.opacity(0.12) : Color.clear)
+                        )
+                }
+                #if os(macOS)
+                .buttonStyle(.plain)
+                #endif
+            }
+        }
+    }
+
+    private var itemPickerCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Choose a \(selectedKind.title)")
+                    .font(.headline)
+                if currentItems.isEmpty {
+                    Text("No \(selectedKind.title)s yet.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } else {
+                    VStack(spacing: 4) {
+                        ForEach(currentItems, id: \.id) { item in
+                            itemRow(item)
+                        }
+                    }
                 }
             }
         }
     }
 
-    private var startSection: some View {
-        Section("Start a Timer") {
-            Picker("Task", selection: $taskID) {
-                Text("None").tag(UUID?.none)
-                ForEach(viewModel.tasks) { task in
-                    Text(task.title).tag(UUID?.some(task.id))
+    private func itemRow(_ item: (id: UUID, title: String)) -> some View {
+        Button {
+            selectedItemID = item.id
+        } label: {
+            HStack {
+                Text(item.title)
+                Spacer()
+                if selectedItemID == item.id {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Color.accentColor)
                 }
             }
-            .onChange(of: taskID) { newValue in
-                if newValue != nil { clearContainer(except: \Self.taskID) }
-            }
-            Picker("Project", selection: $projectID) {
-                Text("None").tag(UUID?.none)
-                ForEach(viewModel.projects) { project in
-                    Text(project.name).tag(UUID?.some(project.id))
-                }
-            }
-            .onChange(of: projectID) { newValue in
-                if newValue != nil { clearContainer(except: \Self.projectID) }
-            }
-            Picker("Client", selection: $clientID) {
-                Text("None").tag(UUID?.none)
-                ForEach(viewModel.clients) { client in
-                    Text(client.name).tag(UUID?.some(client.id))
-                }
-            }
-            .onChange(of: clientID) { newValue in
-                if newValue != nil { clearContainer(except: \Self.clientID) }
-            }
-            Picker("Course", selection: $courseID) {
-                Text("None").tag(UUID?.none)
-                ForEach(viewModel.courses) { course in
-                    Text(course.name).tag(UUID?.some(course.id))
-                }
-            }
-            .onChange(of: courseID) { newValue in
-                if newValue != nil { clearContainer(except: \Self.courseID) }
-            }
-
-            let container = TimeEntryContainer(
-                taskID: taskID, projectID: projectID, clientID: clientID, courseID: courseID
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(selectedItemID == item.id ? Color.primary.opacity(0.08) : Color.clear)
             )
-            if container == nil {
-                Text("Choose exactly one Task, Project, Client, or Course.")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-            Button("Start") {
-                guard let container else { return }
-                Task { await viewModel.start(container: container) }
-            }
-            .disabled(container == nil)
+        }
+        #if os(macOS)
+        .buttonStyle(.plain)
+        #endif
+    }
+
+    /// A large pill-shaped call-to-action button — Start/Stop, spanning
+    /// most of the hero card's width, matching the reference layout's own
+    /// oversized button rather than a standard-size `Form` button.
+    private func bigButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title.uppercased())
+                .font(.title3.bold())
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+    }
+
+    // MARK: - Helpers
+
+    private var container: TimeEntryContainer? {
+        guard let selectedItemID else { return nil }
+        switch selectedKind {
+        case .task: return .task(selectedItemID)
+        case .project: return .project(selectedItemID)
+        case .client: return .client(selectedItemID)
+        case .course: return .course(selectedItemID)
+        }
+    }
+
+    private var currentItems: [(id: UUID, title: String)] {
+        switch selectedKind {
+        case .task: return viewModel.tasks.map { ($0.id, $0.title) }
+        case .project: return viewModel.projects.map { ($0.id, $0.name) }
+        case .client: return viewModel.clients.map { ($0.id, $0.name) }
+        case .course: return viewModel.courses.map { ($0.id, $0.name) }
         }
     }
 
@@ -129,13 +228,40 @@ public struct TimerView: View {
         return "Unattached"
     }
 
-    /// Clears every container field except `keyPath` — called whenever one
-    /// picker gains a non-`nil` selection, so at most one is ever set at a
-    /// time (ADR-0004). Mirrors `TimeEntryFormSheet`'s own copy.
-    private func clearContainer(except keyPath: PartialKeyPath<TimerView>) {
-        if keyPath != \Self.taskID { taskID = nil }
-        if keyPath != \Self.projectID { projectID = nil }
-        if keyPath != \Self.clientID { clientID = nil }
-        if keyPath != \Self.courseID { courseID = nil }
+    /// "H:MM:SS" once past an hour, "MM:SS" until then — a Timer runs
+    /// open-ended (no set session length, unlike a Pomodoro countdown), so
+    /// this counts up rather than down. Also used, at `0`, to render the
+    /// idle card's dimmed placeholder digits.
+    private static func formattedElapsed(_ seconds: TimeInterval) -> String {
+        let total = max(0, Int(seconds))
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let secs = total % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, secs)
+        }
+        return String(format: "%02d:%02d", minutes, secs)
+    }
+}
+
+/// The four kinds of container a Time Entry can attach to (ADR-0004) — as a
+/// `CaseIterable` enum so `TimerView`'s tab row can enumerate them, rather
+/// than four separately-tracked optional ids each needing its own
+/// "clear the other three" logic (`TimeEntryFormSheet`'s own shape).
+/// Package-internal (not `private`) rather than scoped to this file — the
+/// Overview dashboard's mini Timer (`OverviewView.swift`) reuses this same
+/// enum for its own compact container-kind tabs.
+enum ContainerKind: CaseIterable, Identifiable {
+    case task, project, client, course
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .task: return "Task"
+        case .project: return "Project"
+        case .client: return "Client"
+        case .course: return "Course"
+        }
     }
 }

@@ -10,6 +10,7 @@ struct TaskResponse: Content {
     let dueDate: Date?
     let sprintID: UUID?
     let courseID: UUID?
+    let completedAt: Date?
 
     init(_ task: PCCTask) throws {
         self.id = try task.requireID()
@@ -20,6 +21,7 @@ struct TaskResponse: Content {
         self.dueDate = task.dueDate
         self.sprintID = task.$sprint.id
         self.courseID = task.$course.id
+        self.completedAt = task.completedAt
     }
 }
 
@@ -145,9 +147,18 @@ struct TaskController: RouteCollection {
         try await setCompletion(false, req: req)
     }
 
+    /// Stamps `completedAt` on the `false → true` transition, and clears it
+    /// back to `nil` when marked incomplete — so a Task re-completed later
+    /// gets a fresh timestamp rather than keeping a stale one from a prior
+    /// completion (dashboard on-time completion rate).
     private func setCompletion(_ isComplete: Bool, req: Request) async throws -> TaskResponse {
         guard let task = try await findTask(req: req) else {
             throw Abort(.notFound)
+        }
+        if isComplete && !task.isComplete {
+            task.completedAt = Date()
+        } else if !isComplete {
+            task.completedAt = nil
         }
         task.isComplete = isComplete
         try await task.save(on: req.db)

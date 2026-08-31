@@ -44,7 +44,8 @@ let notificationsClient = URLSessionNotificationsAPIClient(baseURL: baseURL, bea
 // doesn't rebuild — and re-fetch, and lose scroll/sheet state for — the
 // screen you're navigating away from. Top-level code in `main.swift` runs
 // on the main actor, same as these `@MainActor` view models require.
-let projectsViewModel = ProjectsViewModel(client: projectsClient, clientsClient: clientsClient, sprintsClient: sprintsClient)
+let projectsViewModel = ProjectsViewModel(
+    client: projectsClient, clientsClient: clientsClient, sprintsClient: sprintsClient, tasksClient: tasksClient)
 let tasksViewModel = TasksViewModel(tasksClient: tasksClient, projectsClient: projectsClient, coursesClient: coursesClient)
 let deadlinesViewModel = DeadlinesViewModel(client: deadlinesClient)
 let calendarViewModel = CalendarViewModel(
@@ -70,9 +71,9 @@ let financesReportingViewModel = FinancesReportingViewModel(
 let notificationsViewModel = NotificationsViewModel(client: notificationsClient)
 let automationLogViewModel = AutomationLogViewModel(client: automationLogsClient)
 let overviewViewModel = OverviewViewModel(
-    deadlinesClient: deadlinesClient, timeEntriesClient: timeEntriesClient, tasksClient: tasksClient,
-    projectsClient: projectsClient, clientsClient: clientsClient, coursesClient: coursesClient,
-    transactionsClient: transactionsClient, accountsClient: accountsClient)
+    tasksClient: tasksClient, projectsClient: projectsClient, accountsClient: accountsClient,
+    transactionsClient: transactionsClient, financesReportingClient: financesReportingClient,
+    workHoursClient: workHoursClient)
 
 /// One case per sidebar row. `CaseIterable` order is display order within
 /// whichever `SidebarSection` the screen belongs to (see below) — it no
@@ -161,6 +162,15 @@ enum SidebarSection: CaseIterable {
 struct DashboardView: View {
     @State private var selection: Screen? = .overview
 
+    /// Whole-app Light/Dark override — a plain on/off switch (no
+    /// "follow system" third option), persisted so it survives a relaunch.
+    /// Forces `.preferredColorScheme` below rather than leaving every
+    /// screen to follow the Mac's system appearance the way this app used
+    /// to; `GlassDesignSystem.swift`'s `GlassBackground`/`GlassSurface` both
+    /// read `@Environment(\.colorScheme)` (which this sets) rather than a
+    /// system dynamic color, so they pick this override up everywhere.
+    @AppStorage("pcc.isDarkMode") private var isDarkMode = false
+
     var body: some View {
         NavigationSplitView {
             List(selection: $selection) {
@@ -178,12 +188,22 @@ struct DashboardView: View {
                         }
                     }
                 }
+                // Pinned below the grouped sections — the sidebar's only
+                // non-navigating row (every `Screen` row above routes
+                // through `detail(for:)`; this one just flips a stored
+                // preference), so it's its own `Section` rather than one
+                // more `Screen` case that would need a `detail(for:)`
+                // branch with nothing to actually navigate to.
+                Section("Settings") {
+                    Toggle("Dark Mode", isOn: $isDarkMode)
+                }
             }
             .navigationTitle("Personal Command Center")
         } detail: {
             detail(for: selection ?? .overview)
         }
-        .frame(minWidth: 1000, minHeight: 650)
+        .frame(minWidth: 1000, maxWidth: .infinity, minHeight: 650, maxHeight: .infinity)
+        .preferredColorScheme(isDarkMode ? .dark : .light)
     }
 
     @ViewBuilder
@@ -192,9 +212,10 @@ struct DashboardView: View {
         case .overview:
             OverviewView(
                 viewModel: overviewViewModel,
-                onTapTimer: { selection = .timer },
-                onTapDeadlines: { selection = .deadlines },
-                onTapTransactions: { selection = .transactions }
+                timerViewModel: timerViewModel,
+                onTapFinances: { selection = .financesReporting },
+                onTapProjects: { selection = .projects },
+                onTapTasks: { selection = .tasks }
             )
         case .projects: ProjectsView(viewModel: projectsViewModel)
         case .tasks: TasksView(viewModel: tasksViewModel)
@@ -221,6 +242,12 @@ struct PCCDesktopApp: App {
         WindowGroup("Personal Command Center") {
             DashboardView()
         }
+        // Without this, the window could only be maximized, not dragged
+        // larger/smaller from a corner or edge — `.contentMinSize` tells
+        // SwiftUI the window resizes freely down to `DashboardView`'s own
+        // declared minimum (`.frame(minWidth:minHeight:)`) rather than
+        // leaving resizability to inference alone.
+        .windowResizability(.contentMinSize)
     }
 }
 

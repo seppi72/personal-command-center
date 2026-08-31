@@ -81,7 +81,9 @@ public struct PersonalCommitmentsView: View {
                     }
                 }
             }
+            .glassRows()
         }
+        .glassScreenBackground()
     }
 
     private var emptyState: some View {
@@ -144,25 +146,29 @@ struct PersonalCommitmentFormSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                TextField("Title", text: $commitmentTitle)
-                DatePicker("Starts", selection: $startDate)
-                DatePicker("Ends", selection: $endDate)
-                if !isEndAfterStart {
-                    Text("End time must be after start time.")
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
-                TextField("Recurrence (e.g. FREQ=WEEKLY)", text: $recurrenceRule)
-                // Optional and standalone — unlike `TaskFormSheet`'s
-                // Project/Course pickers, there's no other container this
-                // one is mutually exclusive with (spec #56).
-                Picker("Course", selection: $courseID) {
-                    Text("None").tag(UUID?.none)
-                    ForEach(courses) { course in
-                        Text(course.name).tag(UUID?.some(course.id))
+                Section {
+                    TextField("Title", text: $commitmentTitle)
+                        .pccField()
+                    DatePicker("Starts", selection: $startDate)
+                    DatePicker("Ends", selection: $endDate)
+                    if !isEndAfterStart {
+                        Text("End time must be after start time.")
+                            .font(.caption)
+                            .foregroundStyle(.red)
                     }
+                    TextField("Recurrence (e.g. FREQ=WEEKLY)", text: $recurrenceRule)
+                        .pccField()
+                    // Optional and standalone — unlike `TaskFormSheet`'s
+                    // Project/Course pickers, there's no other container this
+                    // one is mutually exclusive with (spec #56).
+                    PCCMenuPicker(
+                        "Course", selection: $courseID,
+                        options: [(UUID?.none, "None")] + courses.map { (Optional($0.id), $0.name) }
+                    )
                 }
+                .glassRows()
             }
+            .glassScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

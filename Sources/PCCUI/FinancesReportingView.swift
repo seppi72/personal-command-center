@@ -26,6 +26,7 @@ public struct FinancesReportingView: View {
                 expensesSection
                 projectedBalanceSection
             }
+            .glassScreenBackground()
             .navigationTitle("Finances Reporting")
             .task { await viewModel.load() }
             .refreshable { await viewModel.load() }
@@ -33,17 +34,22 @@ public struct FinancesReportingView: View {
         }
     }
 
-    /// One shared `[start, end)` range for Net Worth trend, Account Balance
-    /// history, and expense-per-day — reloads every affected section on
-    /// change rather than needing a separate "Apply" step, the same
-    /// immediate-reload convention `WorkHoursView`'s own `controls` uses.
+    /// One shared range for Net Worth trend, Account Balance history, and
+    /// expense-per-day — reloads every affected section on change rather
+    /// than needing a separate "Apply" step, the same immediate-reload
+    /// convention `WorkHoursView`'s own `controls` uses.
     private var rangeSection: some View {
         Section("Range") {
-            DatePicker("Start", selection: $viewModel.start, displayedComponents: .date)
-                .onChange(of: viewModel.start) { _ in Task { await reloadAll() } }
-            DatePicker("End", selection: $viewModel.end, displayedComponents: .date)
-                .onChange(of: viewModel.end) { _ in Task { await reloadAll() } }
+            HStack {
+                Text("Range")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                PCCDateRangeControl(selection: $viewModel.dateRange) {
+                    Task { await reloadAll() }
+                }
+            }
         }
+        .glassRows()
     }
 
     private var netWorthSection: some View {
@@ -59,10 +65,14 @@ public struct FinancesReportingView: View {
             } else {
                 Chart(viewModel.netWorthTrend) { point in
                     LineMark(x: .value("Date", point.date, unit: .day), y: .value("Net Worth", point.value))
+                        .foregroundStyle(Color.accentColor)
+                    AreaMark(x: .value("Date", point.date, unit: .day), y: .value("Net Worth", point.value))
+                        .foregroundStyle(Color.accentColor.opacity(0.15).gradient)
                 }
                 .frame(height: 160)
             }
         }
+        .glassRows()
     }
 
     private var accountBalanceSection: some View {
@@ -73,10 +83,14 @@ public struct FinancesReportingView: View {
             } else {
                 Chart(viewModel.accountBalanceHistory) { point in
                     LineMark(x: .value("Date", point.date, unit: .day), y: .value("Balance", point.value))
+                        .foregroundStyle(Color.accentColor)
+                    AreaMark(x: .value("Date", point.date, unit: .day), y: .value("Balance", point.value))
+                        .foregroundStyle(Color.accentColor.opacity(0.15).gradient)
                 }
                 .frame(height: 160)
             }
         }
+        .glassRows()
     }
 
     private var expensesSection: some View {
@@ -86,19 +100,21 @@ public struct FinancesReportingView: View {
             } else {
                 Chart(viewModel.expensesPerDay) { row in
                     BarMark(x: .value("Date", row.date, unit: .day), y: .value("Expenses", row.totalExpenses))
+                        .foregroundStyle(Color.accentColor.gradient)
                 }
                 .frame(height: 160)
             }
         }
+        .glassRows()
     }
 
     private var projectedBalanceSection: some View {
         Section("Projected Balance") {
-            Picker("Period", selection: $viewModel.projectedBalancePeriod) {
-                ForEach(ProjectedBalancePeriod.allCases, id: \.self) { period in
-                    Text(period.displayName).tag(period)
-                }
-            }
+            PCCMenuPicker(
+                "Period",
+                selection: $viewModel.projectedBalancePeriod,
+                options: ProjectedBalancePeriod.allCases.map { ($0, $0.displayName) }
+            )
             .onChange(of: viewModel.projectedBalancePeriod) { _ in
                 Task { await viewModel.loadSelectedAccountFigures() }
             }
@@ -109,17 +125,18 @@ public struct FinancesReportingView: View {
                 Text("No Account selected").foregroundStyle(.secondary)
             }
         }
+        .glassRows()
     }
 
     /// Shared by `accountBalanceSection` and, transitively,
     /// `projectedBalanceSection` — both read `viewModel.selectedAccountID`,
     /// so one picker drives both sections rather than each needing its own.
     private var accountPicker: some View {
-        Picker("Account", selection: $viewModel.selectedAccountID) {
-            ForEach(viewModel.accounts) { account in
-                Text(account.name).tag(Optional(account.id))
-            }
-        }
+        PCCMenuPicker(
+            "Account",
+            selection: $viewModel.selectedAccountID,
+            options: viewModel.accounts.map { (Optional($0.id), $0.name) }
+        )
         .onChange(of: viewModel.selectedAccountID) { _ in
             Task { await viewModel.loadSelectedAccountFigures() }
         }
