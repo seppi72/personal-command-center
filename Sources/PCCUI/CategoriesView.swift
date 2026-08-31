@@ -11,6 +11,8 @@ public struct CategoriesView: View {
     @ObservedObject private var viewModel: CategoriesViewModel
     @State private var isPresentingNewCategorySheet = false
 
+    @Environment(\.colorScheme) private var colorScheme
+
     public init(viewModel: CategoriesViewModel) {
         self.viewModel = viewModel
     }
@@ -51,28 +53,65 @@ public struct CategoriesView: View {
 
     private var categoryList: some View {
         List {
-            ForEach(viewModel.categories) { category in
-                NavigationLink {
-                    CategoryDetailView(
-                        category: category,
-                        viewModel: viewModel,
-                        subcategoriesViewModel: viewModel.makeSubcategoriesViewModel(for: category)
-                    )
-                } label: {
-                    Text(category.name)
-                }
+            Section {
+                statusStrip
             }
-            .onDelete { offsets in
-                let toDelete = offsets.map { viewModel.categories[$0] }
-                Task {
-                    for category in toDelete {
-                        await viewModel.deleteCategory(category)
+            Section {
+                ForEach(viewModel.categories) { category in
+                    NavigationLink {
+                        CategoryDetailView(
+                            category: category,
+                            viewModel: viewModel,
+                            subcategoriesViewModel: viewModel.makeSubcategoriesViewModel(for: category)
+                        )
+                    } label: {
+                        Text(category.name)
                     }
                 }
+                .onDelete { offsets in
+                    let toDelete = offsets.map { viewModel.categories[$0] }
+                    Task {
+                        for category in toDelete {
+                            await viewModel.deleteCategory(category)
+                        }
+                    }
+                }
+                .glassRows()
             }
-            .glassRows()
         }
         .glassScreenBackground()
+    }
+
+    // MARK: - Status strip
+
+    /// `.idle` — a Category list, like `ClientsView`'s roster, has no
+    /// urgency signal to flag; kept for layout consistency only.
+    private var statusStrip: some View {
+        HStack(spacing: 10) {
+            StatusDot(.idle)
+            Text(statusStripText)
+                .pccPanelLabel()
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 10)
+        .overlay(
+            Rectangle()
+                .fill(GlassStyle.panelLine(for: colorScheme))
+                .frame(height: 1),
+            alignment: .bottom
+        )
+        .listRowInsets(EdgeInsets())
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+
+    private var statusStripText: String {
+        let count = viewModel.categories.count
+        let noun = count == 1 ? "CATEGORY" : "CATEGORIES"
+        return "\(count) \(noun)"
     }
 
     private var emptyState: some View {

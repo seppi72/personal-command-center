@@ -1,18 +1,25 @@
 import Charts
 import SwiftUI
 
-/// The app's landing screen: three glass cards — Finances (Net Worth + an
-/// income/expense/net chart over a selectable date range), Work (Projects
-/// Progress, today's-and-overdue Tasks, and an on-time completion rate),
-/// and Productivity (a mini, fully-interactive Timer plus this week's Work
-/// Hours). One shared SwiftUI view for both platforms, no
-/// platform-specific chrome, per this package's existing "minimal" scope
-/// (mirrors `DeadlinesView`/`TransactionsView`).
+/// The app's landing screen: a status strip, then three instrument panels —
+/// Finances (a Net Worth readout + a net trend trace + income/expense
+/// gauges over a selectable date range), Work (Projects Progress, today's-
+/// and-overdue Tasks, and an on-time completion rate), and Productivity (a
+/// mini, fully-interactive Timer plus this week's Work Hours). One shared
+/// SwiftUI view for both platforms, no platform-specific chrome, per this
+/// package's existing "minimal" scope (mirrors `DeadlinesView`/
+/// `TransactionsView`).
 ///
-/// Mostly a glance, with one deliberate exception: the Productivity card's
+/// Every panel header carries a `StatusDot` (`GlassDesignSystem.swift`)
+/// computed from the same data the panel shows — the deliberate "read the
+/// lamp, not every gauge" hierarchy device this screen is built around, so
+/// a glance at the top of the screen (or the status strip above the panels
+/// entirely) says what needs attention before you've read a single number.
+///
+/// Mostly a glance, with one deliberate exception: the Productivity panel's
 /// mini Timer lets the owner pick a Task/Project/Client/Course and
 /// start/stop right from here, reading and mutating the same shared
-/// `TimerViewModel` instance the full Timer screen uses — every other card
+/// `TimerViewModel` instance the full Timer screen uses — every other panel
 /// stays read-only, handing off to its full screen via a tappable header.
 ///
 /// `Screen` (the sidebar's navigation enum) lives in the `PCCDesktop`
@@ -35,6 +42,14 @@ public struct OverviewView: View {
     @State private var timerSelectedKind: ContainerKind = .task
     @State private var timerSelectedItemID: UUID?
 
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// Below this available width, Work and Productivity stack in one
+    /// column instead of sitting side by side — narrower than that and two
+    /// half-width panels would squeeze their charts and controls too tight
+    /// to read.
+    private static let wideLayoutThreshold: CGFloat = 620
+
     public init(
         viewModel: OverviewViewModel,
         timerViewModel: TimerViewModel,
@@ -51,17 +66,27 @@ public struct OverviewView: View {
 
     public var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    financesCard
-                    workCard
-                    productivityCard
+            GeometryReader { proxy in
+                ScrollView {
+                    VStack(spacing: 16) {
+                        statusStrip
+                        financesCard
+                        if proxy.size.width > Self.wideLayoutThreshold {
+                            HStack(alignment: .top, spacing: 16) {
+                                workCard
+                                productivityCard
+                            }
+                        } else {
+                            workCard
+                            productivityCard
+                        }
+                    }
+                    .padding(16)
+                    .frame(maxWidth: 900)
+                    .frame(maxWidth: .infinity)
                 }
-                .padding(16)
-                .frame(maxWidth: 900)
-                .frame(maxWidth: .infinity)
+                .glassScreenBackground()
             }
-            .glassScreenBackground()
             .navigationTitle("Overview")
             .task { await viewModel.load() }
             .task { await timerViewModel.load() }
@@ -75,29 +100,90 @@ public struct OverviewView: View {
         }
     }
 
-    private func cardHeader(_ title: String, systemImage: String, action: (() -> Void)? = nil) -> some View {
+    /// The primary "readout" accent — see `Font.pccReadout`'s doc comment
+    /// for why a hero number gets this color rather than one of the
+    /// urgency-signaling colors `PanelStatus` uses.
+    private var readoutColor: Color {
+        GlassStyle.signalCyan(for: colorScheme)
+    }
+
+    // MARK: - Status strip
+
+    /// A one-line summary above every panel — the first thing read on this
+    /// screen, before any individual panel's own detail. Answers "does
+    /// anything need me right now?" without requiring a glance at three
+    /// separate panels to find out.
+    private var statusStrip: some View {
+        HStack(spacing: 10) {
+            StatusDot(overallStatus)
+            Text(statusStripText)
+                .pccPanelLabel()
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(Self.dateStripText())
+                .pccPanelLabel()
+                .foregroundStyle(.secondary)
+        }
+        .padding(.bottom, 10)
+        .overlay(
+            Rectangle()
+                .fill(GlassStyle.panelLine(for: colorScheme))
+                .frame(height: 1),
+            alignment: .bottom
+        )
+    }
+
+    private var overallStatus: PanelStatus {
+        viewModel.tasksOverdue.isEmpty ? .nominal : .critical
+    }
+
+    private var statusStripText: String {
+        let overdueCount = viewModel.tasksOverdue.count
+        let overdueText = overdueCount > 0 ? "\(overdueCount) OVERDUE" : "ALL CLEAR"
+        let timerText = timerViewModel.activeTimer != nil ? "TIMER RUNNING" : "TIMER IDLE"
+        return "\(overdueText)   ·   \(timerText)"
+    }
+
+    private static func dateStripText() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE, MMM d"
+        return formatter.string(from: Date()).uppercased()
+    }
+
+    // MARK: - Panel header
+
+    private func panelHeader(
+        _ title: String, systemImage: String, status: PanelStatus, action: (() -> Void)? = nil
+    ) -> some View {
         Group {
             if let action {
                 Button(action: action) {
-                    cardHeaderLabel(title, systemImage: systemImage, showsChevron: true)
+                    panelHeaderLabel(title, systemImage: systemImage, status: status, showsChevron: true)
                 }
                 #if os(macOS)
                 .buttonStyle(.plain)
                 #endif
             } else {
-                cardHeaderLabel(title, systemImage: systemImage, showsChevron: false)
+                panelHeaderLabel(title, systemImage: systemImage, status: status, showsChevron: false)
             }
         }
     }
 
-    private func cardHeaderLabel(_ title: String, systemImage: String, showsChevron: Bool) -> some View {
-        HStack {
-            Label(title, systemImage: systemImage)
-                .font(.title3.bold())
+    private func panelHeaderLabel(
+        _ title: String, systemImage: String, status: PanelStatus, showsChevron: Bool
+    ) -> some View {
+        HStack(spacing: 8) {
+            StatusDot(status)
+            Image(systemName: systemImage)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(title)
+                .pccPanelLabel()
+                .foregroundStyle(.secondary)
             Spacer()
             if showsChevron {
                 Image(systemName: "chevron.right")
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
             }
         }
@@ -108,10 +194,19 @@ public struct OverviewView: View {
     private var financesCard: some View {
         GlassCard {
             VStack(alignment: .leading, spacing: 16) {
-                cardHeader("Finances", systemImage: "dollarsign.circle", action: onTapFinances)
-                Text(Self.currency(viewModel.currentNetWorth))
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
-                financesRangeControl
+                panelHeader("Finances", systemImage: "dollarsign.circle", status: viewModel.financesStatus, action: onTapFinances)
+                HStack(alignment: .lastTextBaseline) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Net Worth")
+                            .pccPanelLabel()
+                            .foregroundStyle(.secondary)
+                        Text(Self.currency(viewModel.currentNetWorth))
+                            .font(.pccReadout(40))
+                            .foregroundStyle(readoutColor)
+                    }
+                    Spacer()
+                    financesRangeControl
+                }
                 incomeExpenseChart
             }
         }
@@ -123,12 +218,14 @@ public struct OverviewView: View {
         }
     }
 
-    /// Grouped Income/Expense bars per period plus a Net line overlay — two
-    /// `BarMark`s and one `LineMark` per bucket, each tagged with a "Type"
-    /// style value so Swift Charts colors and legends all three series from
-    /// one `chartForegroundStyleScale`. Green/red for income/expense matches
-    /// the sign coloring every other money figure in this package already
-    /// uses (e.g. `TransactionsView`'s own row amounts).
+    /// A net trend trace (one `AreaMark` + `LineMark` pair, hairline
+    /// gridlines, monospaced axis labels — an oscilloscope reading, not a
+    /// default chart-library combo chart) plus two small level gauges
+    /// underneath giving the period's raw Income/Expense totals. Split
+    /// this way rather than the old grouped-bar-plus-line-in-one-chart
+    /// shape: the trace answers "which way is this going," the gauges
+    /// answer "how much of each," and neither has to compromise its own
+    /// scale to share an axis with the other.
     @ViewBuilder
     private var incomeExpenseChart: some View {
         if viewModel.financeBuckets.isEmpty {
@@ -136,35 +233,90 @@ public struct OverviewView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         } else {
-            Chart(viewModel.financeBuckets) { bucket in
-                BarMark(
-                    x: .value("Period", bucket.periodStart, unit: viewModel.financeBucketUnit),
-                    y: .value("Amount", bucket.income)
-                )
-                .position(by: .value("Type", "Income"))
-                .foregroundStyle(by: .value("Type", "Income"))
-
-                BarMark(
-                    x: .value("Period", bucket.periodStart, unit: viewModel.financeBucketUnit),
-                    y: .value("Amount", bucket.expense)
-                )
-                .position(by: .value("Type", "Expense"))
-                .foregroundStyle(by: .value("Type", "Expense"))
-
-                LineMark(
-                    x: .value("Period", bucket.periodStart, unit: viewModel.financeBucketUnit),
-                    y: .value("Amount", bucket.net)
-                )
-                .foregroundStyle(by: .value("Type", "Net"))
-                .interpolationMethod(.catmullRom)
-            }
-            .chartForegroundStyleScale([
-                "Income": Color.green,
-                "Expense": Color.red,
-                "Net": Color.accentColor,
-            ])
-            .frame(height: 180)
+            netTrendChart
+            incomeExpenseGauges
         }
+    }
+
+    private var netTrendChart: some View {
+        Chart(viewModel.financeBuckets) { bucket in
+            AreaMark(
+                x: .value("Period", bucket.periodStart, unit: viewModel.financeBucketUnit),
+                y: .value("Net", bucket.net)
+            )
+            .foregroundStyle(
+                LinearGradient(
+                    colors: [readoutColor.opacity(0.30), readoutColor.opacity(0)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .interpolationMethod(.catmullRom)
+
+            LineMark(
+                x: .value("Period", bucket.periodStart, unit: viewModel.financeBucketUnit),
+                y: .value("Net", bucket.net)
+            )
+            .foregroundStyle(readoutColor)
+            .lineStyle(StrokeStyle(lineWidth: 1.5))
+            .interpolationMethod(.catmullRom)
+        }
+        .chartXAxis {
+            AxisMarks { _ in
+                AxisValueLabel()
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .chartYAxis {
+            AxisMarks(position: .leading) { _ in
+                AxisGridLine(stroke: StrokeStyle(lineWidth: 1, dash: [2, 3]))
+                    .foregroundStyle(GlassStyle.panelLine(for: colorScheme))
+                AxisValueLabel()
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(height: 120)
+    }
+
+    private var incomeExpenseGauges: some View {
+        let maxValue = max(totalIncome, totalExpense, 1)
+        return VStack(spacing: 8) {
+            gaugeRow(label: "Income", value: totalIncome, maxValue: maxValue, color: GlassStyle.signalGreen(for: colorScheme))
+            gaugeRow(label: "Expense", value: totalExpense, maxValue: maxValue, color: GlassStyle.signalRed(for: colorScheme))
+        }
+    }
+
+    private func gaugeRow(label: String, value: Double, maxValue: Double, color: Color) -> some View {
+        HStack(spacing: 10) {
+            Text(label)
+                .pccPanelLabel()
+                .foregroundStyle(.secondary)
+                .frame(width: 64, alignment: .leading)
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(GlassStyle.panelLine(for: colorScheme))
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(color)
+                        .frame(width: proxy.size.width * CGFloat(maxValue > 0 ? value / maxValue : 0))
+                }
+            }
+            .frame(height: 6)
+            Text(Self.currency(value))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 80, alignment: .trailing)
+        }
+    }
+
+    private var totalIncome: Double {
+        viewModel.financeBuckets.reduce(0) { $0 + $1.income }
+    }
+
+    private var totalExpense: Double {
+        viewModel.financeBuckets.reduce(0) { $0 + $1.expense }
     }
 
     // MARK: - Work card
@@ -172,11 +324,15 @@ public struct OverviewView: View {
     private var workCard: some View {
         GlassCard {
             VStack(alignment: .leading, spacing: 16) {
-                cardHeader("Work", systemImage: "briefcase", action: onTapProjects)
+                panelHeader("Work", systemImage: "briefcase", status: viewModel.workStatus, action: onTapProjects)
                 projectsProgressContent
                 Divider()
-                taskList(title: "Today", tasks: viewModel.tasksDueToday, emptyText: "Nothing due today")
-                taskList(title: "Overdue", tasks: viewModel.tasksOverdue, emptyText: "Nothing overdue")
+                taskList(
+                    title: "Today", tasks: viewModel.tasksDueToday, emptyText: "Nothing due today",
+                    indicatorColor: GlassStyle.signalAmber(for: colorScheme))
+                taskList(
+                    title: "Overdue", tasks: viewModel.tasksOverdue, emptyText: "Nothing overdue",
+                    indicatorColor: GlassStyle.signalRed(for: colorScheme))
                 Divider()
                 completionRateContent
             }
@@ -186,7 +342,7 @@ public struct OverviewView: View {
     /// A horizontal bar per Project with at least one Task, its length the
     /// fraction of that Project's Tasks that are complete. Capped to the 5
     /// furthest-from-done Projects so a busy Projects list doesn't turn this
-    /// card into its own scroll view — sorted ascending by completion so
+    /// panel into its own scroll view — sorted ascending by completion so
     /// the Projects most needing attention are the ones shown.
     @ViewBuilder
     private var projectsProgressContent: some View {
@@ -200,25 +356,33 @@ public struct OverviewView: View {
                     x: .value("Complete", row.fraction),
                     y: .value("Project", row.project.name)
                 )
-                .foregroundStyle(Color.accentColor.gradient)
+                .foregroundStyle(readoutColor)
+                .cornerRadius(2)
                 .annotation(position: .trailing) {
                     Text(row.fraction, format: .percent.precision(.fractionLength(0)))
-                        .font(.caption)
+                        .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }
             }
             .chartXScale(domain: 0...1)
             .chartXAxis(.hidden)
-            .frame(height: CGFloat(rows.count) * 32 + 16)
+            .chartYAxis {
+                AxisMarks { _ in
+                    AxisValueLabel()
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(height: CGFloat(rows.count) * 28 + 8)
         }
     }
 
-    private func taskList(title: String, tasks: [PCCTask], emptyText: String) -> some View {
+    private func taskList(title: String, tasks: [PCCTask], emptyText: String, indicatorColor: Color) -> some View {
         let sorted = tasks.sorted { ($0.dueDate ?? .distantFuture) < ($1.dueDate ?? .distantFuture) }
         let capped = Array(sorted.prefix(5))
         return VStack(alignment: .leading, spacing: 8) {
             Text(title)
-                .font(.subheadline.bold())
+                .pccPanelLabel()
                 .foregroundStyle(.secondary)
             if capped.isEmpty {
                 Text(emptyText)
@@ -226,15 +390,17 @@ public struct OverviewView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(capped) { task in
-                    HStack {
-                        Image(systemName: "checkmark.circle")
-                            .foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(indicatorColor)
+                            .frame(width: 5, height: 5)
                         Text(task.title)
+                            .font(.subheadline)
                             .lineLimit(1)
                         Spacer()
                         if let dueDate = task.dueDate {
                             Text(dueDate, style: .date)
-                                .font(.caption)
+                                .font(.system(size: 11, design: .monospaced))
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -250,12 +416,13 @@ public struct OverviewView: View {
     @ViewBuilder
     private var completionRateContent: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("On-time completion rate")
-                .font(.subheadline.bold())
+            Text("On-Time Completion")
+                .pccPanelLabel()
                 .foregroundStyle(.secondary)
             if let rate = viewModel.taskCompletionRateWithinDeadline {
                 Text(rate, format: .percent.precision(.fractionLength(0)))
-                    .font(.title2.bold())
+                    .font(.pccReadout(22))
+                    .foregroundStyle(completionRateColor(rate))
             } else {
                 Text("Not enough data yet")
                     .font(.subheadline)
@@ -264,12 +431,22 @@ public struct OverviewView: View {
         }
     }
 
+    /// Colors the completion-rate readout itself by the same three-tier
+    /// thresholds a `PanelStatus` would use, rather than leaving it neutral
+    /// — this number is the one figure on the Work panel worth a second
+    /// glance beyond the header lamp, so it earns its own signal color.
+    private func completionRateColor(_ rate: Double) -> Color {
+        if rate >= 0.8 { return GlassStyle.signalGreen(for: colorScheme) }
+        if rate >= 0.5 { return GlassStyle.signalAmber(for: colorScheme) }
+        return GlassStyle.signalRed(for: colorScheme)
+    }
+
     // MARK: - Productivity card
 
     private var productivityCard: some View {
         GlassCard {
             VStack(alignment: .leading, spacing: 16) {
-                cardHeader("Productivity", systemImage: "bolt.fill")
+                panelHeader("Productivity", systemImage: "bolt.fill", status: productivityStatus)
                 miniTimerContent
                 Divider()
                 workHoursContent
@@ -277,21 +454,31 @@ public struct OverviewView: View {
         }
     }
 
+    /// `.active` (the readout-cyan lamp) while a Timer is running, `.idle`
+    /// otherwise — this panel's lamp signals live state rather than
+    /// urgency, the other meaning `PanelStatus` carries (see its own doc
+    /// comment).
+    private var productivityStatus: PanelStatus {
+        timerViewModel.activeTimer != nil ? .active : .idle
+    }
+
     @ViewBuilder
     private var miniTimerContent: some View {
         if let activeTimer = timerViewModel.activeTimer {
             VStack(alignment: .leading, spacing: 8) {
                 Text(timerContainerLabel(for: activeTimer))
-                    .font(.subheadline.bold())
+                    .pccPanelLabel()
+                    .foregroundStyle(.secondary)
                 TimelineView(.periodic(from: activeTimer.startDate, by: 1)) { context in
                     Text(Self.formattedElapsed(context.date.timeIntervalSince(activeTimer.startDate)))
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
-                        .monospacedDigit()
+                        .font(.pccReadout(30))
+                        .foregroundStyle(readoutColor)
                 }
                 Button("Stop") {
                     Task { await timerViewModel.stop() }
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(GlassStyle.signalRed(for: colorScheme))
             }
         } else {
             VStack(alignment: .leading, spacing: 8) {
@@ -308,6 +495,7 @@ public struct OverviewView: View {
                     Task { await timerViewModel.start(container: miniContainer(itemID: timerSelectedItemID)) }
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(readoutColor)
                 .disabled(timerSelectedItemID == nil)
             }
         }
@@ -327,11 +515,11 @@ public struct OverviewView: View {
                 } label: {
                     Text(kind.title)
                         .font(.caption.weight(kind == timerSelectedKind ? .bold : .regular))
-                        .foregroundStyle(kind == timerSelectedKind ? Color.primary : Color.secondary)
+                        .foregroundStyle(kind == timerSelectedKind ? readoutColor : Color.secondary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
                         .background(
-                            Capsule().fill(kind == timerSelectedKind ? Color.primary.opacity(0.12) : Color.clear)
+                            Capsule().fill(kind == timerSelectedKind ? readoutColor.opacity(0.15) : Color.clear)
                         )
                 }
                 #if os(macOS)
@@ -392,9 +580,13 @@ public struct OverviewView: View {
     private var workHoursContent: some View {
         let totalHours = viewModel.workHoursThisWeek.reduce(0) { $0 + $1.totalSeconds } / 3600
         VStack(alignment: .leading, spacing: 8) {
-            Text("\(totalHours, specifier: "%.1f") hrs this week")
-                .font(.subheadline.bold())
-                .foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(String(format: "%.1f", totalHours))
+                    .font(.pccReadout(18))
+                Text("Hrs This Week")
+                    .pccPanelLabel()
+                    .foregroundStyle(.secondary)
+            }
             if viewModel.workHoursThisWeek.isEmpty {
                 Text("No Work Hours logged this week")
                     .font(.subheadline)
@@ -405,15 +597,18 @@ public struct OverviewView: View {
                         x: .value("Day", row.date ?? Date(), unit: .day),
                         y: .value("Hours", row.totalSeconds / 3600)
                     )
-                    .foregroundStyle(Color.accentColor.gradient)
+                    .foregroundStyle(readoutColor)
+                    .cornerRadius(2)
                 }
                 .chartXAxis {
                     AxisMarks(values: .stride(by: .day)) { _ in
                         AxisValueLabel(format: .dateTime.weekday(.narrow))
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.secondary)
                     }
                 }
                 .chartYAxis(.hidden)
-                .frame(height: 100)
+                .frame(height: 90)
             }
         }
     }
@@ -429,6 +624,6 @@ public struct OverviewView: View {
     }
 
     private static func currency(_ amount: Double) -> String {
-        amount.formatted(.currency(code: "USD"))
+        amount.formatted(.currency(code: "PHP"))
     }
 }

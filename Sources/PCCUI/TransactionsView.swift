@@ -10,6 +10,8 @@ public struct TransactionsView: View {
     @State private var isPresentingNewTransactionSheet = false
     @State private var editingTransaction: Transaction?
 
+    @Environment(\.colorScheme) private var colorScheme
+
     public init(viewModel: TransactionsViewModel) {
         self.viewModel = viewModel
     }
@@ -76,48 +78,101 @@ public struct TransactionsView: View {
 
     private var transactionList: some View {
         List {
-            ForEach(viewModel.transactions.sorted { $0.date > $1.date }) { transaction in
-                Button {
-                    editingTransaction = transaction
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack {
-                            Text(accountName(for: transaction))
-                            Spacer()
-                            Text(Self.formattedAmount(transaction))
-                                .foregroundStyle(transaction.type == .expense ? .red : .green)
-                        }
-                        Text(transaction.date, style: .date)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        if let tagLabel = tagLabel(for: transaction) {
-                            Text(tagLabel)
-                                .font(.caption)
+            Section {
+                statusStrip
+            }
+            Section {
+                ForEach(viewModel.transactions.sorted { $0.date > $1.date }) { transaction in
+                    Button {
+                        editingTransaction = transaction
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text(accountName(for: transaction))
+                                Spacer()
+                                Text(Self.formattedAmount(transaction))
+                                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(
+                                        transaction.type == .expense
+                                            ? GlassStyle.signalRed(for: colorScheme) : GlassStyle.signalGreen(for: colorScheme))
+                            }
+                            Text(transaction.date, style: .date)
+                                .font(.subheadline)
                                 .foregroundStyle(.secondary)
+                            if let tagLabel = tagLabel(for: transaction) {
+                                Text(tagLabel)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if let notes = transaction.notes {
+                                Text(notes)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
-                        if let notes = transaction.notes {
-                            Text(notes)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                    }
+                    #if os(macOS)
+                    .buttonStyle(.plain)
+                    #endif
+                }
+                .onDelete { offsets in
+                    let sorted = viewModel.transactions.sorted { $0.date > $1.date }
+                    let toDelete = offsets.map { sorted[$0] }
+                    Task {
+                        for transaction in toDelete {
+                            await viewModel.deleteTransaction(transaction)
                         }
                     }
                 }
-                #if os(macOS)
-                .buttonStyle(.plain)
-                #endif
+                .glassRows()
             }
-            .onDelete { offsets in
-                let sorted = viewModel.transactions.sorted { $0.date > $1.date }
-                let toDelete = offsets.map { sorted[$0] }
-                Task {
-                    for transaction in toDelete {
-                        await viewModel.deleteTransaction(transaction)
-                    }
-                }
-            }
-            .glassRows()
         }
         .glassScreenBackground()
+    }
+
+    // MARK: - Status strip
+
+    private var statusStrip: some View {
+        HStack(spacing: 10) {
+            StatusDot(overallStatus)
+            Text(statusStripText)
+                .pccPanelLabel()
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(Self.formattedNet(netTotal))
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(netTotal < 0 ? GlassStyle.signalRed(for: colorScheme) : GlassStyle.signalGreen(for: colorScheme))
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 10)
+        .overlay(
+            Rectangle()
+                .fill(GlassStyle.panelLine(for: colorScheme))
+                .frame(height: 1),
+            alignment: .bottom
+        )
+        .listRowInsets(EdgeInsets())
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+
+    private var netTotal: Double {
+        viewModel.transactions.reduce(0) { $0 + ($1.type == .expense ? -$1.amount : $1.amount) }
+    }
+
+    private var overallStatus: PanelStatus {
+        netTotal < 0 ? .critical : .nominal
+    }
+
+    private var statusStripText: String {
+        let count = viewModel.transactions.count
+        let noun = count == 1 ? "TRANSACTION" : "TRANSACTIONS"
+        return "\(count) \(noun)"
+    }
+
+    private static func formattedNet(_ amount: Double) -> String {
+        amount.formatted(.currency(code: "PHP").sign(strategy: .always()))
     }
 
     private var emptyState: some View {
@@ -170,7 +225,7 @@ public struct TransactionsView: View {
 
     private static func formattedAmount(_ transaction: Transaction) -> String {
         let signed = transaction.type == .expense ? -transaction.amount : transaction.amount
-        return signed.formatted(.currency(code: "USD").sign(strategy: .always()))
+        return signed.formatted(.currency(code: "PHP").sign(strategy: .always()))
     }
 }
 

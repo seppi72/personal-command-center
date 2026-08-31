@@ -6,13 +6,14 @@ import SwiftUI
 /// `ProgressView` rather than a `Chart` here: a full chart per row would be
 /// visual noise in a list this dense — the real chart lives on the Overview
 /// dashboard's "Projects Progress" widget, which shows every Project at
-/// once.
-func projectProgressBar(_ fraction: Double) -> some View {
+/// once. Tinted with this system's readout-cyan accent rather than the
+/// generic `.accentColor` a default `ProgressView` would use.
+func projectProgressBar(_ fraction: Double, colorScheme: ColorScheme) -> some View {
     HStack(spacing: 8) {
         ProgressView(value: fraction)
-            .tint(.accentColor)
+            .tint(GlassStyle.signalCyan(for: colorScheme))
         Text(fraction, format: .percent.precision(.fractionLength(0)))
-            .font(.caption)
+            .font(.system(size: 11, design: .monospaced))
             .foregroundStyle(.secondary)
             .frame(minWidth: 36, alignment: .trailing)
     }
@@ -27,6 +28,8 @@ func projectProgressBar(_ fraction: Double) -> some View {
 public struct ProjectsView: View {
     @ObservedObject private var viewModel: ProjectsViewModel
     @State private var isPresentingNewProjectSheet = false
+
+    @Environment(\.colorScheme) private var colorScheme
 
     public init(viewModel: ProjectsViewModel) {
         self.viewModel = viewModel
@@ -68,46 +71,96 @@ public struct ProjectsView: View {
 
     private var projectList: some View {
         List {
-            ForEach(viewModel.projects) { project in
-                NavigationLink {
-                    ProjectDetailView(
-                        project: project,
-                        viewModel: viewModel,
-                        sprintsViewModel: viewModel.makeSprintsViewModel(for: project)
-                    )
-                } label: {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(project.name)
-                        if let clientName = viewModel.clientName(for: project) {
-                            Text(clientName)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        if let dueDate = project.dueDate {
-                            Text(dueDate, style: .date)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        if let fraction = viewModel.completionFraction(for: project) {
-                            projectProgressBar(fraction)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
+            Section {
+                statusStrip
             }
-            .onDelete { offsets in
-                let toDelete = offsets.map { viewModel.projects[$0] }
-                Task {
-                    for project in toDelete {
-                        await viewModel.deleteProject(project)
+            Section {
+                ForEach(viewModel.projects) { project in
+                    NavigationLink {
+                        ProjectDetailView(
+                            project: project,
+                            viewModel: viewModel,
+                            sprintsViewModel: viewModel.makeSprintsViewModel(for: project)
+                        )
+                    } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(project.name)
+                            if let clientName = viewModel.clientName(for: project) {
+                                Text(clientName)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if let dueDate = project.dueDate {
+                                Text(dueDate, style: .date)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if let fraction = viewModel.completionFraction(for: project) {
+                                projectProgressBar(fraction, colorScheme: colorScheme)
+                            }
+                        }
+                        .padding(.vertical, 4)
                     }
                 }
+                .onDelete { offsets in
+                    let toDelete = offsets.map { viewModel.projects[$0] }
+                    Task {
+                        for project in toDelete {
+                            await viewModel.deleteProject(project)
+                        }
+                    }
+                }
+                .glassRows()
             }
-            .glassRows()
         }
         .glassScreenBackground()
     }
 
+    // MARK: - Status strip
+
+    private var statusStrip: some View {
+        HStack(spacing: 10) {
+            StatusDot(overallStatus)
+            Text(statusStripText)
+                .pccPanelLabel()
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 10)
+        .overlay(
+            Rectangle()
+                .fill(GlassStyle.panelLine(for: colorScheme))
+                .frame(height: 1),
+            alignment: .bottom
+        )
+        .listRowInsets(EdgeInsets())
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+
+    /// `.critical` when any Project is past its due date with incomplete
+    /// Tasks — the same "read the lamp before the rows" device
+    /// `OverviewView`'s own status strip uses.
+    private var overallStatus: PanelStatus {
+        hasOverdueProject ? .critical : .nominal
+    }
+
+    private var hasOverdueProject: Bool {
+        viewModel.projects.contains { project in
+            guard let dueDate = project.dueDate, dueDate < Date() else { return false }
+            let fraction = viewModel.completionFraction(for: project) ?? 1
+            return fraction < 1
+        }
+    }
+
+    private var statusStripText: String {
+        let count = viewModel.projects.count
+        let noun = count == 1 ? "PROJECT" : "PROJECTS"
+        let flagText = hasOverdueProject ? "OVERDUE" : "ON TRACK"
+        return "\(count) \(noun)   ·   \(flagText)"
+    }
 
     private var emptyState: some View {
         VStack(spacing: 8) {
@@ -208,6 +261,8 @@ struct ProjectDetailView: View {
     @State private var isPresentingNewSprintSheet = false
     @State private var editingSprint: Sprint?
 
+    @Environment(\.colorScheme) private var colorScheme
+
     /// The freshest known copy of `project` — falls back to the value
     /// passed in if `viewModel.projects` hasn't (yet) reflected an edit.
     private var currentProject: Project {
@@ -225,7 +280,7 @@ struct ProjectDetailView: View {
                         .foregroundStyle(.secondary)
                 }
                 if let fraction = viewModel.completionFraction(for: currentProject) {
-                    projectProgressBar(fraction)
+                    projectProgressBar(fraction, colorScheme: colorScheme)
                 }
             }
             .glassRows()

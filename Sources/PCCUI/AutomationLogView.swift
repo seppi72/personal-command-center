@@ -11,6 +11,8 @@ import SwiftUI
 public struct AutomationLogView: View {
     @ObservedObject private var viewModel: AutomationLogViewModel
 
+    @Environment(\.colorScheme) private var colorScheme
+
     public init(viewModel: AutomationLogViewModel) {
         self.viewModel = viewModel
     }
@@ -39,14 +41,30 @@ public struct AutomationLogView: View {
                 }
                 .glassRows()
             }
-            Section("Recent Activity") {
+            Section {
                 ForEach(viewModel.entries) { entry in
                     row(for: entry)
                 }
+            } header: {
+                panelHeader(
+                    "Recent Activity", systemImage: "list.bullet.rectangle",
+                    status: viewModel.mostRecentFailure != nil ? .critical : .nominal)
             }
             .glassRows()
         }
         .glassScreenBackground()
+    }
+
+    private func panelHeader(_ title: String, systemImage: String, status: PanelStatus) -> some View {
+        HStack(spacing: 8) {
+            StatusDot(status)
+            Image(systemName: systemImage)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(title)
+                .pccPanelLabel()
+                .foregroundStyle(.secondary)
+        }
     }
 
     /// The "surfaced clearly" element this ticket asks for: unmissable at
@@ -55,15 +73,16 @@ public struct AutomationLogView: View {
     /// `entries` below.
     private func failureBanner(_ entry: AutomationLogEntry) -> some View {
         HStack(alignment: .top) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.red)
+            StatusDot(.critical)
+                .padding(.top, 5)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Most recent sync failure")
-                    .font(.headline)
+                    .pccPanelLabel()
+                    .foregroundStyle(GlassStyle.signalRed(for: colorScheme))
                 Text(entry.detail)
                     .font(.subheadline)
                 Text(entry.occurredAt, style: .relative)
-                    .font(.caption)
+                    .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
         }
@@ -79,7 +98,7 @@ public struct AutomationLogView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Text(entry.occurredAt, style: .relative)
-                    .font(.caption)
+                    .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
         }
@@ -90,10 +109,10 @@ public struct AutomationLogView: View {
         switch outcome {
         case .success:
             Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(GlassStyle.signalGreen(for: colorScheme))
         case .failure:
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.red)
+                .foregroundStyle(GlassStyle.signalRed(for: colorScheme))
         }
     }
 

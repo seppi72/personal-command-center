@@ -6,13 +6,16 @@ import SwiftUI
 /// Start button. One shared view for both platforms, no platform-specific
 /// chrome, per this repo's "minimal" scope (mirrors `TimeEntriesView`).
 ///
-/// Laid out as one big hero card — segmented Task/Project/Client/Course
-/// tabs, giant monospaced elapsed time, a large Start/Stop button — with a
-/// second card below it listing that kind's items to attach to, rather than
-/// the four stacked `Picker`s a plain `Form` would use: a large, focused
-/// timer screen (glassmorphism dashboard pass) instead of one more settings
-/// form. `TimeEntryContainer`'s "exactly one of four" rule (ADR-0004) falls
-/// out of this shape for free — only one kind's item list is ever shown, so
+/// Laid out as one big hero panel — segmented Task/Project/Client/Course
+/// tabs, a giant `pccReadout` elapsed time, a large Start/Stop button — with
+/// a second panel below it listing that kind's items to attach to, rather
+/// than the four stacked `Picker`s a plain `Form` would use: a large,
+/// focused timer screen instead of one more settings form. The header lamp
+/// mirrors `OverviewView`'s Productivity panel: `.active` (readout-cyan)
+/// while running, `.idle` otherwise — this is the one panel in the app
+/// where the lamp signals live state rather than urgency.
+/// `TimeEntryContainer`'s "exactly one of four" rule (ADR-0004) falls out
+/// of this shape for free — only one kind's item list is ever shown, so
 /// only one id can ever be selected at a time, rather than needing the
 /// four-Picker "picking one clears the other three" dance
 /// `TimeEntryFormSheet` still uses.
@@ -21,6 +24,8 @@ public struct TimerView: View {
     @State private var selectedKind: ContainerKind = .task
     @State private var selectedItemID: UUID?
 
+    @Environment(\.colorScheme) private var colorScheme
+
     public init(viewModel: TimerViewModel) {
         self.viewModel = viewModel
     }
@@ -28,7 +33,7 @@ public struct TimerView: View {
     public var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 20) {
+                VStack(spacing: 16) {
                     if let activeTimer = viewModel.activeTimer {
                         runningCard(for: activeTimer)
                     } else {
@@ -36,7 +41,7 @@ public struct TimerView: View {
                         itemPickerCard
                     }
                 }
-                .padding(24)
+                .padding(20)
                 .frame(maxWidth: 640)
                 .frame(maxWidth: .infinity)
             }
@@ -48,23 +53,50 @@ public struct TimerView: View {
         }
     }
 
+    private var readoutColor: Color {
+        GlassStyle.signalCyan(for: colorScheme)
+    }
+
+    // MARK: - Panel header
+
+    /// Mirrors `OverviewView`'s own `panelHeader` — a `StatusDot` plus an
+    /// uppercase tracked-out nameplate, no chevron here since this screen
+    /// has nowhere further to navigate to.
+    private func panelHeader(_ title: String, systemImage: String, status: PanelStatus) -> some View {
+        HStack(spacing: 8) {
+            StatusDot(status)
+            Image(systemName: systemImage)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(title)
+                .pccPanelLabel()
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+    }
+
     // MARK: - Running
 
     private func runningCard(for entry: TimeEntry) -> some View {
         GlassCard(minHeight: 360) {
             VStack(spacing: 20) {
-                Text(containerLabel(for: entry))
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-                TimelineView(.periodic(from: entry.startDate, by: 1)) { context in
-                    Text(Self.formattedElapsed(context.date.timeIntervalSince(entry.startDate)))
-                        .font(.system(size: 72, weight: .bold, design: .rounded))
-                        .monospacedDigit()
+                panelHeader("Timer", systemImage: "stopwatch", status: .active)
+                Spacer(minLength: 0)
+                VStack(spacing: 8) {
+                    Text(containerLabel(for: entry))
+                        .pccPanelLabel()
+                        .foregroundStyle(.secondary)
+                    TimelineView(.periodic(from: entry.startDate, by: 1)) { context in
+                        Text(Self.formattedElapsed(context.date.timeIntervalSince(entry.startDate)))
+                            .font(.pccReadout(64))
+                            .foregroundStyle(readoutColor)
+                    }
+                    Text("Started \(entry.startDate, style: .relative) ago")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
-                Text("Started \(entry.startDate, style: .relative) ago")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                bigButton("Stop") {
+                Spacer(minLength: 0)
+                bigButton("Stop", tint: GlassStyle.signalRed(for: colorScheme)) {
                     Task { await viewModel.stop() }
                 }
                 Button("Cancel Timer", role: .destructive) {
@@ -81,15 +113,17 @@ public struct TimerView: View {
     private var idleCard: some View {
         GlassCard(minHeight: 360) {
             VStack(spacing: 20) {
+                panelHeader("Timer", systemImage: "stopwatch", status: .idle)
+                Spacer(minLength: 0)
                 kindTabs
                 Text(Self.formattedElapsed(0))
-                    .font(.system(size: 72, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary.opacity(0.4))
+                    .font(.pccReadout(64))
+                    .foregroundStyle(.secondary.opacity(0.35))
                 Text(selectedItemID == nil ? "Choose a \(selectedKind.title) below to start" : "Ready to start")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                bigButton("Start") {
+                Spacer(minLength: 0)
+                bigButton("Start", tint: readoutColor) {
                     guard let container else { return }
                     Task { await viewModel.start(container: container) }
                 }
@@ -99,12 +133,11 @@ public struct TimerView: View {
         }
     }
 
-    /// The segmented Task/Project/Client/Course tab row — the reference
-    /// layout's mode tabs, repurposed here to pick which of `TimeEntry`'s
-    /// four possible containers this Timer attaches to (ADR-0004) instead
-    /// of a session type. Switching tabs clears `selectedItemID`: an id
-    /// from the old kind's list wouldn't mean anything against the new
-    /// kind's items.
+    /// The segmented Task/Project/Client/Course tab row — mirrors
+    /// `OverviewView`'s compact `miniKindTabs`: the selected tab picks up
+    /// this system's readout-cyan accent instead of a generic tint.
+    /// Switching tabs clears `selectedItemID`: an id from the old kind's
+    /// list wouldn't mean anything against the new kind's items.
     private var kindTabs: some View {
         HStack(spacing: 4) {
             ForEach(ContainerKind.allCases) { kind in
@@ -115,11 +148,11 @@ public struct TimerView: View {
                 } label: {
                     Text(kind.title)
                         .font(.subheadline.weight(kind == selectedKind ? .bold : .regular))
-                        .foregroundStyle(kind == selectedKind ? Color.primary : Color.secondary)
+                        .foregroundStyle(kind == selectedKind ? readoutColor : Color.secondary)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
                         .background(
-                            Capsule().fill(kind == selectedKind ? Color.primary.opacity(0.12) : Color.clear)
+                            Capsule().fill(kind == selectedKind ? readoutColor.opacity(0.15) : Color.clear)
                         )
                 }
                 #if os(macOS)
@@ -133,7 +166,8 @@ public struct TimerView: View {
         GlassCard {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Choose a \(selectedKind.title)")
-                    .font(.headline)
+                    .pccPanelLabel()
+                    .foregroundStyle(.secondary)
                 if currentItems.isEmpty {
                     Text("No \(selectedKind.title)s yet.")
                         .font(.subheadline)
@@ -158,14 +192,20 @@ public struct TimerView: View {
                 Spacer()
                 if selectedItemID == item.id {
                     Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(readoutColor)
                 }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(selectedItemID == item.id ? Color.primary.opacity(0.08) : Color.clear)
+                RoundedRectangle(cornerRadius: GlassStyle.controlCornerRadius, style: .continuous)
+                    .fill(selectedItemID == item.id ? readoutColor.opacity(0.12) : Color.clear)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: GlassStyle.controlCornerRadius, style: .continuous)
+                    .strokeBorder(
+                        selectedItemID == item.id ? readoutColor.opacity(0.4) : GlassStyle.panelLine(for: colorScheme),
+                        lineWidth: 1)
             )
         }
         #if os(macOS)
@@ -174,16 +214,19 @@ public struct TimerView: View {
     }
 
     /// A large pill-shaped call-to-action button — Start/Stop, spanning
-    /// most of the hero card's width, matching the reference layout's own
-    /// oversized button rather than a standard-size `Form` button.
-    private func bigButton(_ title: String, action: @escaping () -> Void) -> some View {
+    /// most of the hero panel's width, tinted with this system's signal
+    /// colors (readout-cyan to start, red to stop) rather than the generic
+    /// accent color a plain `.borderedProminent` button would default to.
+    private func bigButton(_ title: String, tint: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title.uppercased())
-                .font(.title3.bold())
+                .font(.pccReadout(17, weight: .semibold))
+                .tracking(1.2)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
         }
         .buttonStyle(.borderedProminent)
+        .tint(tint)
         .controlSize(.large)
     }
 

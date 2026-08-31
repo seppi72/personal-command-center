@@ -140,6 +140,27 @@ public final class OverviewViewModel: ObservableObject {
         return Double(onTime) / Double(eligible.count)
     }
 
+    /// The Finances card's status lamp (see `PanelStatus`'s own doc comment
+    /// for what the signal generally means): `.critical` when Net Worth
+    /// itself has gone negative, `.attention` when Net Worth is still
+    /// positive but the selected range's own net (income minus expense) is
+    /// negative — spending is outpacing income even if the overall
+    /// position is still fine — `.nominal` otherwise.
+    public var financesStatus: PanelStatus {
+        if currentNetWorth < 0 { return .critical }
+        let rangeNet = financeBuckets.reduce(0) { $0 + $1.net }
+        return rangeNet < 0 ? .attention : .nominal
+    }
+
+    /// The Work card's status lamp: `.critical` when anything is overdue,
+    /// `.attention` when nothing's overdue but something's due today,
+    /// `.nominal` when neither.
+    public var workStatus: PanelStatus {
+        if !tasksOverdue.isEmpty { return .critical }
+        if !tasksDueToday.isEmpty { return .attention }
+        return .nominal
+    }
+
     public func load() async {
         isLoading = true
         defer { isLoading = false }

@@ -8,6 +8,8 @@ import SwiftUI
 public struct DeadlinesView: View {
     @ObservedObject private var viewModel: DeadlinesViewModel
 
+    @Environment(\.colorScheme) private var colorScheme
+
     public init(viewModel: DeadlinesViewModel) {
         self.viewModel = viewModel
     }
@@ -33,27 +35,78 @@ public struct DeadlinesView: View {
     }
 
     private var itemList: some View {
-        List(viewModel.items) { item in
-            HStack {
-                Image(systemName: Self.symbolName(for: item.kind))
-                    .foregroundStyle(.secondary)
-                VStack(alignment: .leading) {
-                    Text(item.title)
-                        .strikethrough(item.isComplete == true)
-                    if let dueDate = item.dueDate {
-                        Text(dueDate, style: .date)
-                            .font(.subheadline)
+        List {
+            Section {
+                statusStrip
+            }
+            Section {
+                ForEach(viewModel.items) { item in
+                    HStack {
+                        Image(systemName: Self.symbolName(for: item.kind))
                             .foregroundStyle(.secondary)
-                    } else {
-                        Text("No date")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading) {
+                            Text(item.title)
+                                .strikethrough(item.isComplete == true)
+                            if let dueDate = item.dueDate {
+                                Text(dueDate, style: .date)
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundStyle(Self.isOverdue(item) ? GlassStyle.signalRed(for: colorScheme) : .secondary)
+                            } else {
+                                Text("No date")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
                 }
             }
+            .glassRows()
         }
-        .glassRows()
         .glassScreenBackground()
+    }
+
+    // MARK: - Status strip
+
+    private var statusStrip: some View {
+        HStack(spacing: 10) {
+            StatusDot(overallStatus)
+            Text(statusStripText)
+                .pccPanelLabel()
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 10)
+        .overlay(
+            Rectangle()
+                .fill(GlassStyle.panelLine(for: colorScheme))
+                .frame(height: 1),
+            alignment: .bottom
+        )
+        .listRowInsets(EdgeInsets())
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+
+    private var overallStatus: PanelStatus {
+        overdueCount > 0 ? .critical : .nominal
+    }
+
+    private var overdueCount: Int {
+        viewModel.items.filter(Self.isOverdue).count
+    }
+
+    private static func isOverdue(_ item: DeadlineItem) -> Bool {
+        guard let dueDate = item.dueDate, item.isComplete != true else { return false }
+        return dueDate < Date()
+    }
+
+    private var statusStripText: String {
+        let count = viewModel.items.count
+        let noun = count == 1 ? "DEADLINE" : "DEADLINES"
+        let flagText = overdueCount > 0 ? "\(overdueCount) OVERDUE" : "ALL CLEAR"
+        return "\(count) \(noun)   ·   \(flagText)"
     }
 
     private var emptyState: some View {

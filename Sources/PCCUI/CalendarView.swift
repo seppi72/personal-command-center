@@ -17,6 +17,8 @@ public struct CalendarView: View {
     @State private var isPresentingNewCommitmentSheet = false
     @State private var editingCommitment: PersonalCommitment?
 
+    @Environment(\.colorScheme) private var colorScheme
+
     public init(viewModel: CalendarViewModel) {
         self.viewModel = viewModel
     }
@@ -55,23 +57,77 @@ public struct CalendarView: View {
 
     private var entryList: some View {
         List {
-            ForEach(viewModel.entries) { entry in
-                row(for: entry)
+            Section {
+                statusStrip
             }
-            .onDelete { offsets in
-                let toDelete = offsets.compactMap { offset -> PersonalCommitment? in
-                    guard case let .commitment(commitment) = viewModel.entries[offset] else { return nil }
-                    return commitment
+            Section {
+                ForEach(viewModel.entries) { entry in
+                    row(for: entry)
                 }
-                Task {
-                    for commitment in toDelete {
-                        await viewModel.deleteCommitment(commitment)
+                .onDelete { offsets in
+                    let toDelete = offsets.compactMap { offset -> PersonalCommitment? in
+                        guard case let .commitment(commitment) = viewModel.entries[offset] else { return nil }
+                        return commitment
+                    }
+                    Task {
+                        for commitment in toDelete {
+                            await viewModel.deleteCommitment(commitment)
+                        }
                     }
                 }
+                .glassRows()
             }
-            .glassRows()
         }
         .glassScreenBackground()
+    }
+
+    // MARK: - Status strip
+
+    private var statusStrip: some View {
+        HStack(spacing: 10) {
+            StatusDot(overallStatus)
+            Text(statusStripText)
+                .pccPanelLabel()
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 10)
+        .overlay(
+            Rectangle()
+                .fill(GlassStyle.panelLine(for: colorScheme))
+                .frame(height: 1),
+            alignment: .bottom
+        )
+        .listRowInsets(EdgeInsets())
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+
+    private var failedSyncCount: Int {
+        viewModel.entries.filter {
+            if case let .commitment(commitment) = $0 { return commitment.syncStatus == .failed }
+            return false
+        }.count
+    }
+
+    private var todayCount: Int {
+        viewModel.entries.filter { Calendar.current.isDateInToday($0.startDate) }.count
+    }
+
+    private var overallStatus: PanelStatus {
+        if failedSyncCount > 0 { return .critical }
+        return todayCount > 0 ? .attention : .nominal
+    }
+
+    private var statusStripText: String {
+        let count = viewModel.entries.count
+        let noun = count == 1 ? "ENTRY" : "ENTRIES"
+        if failedSyncCount > 0 {
+            return "\(count) \(noun)   ·   \(failedSyncCount) SYNC FAILED"
+        }
+        return "\(count) \(noun)   ·   \(todayCount) TODAY"
     }
 
     @ViewBuilder
