@@ -11,6 +11,7 @@ public struct TransactionsView: View {
     @State private var editingTransaction: Transaction?
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
 
     public init(viewModel: TransactionsViewModel) {
         self.viewModel = viewModel
@@ -94,7 +95,7 @@ public struct TransactionsView: View {
                                     .font(.system(size: 13, weight: .semibold, design: .monospaced))
                                     .foregroundStyle(
                                         transaction.type == .expense
-                                            ? GlassStyle.signalRed(for: colorScheme) : GlassStyle.signalGreen(for: colorScheme))
+                                            ? theme.signalRed(colorScheme) : theme.signalGreen(colorScheme))
                             }
                             Text(transaction.date, style: .date)
                                 .font(.subheadline)
@@ -124,10 +125,10 @@ public struct TransactionsView: View {
                         }
                     }
                 }
-                .glassRows()
+                .panelRows()
             }
         }
-        .glassScreenBackground()
+        .panelScreenBackground()
     }
 
     // MARK: - Status strip
@@ -141,14 +142,14 @@ public struct TransactionsView: View {
             Spacer()
             Text(Self.formattedNet(netTotal))
                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                .foregroundStyle(netTotal < 0 ? GlassStyle.signalRed(for: colorScheme) : GlassStyle.signalGreen(for: colorScheme))
+                .foregroundStyle(netTotal < 0 ? theme.signalRed(colorScheme) : theme.signalGreen(colorScheme))
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 10)
         .overlay(
             Rectangle()
-                .fill(GlassStyle.panelLine(for: colorScheme))
+                .fill(theme.panelLine(colorScheme))
                 .frame(height: 1),
             alignment: .bottom
         )
@@ -324,7 +325,7 @@ struct TransactionFormSheet: View {
                     TextField("Notes", text: $notes)
                         .pccField()
                 }
-                .glassRows()
+                .panelRows()
                 Section("Category") {
                     PCCMenuPicker(
                         "Category", selection: $categoryID,
@@ -337,9 +338,9 @@ struct TransactionFormSheet: View {
                         )
                     }
                 }
-                .glassRows()
+                .panelRows()
             }
-            .glassScreenBackground()
+            .panelScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

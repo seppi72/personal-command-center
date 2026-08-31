@@ -8,10 +8,10 @@ import SwiftUI
 /// dashboard's "Projects Progress" widget, which shows every Project at
 /// once. Tinted with this system's readout-cyan accent rather than the
 /// generic `.accentColor` a default `ProgressView` would use.
-func projectProgressBar(_ fraction: Double, colorScheme: ColorScheme) -> some View {
+func projectProgressBar(_ fraction: Double, colorScheme: ColorScheme, theme: ScreenTheme) -> some View {
     HStack(spacing: 8) {
         ProgressView(value: fraction)
-            .tint(GlassStyle.signalCyan(for: colorScheme))
+            .tint(theme.accent(colorScheme))
         Text(fraction, format: .percent.precision(.fractionLength(0)))
             .font(.system(size: 11, design: .monospaced))
             .foregroundStyle(.secondary)
@@ -30,6 +30,7 @@ public struct ProjectsView: View {
     @State private var isPresentingNewProjectSheet = false
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
 
     public init(viewModel: ProjectsViewModel) {
         self.viewModel = viewModel
@@ -96,7 +97,7 @@ public struct ProjectsView: View {
                                     .foregroundStyle(.secondary)
                             }
                             if let fraction = viewModel.completionFraction(for: project) {
-                                projectProgressBar(fraction, colorScheme: colorScheme)
+                                projectProgressBar(fraction, colorScheme: colorScheme, theme: theme)
                             }
                         }
                         .padding(.vertical, 4)
@@ -110,10 +111,10 @@ public struct ProjectsView: View {
                         }
                     }
                 }
-                .glassRows()
+                .panelRows()
             }
         }
-        .glassScreenBackground()
+        .panelScreenBackground()
     }
 
     // MARK: - Status strip
@@ -131,7 +132,7 @@ public struct ProjectsView: View {
         .padding(.bottom, 10)
         .overlay(
             Rectangle()
-                .fill(GlassStyle.panelLine(for: colorScheme))
+                .fill(theme.panelLine(colorScheme))
                 .frame(height: 1),
             alignment: .bottom
         )
@@ -217,16 +218,16 @@ struct ProjectFormSheet: View {
                     TextField("Name", text: $name)
                         .pccField()
                 }
-                .glassRows()
+                .panelRows()
                 Section("Deadline") {
                     Toggle("Has deadline", isOn: $hasDeadline)
                     if hasDeadline {
                         DatePicker("Due", selection: $dueDate, displayedComponents: .date)
                     }
                 }
-                .glassRows()
+                .panelRows()
             }
-            .glassScreenBackground()
+            .panelScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -262,6 +263,7 @@ struct ProjectDetailView: View {
     @State private var editingSprint: Sprint?
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
 
     /// The freshest known copy of `project` — falls back to the value
     /// passed in if `viewModel.projects` hasn't (yet) reflected an edit.
@@ -280,10 +282,10 @@ struct ProjectDetailView: View {
                         .foregroundStyle(.secondary)
                 }
                 if let fraction = viewModel.completionFraction(for: currentProject) {
-                    projectProgressBar(fraction, colorScheme: colorScheme)
+                    projectProgressBar(fraction, colorScheme: colorScheme, theme: theme)
                 }
             }
-            .glassRows()
+            .panelRows()
             Section("Sprints") {
                 if sprintsViewModel.sprints.isEmpty {
                     Text("No Sprints yet.")
@@ -319,9 +321,9 @@ struct ProjectDetailView: View {
                     Label("Add Sprint", systemImage: "plus")
                 }
             }
-            .glassRows()
+            .panelRows()
         }
-        .glassScreenBackground()
+        .panelScreenBackground()
         .navigationTitle(currentProject.name)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -415,9 +417,9 @@ struct SprintFormSheet: View {
                     DatePicker("Start", selection: $startDate, displayedComponents: .date)
                     DatePicker("End", selection: $endDate, displayedComponents: .date)
                 }
-                .glassRows()
+                .panelRows()
             }
-            .glassScreenBackground()
+            .panelScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

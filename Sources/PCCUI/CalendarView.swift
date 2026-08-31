@@ -18,6 +18,7 @@ public struct CalendarView: View {
     @State private var editingCommitment: PersonalCommitment?
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
 
     public init(viewModel: CalendarViewModel) {
         self.viewModel = viewModel
@@ -75,10 +76,10 @@ public struct CalendarView: View {
                         }
                     }
                 }
-                .glassRows()
+                .panelRows()
             }
         }
-        .glassScreenBackground()
+        .panelScreenBackground()
     }
 
     // MARK: - Status strip
@@ -96,7 +97,7 @@ public struct CalendarView: View {
         .padding(.bottom, 10)
         .overlay(
             Rectangle()
-                .fill(GlassStyle.panelLine(for: colorScheme))
+                .fill(theme.panelLine(colorScheme))
                 .frame(height: 1),
             alignment: .bottom
         )

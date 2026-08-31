@@ -30,6 +30,7 @@ public struct FinancesReportingView: View {
     @ObservedObject private var viewModel: FinancesReportingViewModel
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
 
     public init(viewModel: FinancesReportingViewModel) {
         self.viewModel = viewModel
@@ -46,7 +47,7 @@ public struct FinancesReportingView: View {
                 expensesSection
                 projectedBalanceSection
             }
-            .glassScreenBackground()
+            .panelScreenBackground()
             .navigationTitle("Finances Reporting")
             .task { await viewModel.load() }
             .refreshable { await viewModel.load() }
@@ -55,7 +56,7 @@ public struct FinancesReportingView: View {
     }
 
     private var readoutColor: Color {
-        GlassStyle.signalCyan(for: colorScheme)
+        theme.accent(colorScheme)
     }
 
     // MARK: - Directional signal
@@ -77,7 +78,7 @@ public struct FinancesReportingView: View {
     /// Chart traces are never neutral — unlike `DeltaBadge`, `.flat` still
     /// reads as green here, since a flat trace isn't a loss.
     private func chartColor(for direction: TrendDirection) -> Color {
-        direction == .down ? GlassStyle.signalRed(for: colorScheme) : GlassStyle.signalGreen(for: colorScheme)
+        direction == .down ? theme.signalRed(colorScheme) : theme.signalGreen(colorScheme)
     }
 
     /// The small "▲ +₱4,200.00 (+3.1%)" ticker-style readout next to Net
@@ -108,6 +109,7 @@ public struct FinancesReportingView: View {
         let text: String
 
         @Environment(\.colorScheme) private var colorScheme
+        @Environment(\.screenTheme) private var theme
 
         var body: some View {
             HStack(spacing: 3) {
@@ -131,8 +133,8 @@ public struct FinancesReportingView: View {
 
         private var color: Color {
             switch direction {
-            case .up: return GlassStyle.signalGreen(for: colorScheme)
-            case .down: return GlassStyle.signalRed(for: colorScheme)
+            case .up: return theme.signalGreen(colorScheme)
+            case .down: return theme.signalRed(colorScheme)
             case .flat: return .secondary
             }
         }
@@ -201,7 +203,7 @@ public struct FinancesReportingView: View {
         .padding(.bottom, 10)
         .overlay(
             Rectangle()
-                .fill(GlassStyle.panelLine(for: colorScheme))
+                .fill(theme.panelLine(colorScheme))
                 .frame(height: 1),
             alignment: .bottom
         )
@@ -225,7 +227,7 @@ public struct FinancesReportingView: View {
         } header: {
             panelHeader("Net Worth", systemImage: "chart.line.uptrend.xyaxis", status: netWorthStatus)
         }
-        .glassRows()
+        .panelRows()
     }
 
     private var netWorthStatus: PanelStatus {
@@ -251,7 +253,7 @@ public struct FinancesReportingView: View {
         } header: {
             panelHeader("Account Balance", systemImage: "building.columns", status: accountBalanceStatus)
         }
-        .glassRows()
+        .panelRows()
     }
 
     private var accountBalanceStatus: PanelStatus {
@@ -293,7 +295,7 @@ public struct FinancesReportingView: View {
         .chartYAxis {
             AxisMarks(position: .leading) { _ in
                 AxisGridLine(stroke: StrokeStyle(lineWidth: 1, dash: [2, 3]))
-                    .foregroundStyle(GlassStyle.panelLine(for: colorScheme))
+                    .foregroundStyle(theme.panelLine(colorScheme))
                 AxisValueLabel()
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(.secondary)
@@ -317,7 +319,7 @@ public struct FinancesReportingView: View {
         } header: {
             panelHeader("Expenses per Day", systemImage: "arrow.down.circle", status: .idle)
         }
-        .glassRows()
+        .panelRows()
     }
 
     /// The period's average daily expense — a real budget-pace reference,
@@ -337,12 +339,12 @@ public struct FinancesReportingView: View {
         Chart {
             ForEach(viewModel.expensesPerDay) { row in
                 BarMark(x: .value("Date", row.date, unit: .day), y: .value("Expenses", row.totalExpenses))
-                    .foregroundStyle(GlassStyle.signalRed(for: colorScheme))
+                    .foregroundStyle(theme.signalRed(colorScheme))
                     .cornerRadius(2)
             }
             RuleMark(y: .value("Average", averageExpense))
                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                .foregroundStyle(GlassStyle.panelLine(for: colorScheme))
+                .foregroundStyle(theme.panelLine(colorScheme))
                 .annotation(position: .top, alignment: .trailing, spacing: 4) {
                     Text("AVG \(Self.currency(averageExpense))/day")
                         .font(.system(size: 9, design: .monospaced))
@@ -359,7 +361,7 @@ public struct FinancesReportingView: View {
         .chartYAxis {
             AxisMarks(position: .leading) { _ in
                 AxisGridLine(stroke: StrokeStyle(lineWidth: 1, dash: [2, 3]))
-                    .foregroundStyle(GlassStyle.panelLine(for: colorScheme))
+                    .foregroundStyle(theme.panelLine(colorScheme))
                 AxisValueLabel()
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(.secondary)
@@ -388,7 +390,7 @@ public struct FinancesReportingView: View {
                     // it gets the same hero readout weight as Net Worth rather
                     // than a plain caption.
                     Rectangle()
-                        .fill(GlassStyle.panelLine(for: colorScheme))
+                        .fill(theme.panelLine(colorScheme))
                         .frame(height: 1)
                         .padding(.top, 4)
                     HStack(alignment: .lastTextBaseline) {
@@ -398,7 +400,7 @@ public struct FinancesReportingView: View {
                         Spacer()
                         Text(Self.currency(projected.projectedBalance))
                             .font(.pccReadout(24))
-                            .foregroundStyle(projected.projectedBalance < 0 ? GlassStyle.signalRed(for: colorScheme) : GlassStyle.signalGreen(for: colorScheme))
+                            .foregroundStyle(projected.projectedBalance < 0 ? theme.signalRed(colorScheme) : theme.signalGreen(colorScheme))
                     }
                     .padding(.top, 4)
                 } else {
@@ -409,7 +411,7 @@ public struct FinancesReportingView: View {
         } header: {
             panelHeader("Projected Balance", systemImage: "chart.bar.doc.horizontal", status: projectedBalanceStatus)
         }
-        .glassRows()
+        .panelRows()
     }
 
     private var projectedBalanceStatus: PanelStatus {

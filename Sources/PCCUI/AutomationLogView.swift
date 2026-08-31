@@ -12,6 +12,7 @@ public struct AutomationLogView: View {
     @ObservedObject private var viewModel: AutomationLogViewModel
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
 
     public init(viewModel: AutomationLogViewModel) {
         self.viewModel = viewModel
@@ -39,7 +40,7 @@ public struct AutomationLogView: View {
                 Section {
                     failureBanner(mostRecentFailure)
                 }
-                .glassRows()
+                .panelRows()
             }
             Section {
                 ForEach(viewModel.entries) { entry in
@@ -50,9 +51,9 @@ public struct AutomationLogView: View {
                     "Recent Activity", systemImage: "list.bullet.rectangle",
                     status: viewModel.mostRecentFailure != nil ? .critical : .nominal)
             }
-            .glassRows()
+            .panelRows()
         }
-        .glassScreenBackground()
+        .panelScreenBackground()
     }
 
     private func panelHeader(_ title: String, systemImage: String, status: PanelStatus) -> some View {
@@ -78,7 +79,7 @@ public struct AutomationLogView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Most recent sync failure")
                     .pccPanelLabel()
-                    .foregroundStyle(GlassStyle.signalRed(for: colorScheme))
+                    .foregroundStyle(theme.signalRed(colorScheme))
                 Text(entry.detail)
                     .font(.subheadline)
                 Text(entry.occurredAt, style: .relative)
@@ -109,10 +110,10 @@ public struct AutomationLogView: View {
         switch outcome {
         case .success:
             Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(GlassStyle.signalGreen(for: colorScheme))
+                .foregroundStyle(theme.signalGreen(colorScheme))
         case .failure:
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(GlassStyle.signalRed(for: colorScheme))
+                .foregroundStyle(theme.signalRed(colorScheme))
         }
     }
 

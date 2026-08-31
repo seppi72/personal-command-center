@@ -12,6 +12,7 @@ public struct CategoriesView: View {
     @State private var isPresentingNewCategorySheet = false
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
 
     public init(viewModel: CategoriesViewModel) {
         self.viewModel = viewModel
@@ -76,10 +77,10 @@ public struct CategoriesView: View {
                         }
                     }
                 }
-                .glassRows()
+                .panelRows()
             }
         }
-        .glassScreenBackground()
+        .panelScreenBackground()
     }
 
     // MARK: - Status strip
@@ -99,7 +100,7 @@ public struct CategoriesView: View {
         .padding(.bottom, 10)
         .overlay(
             Rectangle()
-                .fill(GlassStyle.panelLine(for: colorScheme))
+                .fill(theme.panelLine(colorScheme))
                 .frame(height: 1),
             alignment: .bottom
         )
@@ -159,9 +160,9 @@ struct CategoryFormSheet: View {
                     TextField("Name", text: $name)
                         .pccField()
                 }
-                .glassRows()
+                .panelRows()
             }
-            .glassScreenBackground()
+            .panelScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -209,7 +210,7 @@ struct CategoryDetailView: View {
                 Text(currentCategory.name)
                     .font(.title3)
             }
-            .glassRows()
+            .panelRows()
             Section("Subcategories") {
                 if subcategoriesViewModel.subcategories.isEmpty {
                     Text("No Subcategories yet.")
@@ -240,9 +241,9 @@ struct CategoryDetailView: View {
                     Label("Add Subcategory", systemImage: "plus")
                 }
             }
-            .glassRows()
+            .panelRows()
         }
-        .glassScreenBackground()
+        .panelScreenBackground()
         .navigationTitle(currentCategory.name)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -311,9 +312,9 @@ struct SubcategoryFormSheet: View {
                     TextField("Name", text: $name)
                         .pccField()
                 }
-                .glassRows()
+                .panelRows()
             }
-            .glassScreenBackground()
+            .panelScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

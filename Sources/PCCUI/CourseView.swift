@@ -13,6 +13,7 @@ public struct CourseView: View {
     @State private var isPresentingNewCourseSheet = false
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
 
     public init(viewModel: CoursesViewModel) {
         self.viewModel = viewModel
@@ -81,7 +82,7 @@ public struct CourseView: View {
                             if let dueDate = course.dueDate {
                                 Text(dueDate, style: .date)
                                     .font(.system(size: 11, design: .monospaced))
-                                    .foregroundStyle(Self.isOverdue(course) ? GlassStyle.signalRed(for: colorScheme) : .secondary)
+                                    .foregroundStyle(Self.isOverdue(course) ? theme.signalRed(colorScheme) : .secondary)
                             }
                         }
                     }
@@ -94,10 +95,10 @@ public struct CourseView: View {
                         }
                     }
                 }
-                .glassRows()
+                .panelRows()
             }
         }
-        .glassScreenBackground()
+        .panelScreenBackground()
     }
 
     // MARK: - Status strip
@@ -115,7 +116,7 @@ public struct CourseView: View {
         .padding(.bottom, 10)
         .overlay(
             Rectangle()
-                .fill(GlassStyle.panelLine(for: colorScheme))
+                .fill(theme.panelLine(colorScheme))
                 .frame(height: 1),
             alignment: .bottom
         )
@@ -225,7 +226,7 @@ struct CourseFormSheet: View {
                     TextField("Name", text: $name)
                         .pccField()
                 }
-                .glassRows()
+                .panelRows()
                 Section("Term") {
                     PCCMenuPicker(
                         "Month", selection: $termMonth,
@@ -233,16 +234,16 @@ struct CourseFormSheet: View {
                     )
                     Stepper("Year: \(termYear)", value: $termYear, in: 1900...3000)
                 }
-                .glassRows()
+                .panelRows()
                 Section("Deadline") {
                     Toggle("Has deadline", isOn: $hasDeadline)
                     if hasDeadline {
                         DatePicker("Due", selection: $dueDate, displayedComponents: .date)
                     }
                 }
-                .glassRows()
+                .panelRows()
             }
-            .glassScreenBackground()
+            .panelScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -294,6 +295,7 @@ struct CourseDetailView: View {
     @State private var editingCommitment: PersonalCommitment?
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
 
     /// The freshest known copy of `course` — falls back to the value passed
     /// in if `viewModel.courses` hasn't (yet) reflected an edit.
@@ -315,7 +317,7 @@ struct CourseDetailView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .glassRows()
+            .panelRows()
             Section("Tasks") {
                 listRows(
                     items: tasksViewModel.tasks,
@@ -336,7 +338,7 @@ struct CourseDetailView: View {
                             }
                         } label: {
                             Image(systemName: task.isComplete ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(task.isComplete ? GlassStyle.signalGreen(for: colorScheme) : Color.secondary)
+                                .foregroundStyle(task.isComplete ? theme.signalGreen(colorScheme) : Color.secondary)
                         }
                         #if os(macOS)
                         .buttonStyle(.plain)
@@ -366,7 +368,7 @@ struct CourseDetailView: View {
                     Label("Add Task", systemImage: "plus")
                 }
             }
-            .glassRows()
+            .panelRows()
             Section("Meetings") {
                 listRows(
                     items: commitmentsViewModel.commitments,
@@ -405,9 +407,9 @@ struct CourseDetailView: View {
                     Label("Add Meeting", systemImage: "plus")
                 }
             }
-            .glassRows()
+            .panelRows()
         }
-        .glassScreenBackground()
+        .panelScreenBackground()
         .navigationTitle(currentCourse.name)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {

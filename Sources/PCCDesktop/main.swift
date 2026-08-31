@@ -166,7 +166,7 @@ struct DashboardView: View {
     /// "follow system" third option), persisted so it survives a relaunch.
     /// Forces `.preferredColorScheme` below rather than leaving every
     /// screen to follow the Mac's system appearance the way this app used
-    /// to; `GlassDesignSystem.swift`'s `GlassBackground`/`GlassSurface` both
+    /// to; `PCCChassis.swift`'s `PanelBackground`/`PanelSurface` both
     /// read `@Environment(\.colorScheme)` (which this sets) rather than a
     /// system dynamic color, so they pick this override up everywhere.
     @AppStorage("pcc.isDarkMode") private var isDarkMode = false

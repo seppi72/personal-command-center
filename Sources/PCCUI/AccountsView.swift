@@ -16,6 +16,7 @@ public struct AccountsView: View {
     @State private var editingAccount: Account?
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
 
     public init(viewModel: AccountsViewModel) {
         self.viewModel = viewModel
@@ -85,7 +86,7 @@ public struct AccountsView: View {
         .padding(.bottom, 10)
         .overlay(
             Rectangle()
-                .fill(GlassStyle.panelLine(for: colorScheme))
+                .fill(theme.panelLine(colorScheme))
                 .frame(height: 1),
             alignment: .bottom
         )
@@ -135,10 +136,10 @@ public struct AccountsView: View {
                         }
                     }
                 }
-                .glassRows()
+                .panelRows()
             }
         }
-        .glassScreenBackground()
+        .panelScreenBackground()
     }
 
     private func accountRow(_ account: Account) -> some View {
@@ -156,7 +157,7 @@ public struct AccountsView: View {
             Spacer()
             Text(Self.formattedBalance(account.balance))
                 .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                .foregroundStyle(Self.balanceColor(account.balance, for: colorScheme))
+                .foregroundStyle(Self.balanceColor(account.balance, for: colorScheme, theme: theme))
         }
     }
 
@@ -171,8 +172,8 @@ public struct AccountsView: View {
         }
     }
 
-    private static func balanceColor(_ balance: Double, for colorScheme: ColorScheme) -> Color {
-        balance < 0 ? GlassStyle.signalRed(for: colorScheme) : GlassStyle.signalGreen(for: colorScheme)
+    private static func balanceColor(_ balance: Double, for colorScheme: ColorScheme, theme: ScreenTheme) -> Color {
+        balance < 0 ? theme.signalRed(colorScheme) : theme.signalGreen(colorScheme)
     }
 
     private var emptyState: some View {
@@ -256,7 +257,7 @@ struct AccountFormSheet: View {
                         #endif
                     }
                 }
-                .glassRows()
+                .panelRows()
                 if !isCreating {
                     Section {
                         Text(openingBalanceText)
@@ -264,10 +265,10 @@ struct AccountFormSheet: View {
                     } footer: {
                         Text("Opening balance can't be changed after an Account is created.")
                     }
-                    .glassRows()
+                    .panelRows()
                 }
             }
-            .glassScreenBackground()
+            .panelScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

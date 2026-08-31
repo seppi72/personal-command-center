@@ -25,6 +25,7 @@ public struct TimerView: View {
     @State private var selectedItemID: UUID?
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
 
     public init(viewModel: TimerViewModel) {
         self.viewModel = viewModel
@@ -45,7 +46,7 @@ public struct TimerView: View {
                 .frame(maxWidth: 640)
                 .frame(maxWidth: .infinity)
             }
-            .glassScreenBackground()
+            .panelScreenBackground()
             .navigationTitle("Timer")
             .task { await viewModel.load() }
             .refreshable { await viewModel.load() }
@@ -54,7 +55,7 @@ public struct TimerView: View {
     }
 
     private var readoutColor: Color {
-        GlassStyle.signalCyan(for: colorScheme)
+        theme.accent(colorScheme)
     }
 
     // MARK: - Panel header
@@ -78,7 +79,7 @@ public struct TimerView: View {
     // MARK: - Running
 
     private func runningCard(for entry: TimeEntry) -> some View {
-        GlassCard(minHeight: 360) {
+        PanelCard(minHeight: 360) {
             VStack(spacing: 20) {
                 panelHeader("Timer", systemImage: "stopwatch", status: .active)
                 Spacer(minLength: 0)
@@ -96,7 +97,7 @@ public struct TimerView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
-                bigButton("Stop", tint: GlassStyle.signalRed(for: colorScheme)) {
+                bigButton("Stop", tint: theme.signalRed(colorScheme)) {
                     Task { await viewModel.stop() }
                 }
                 Button("Cancel Timer", role: .destructive) {
@@ -111,7 +112,7 @@ public struct TimerView: View {
     // MARK: - Idle
 
     private var idleCard: some View {
-        GlassCard(minHeight: 360) {
+        PanelCard(minHeight: 360) {
             VStack(spacing: 20) {
                 panelHeader("Timer", systemImage: "stopwatch", status: .idle)
                 Spacer(minLength: 0)
@@ -163,7 +164,7 @@ public struct TimerView: View {
     }
 
     private var itemPickerCard: some View {
-        GlassCard {
+        PanelCard {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Choose a \(selectedKind.title)")
                     .pccPanelLabel()
@@ -198,13 +199,13 @@ public struct TimerView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .background(
-                RoundedRectangle(cornerRadius: GlassStyle.controlCornerRadius, style: .continuous)
+                RoundedRectangle(cornerRadius: PCCChassis.controlCornerRadius, style: .continuous)
                     .fill(selectedItemID == item.id ? readoutColor.opacity(0.12) : Color.clear)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: GlassStyle.controlCornerRadius, style: .continuous)
+                RoundedRectangle(cornerRadius: PCCChassis.controlCornerRadius, style: .continuous)
                     .strokeBorder(
-                        selectedItemID == item.id ? readoutColor.opacity(0.4) : GlassStyle.panelLine(for: colorScheme),
+                        selectedItemID == item.id ? readoutColor.opacity(0.4) : theme.panelLine(colorScheme),
                         lineWidth: 1)
             )
         }

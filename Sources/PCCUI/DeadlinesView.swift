@@ -9,6 +9,7 @@ public struct DeadlinesView: View {
     @ObservedObject private var viewModel: DeadlinesViewModel
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
 
     public init(viewModel: DeadlinesViewModel) {
         self.viewModel = viewModel
@@ -50,7 +51,7 @@ public struct DeadlinesView: View {
                             if let dueDate = item.dueDate {
                                 Text(dueDate, style: .date)
                                     .font(.system(size: 12, design: .monospaced))
-                                    .foregroundStyle(Self.isOverdue(item) ? GlassStyle.signalRed(for: colorScheme) : .secondary)
+                                    .foregroundStyle(Self.isOverdue(item) ? theme.signalRed(colorScheme) : .secondary)
                             } else {
                                 Text("No date")
                                     .font(.subheadline)
@@ -60,9 +61,9 @@ public struct DeadlinesView: View {
                     }
                 }
             }
-            .glassRows()
+            .panelRows()
         }
-        .glassScreenBackground()
+        .panelScreenBackground()
     }
 
     // MARK: - Status strip
@@ -80,7 +81,7 @@ public struct DeadlinesView: View {
         .padding(.bottom, 10)
         .overlay(
             Rectangle()
-                .fill(GlassStyle.panelLine(for: colorScheme))
+                .fill(theme.panelLine(colorScheme))
                 .frame(height: 1),
             alignment: .bottom
         )

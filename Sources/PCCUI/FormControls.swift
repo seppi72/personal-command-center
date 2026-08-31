@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Reusable form controls that sit on top of `GlassDesignSystem.swift`'s
+/// Reusable form controls that sit on top of `PCCChassis.swift`'s
 /// surface tokens — this file is the "interactive control" half of the
 /// design system (dropdowns, date ranges, text fields), where that one is
 /// the "surface" half (cards, rows, backdrop). Introduced to replace every
@@ -12,7 +12,7 @@ import SwiftUI
 /// Two different "the control sits on X" contexts each need a different
 /// treatment, which is why there are two shapes below rather than one:
 /// `PCCMenuPicker` (an already-boxed `List`/`Form` row picks up its box from
-/// `.glassRows()`, so the control itself stays a plain inline label+value+
+/// `.panelRows()`, so the control itself stays a plain inline label+value+
 /// chevron) and `PCCControlChip`/`PCCDateRangeControl` (open card content
 /// has no such box yet, so the control draws its own compact chip).
 
@@ -20,9 +20,9 @@ import SwiftUI
 
 /// The compact "chip" background `PCCDateRangeControl` and boxed
 /// `PCCMenuPicker`s use — a small pill/rounded-rect distinct from
-/// `GlassCard`'s bigger, softer card surface, sized and tinted to read as a
+/// `PanelCard`'s bigger, softer card surface, sized and tinted to read as a
 /// clickable control rather than a static panel. Built from `.primary`
-/// opacity rather than `GlassSurface`'s explicit light/dark branching: a
+/// opacity rather than `PanelSurface`'s explicit light/dark branching: a
 /// semantic color already adapts (dark tint in light mode, light tint in
 /// dark mode) without needing its own `colorScheme` check.
 private struct PCCControlChipBackground: View {
@@ -30,14 +30,14 @@ private struct PCCControlChipBackground: View {
     var isHovering: Bool = false
 
     var body: some View {
-        RoundedRectangle(cornerRadius: GlassStyle.controlCornerRadius, style: .continuous)
+        RoundedRectangle(cornerRadius: PCCChassis.controlCornerRadius, style: .continuous)
             .fill(.ultraThinMaterial)
             .overlay(
-                RoundedRectangle(cornerRadius: GlassStyle.controlCornerRadius, style: .continuous)
+                RoundedRectangle(cornerRadius: PCCChassis.controlCornerRadius, style: .continuous)
                     .fill(Color.primary.opacity(fillOpacity))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: GlassStyle.controlCornerRadius, style: .continuous)
+                RoundedRectangle(cornerRadius: PCCChassis.controlCornerRadius, style: .continuous)
                     .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
             )
     }
@@ -87,7 +87,7 @@ extension ButtonStyle where Self == PCCControlChipStyle {
 // MARK: - Dropdown / menu picker
 
 /// How a `PCCMenuPicker` renders its trigger: `.inline` for a row already
-/// sitting inside a `.glassRows()`-styled `List`/`Form` Section (the row
+/// sitting inside a `.panelRows()`-styled `List`/`Form` Section (the row
 /// itself is the box, so the control is just label + value + chevron), or
 /// `.boxed` for one placed directly in open card content, which draws its
 /// own `PCCControlChipStyle` chip the way `PCCDateRangeControl` does.
@@ -383,7 +383,7 @@ public struct PCCDateRangeControl: View {
 
 extension View {
     /// The text field treatment every `TextField`/`SecureField` in this
-    /// package uses inside a `.glassRows()` Section — `.plain` strips the
+    /// package uses inside a `.panelRows()` Section — `.plain` strips the
     /// platform's own bordered/boxed field chrome (macOS's native
     /// `NSTextField` box in particular reads oddly floating on top of an
     /// already-custom glass row background) so typed text sits directly on

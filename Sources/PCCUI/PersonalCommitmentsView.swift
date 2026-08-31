@@ -12,6 +12,7 @@ public struct PersonalCommitmentsView: View {
     @State private var editingCommitment: PersonalCommitment?
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
 
     public init(viewModel: PersonalCommitmentsViewModel) {
         self.viewModel = viewModel
@@ -87,10 +88,10 @@ public struct PersonalCommitmentsView: View {
                         }
                     }
                 }
-                .glassRows()
+                .panelRows()
             }
         }
-        .glassScreenBackground()
+        .panelScreenBackground()
     }
 
     // MARK: - Status strip
@@ -108,7 +109,7 @@ public struct PersonalCommitmentsView: View {
         .padding(.bottom, 10)
         .overlay(
             Rectangle()
-                .fill(GlassStyle.panelLine(for: colorScheme))
+                .fill(theme.panelLine(colorScheme))
                 .frame(height: 1),
             alignment: .bottom
         )
@@ -212,9 +213,9 @@ struct PersonalCommitmentFormSheet: View {
                         options: [(UUID?.none, "None")] + courses.map { (Optional($0.id), $0.name) }
                     )
                 }
-                .glassRows()
+                .panelRows()
             }
-            .glassScreenBackground()
+            .panelScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

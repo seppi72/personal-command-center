@@ -14,6 +14,7 @@ public struct NotificationsView: View {
     @ObservedObject private var viewModel: NotificationsViewModel
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
 
     public init(viewModel: NotificationsViewModel) {
         self.viewModel = viewModel
@@ -52,10 +53,10 @@ public struct NotificationsView: View {
                         }
                     }
                 }
-                .glassRows()
+                .panelRows()
             }
         }
-        .glassScreenBackground()
+        .panelScreenBackground()
     }
 
     private func row(for notification: NotificationItem) -> some View {
@@ -90,7 +91,7 @@ public struct NotificationsView: View {
         .padding(.bottom, 10)
         .overlay(
             Rectangle()
-                .fill(GlassStyle.panelLine(for: colorScheme))
+                .fill(theme.panelLine(colorScheme))
                 .frame(height: 1),
             alignment: .bottom
         )

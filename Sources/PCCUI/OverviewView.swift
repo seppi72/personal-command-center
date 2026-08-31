@@ -10,7 +10,7 @@ import SwiftUI
 /// package's existing "minimal" scope (mirrors `DeadlinesView`/
 /// `TransactionsView`).
 ///
-/// Every panel header carries a `StatusDot` (`GlassDesignSystem.swift`)
+/// Every panel header carries a `StatusDot` (`PCCChassis.swift`)
 /// computed from the same data the panel shows — the deliberate "read the
 /// lamp, not every gauge" hierarchy device this screen is built around, so
 /// a glance at the top of the screen (or the status strip above the panels
@@ -43,6 +43,7 @@ public struct OverviewView: View {
     @State private var timerSelectedItemID: UUID?
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
 
     /// Below this available width, Work and Productivity stack in one
     /// column instead of sitting side by side — narrower than that and two
@@ -85,7 +86,7 @@ public struct OverviewView: View {
                     .frame(maxWidth: 900)
                     .frame(maxWidth: .infinity)
                 }
-                .glassScreenBackground()
+                .panelScreenBackground()
             }
             .navigationTitle("Overview")
             .task { await viewModel.load() }
@@ -104,7 +105,7 @@ public struct OverviewView: View {
     /// for why a hero number gets this color rather than one of the
     /// urgency-signaling colors `PanelStatus` uses.
     private var readoutColor: Color {
-        GlassStyle.signalCyan(for: colorScheme)
+        theme.accent(colorScheme)
     }
 
     // MARK: - Status strip
@@ -127,7 +128,7 @@ public struct OverviewView: View {
         .padding(.bottom, 10)
         .overlay(
             Rectangle()
-                .fill(GlassStyle.panelLine(for: colorScheme))
+                .fill(theme.panelLine(colorScheme))
                 .frame(height: 1),
             alignment: .bottom
         )
@@ -192,7 +193,7 @@ public struct OverviewView: View {
     // MARK: - Finances card
 
     private var financesCard: some View {
-        GlassCard {
+        PanelCard {
             VStack(alignment: .leading, spacing: 16) {
                 panelHeader("Finances", systemImage: "dollarsign.circle", status: viewModel.financesStatus, action: onTapFinances)
                 HStack(alignment: .lastTextBaseline) {
@@ -271,7 +272,7 @@ public struct OverviewView: View {
         .chartYAxis {
             AxisMarks(position: .leading) { _ in
                 AxisGridLine(stroke: StrokeStyle(lineWidth: 1, dash: [2, 3]))
-                    .foregroundStyle(GlassStyle.panelLine(for: colorScheme))
+                    .foregroundStyle(theme.panelLine(colorScheme))
                 AxisValueLabel()
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(.secondary)
@@ -283,8 +284,8 @@ public struct OverviewView: View {
     private var incomeExpenseGauges: some View {
         let maxValue = max(totalIncome, totalExpense, 1)
         return VStack(spacing: 8) {
-            gaugeRow(label: "Income", value: totalIncome, maxValue: maxValue, color: GlassStyle.signalGreen(for: colorScheme))
-            gaugeRow(label: "Expense", value: totalExpense, maxValue: maxValue, color: GlassStyle.signalRed(for: colorScheme))
+            gaugeRow(label: "Income", value: totalIncome, maxValue: maxValue, color: theme.signalGreen(colorScheme))
+            gaugeRow(label: "Expense", value: totalExpense, maxValue: maxValue, color: theme.signalRed(colorScheme))
         }
     }
 
@@ -297,7 +298,7 @@ public struct OverviewView: View {
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 2)
-                        .fill(GlassStyle.panelLine(for: colorScheme))
+                        .fill(theme.panelLine(colorScheme))
                     RoundedRectangle(cornerRadius: 2)
                         .fill(color)
                         .frame(width: proxy.size.width * CGFloat(maxValue > 0 ? value / maxValue : 0))
@@ -322,17 +323,17 @@ public struct OverviewView: View {
     // MARK: - Work card
 
     private var workCard: some View {
-        GlassCard {
+        PanelCard {
             VStack(alignment: .leading, spacing: 16) {
                 panelHeader("Work", systemImage: "briefcase", status: viewModel.workStatus, action: onTapProjects)
                 projectsProgressContent
                 Divider()
                 taskList(
                     title: "Today", tasks: viewModel.tasksDueToday, emptyText: "Nothing due today",
-                    indicatorColor: GlassStyle.signalAmber(for: colorScheme))
+                    indicatorColor: theme.signalAmber(colorScheme))
                 taskList(
                     title: "Overdue", tasks: viewModel.tasksOverdue, emptyText: "Nothing overdue",
-                    indicatorColor: GlassStyle.signalRed(for: colorScheme))
+                    indicatorColor: theme.signalRed(colorScheme))
                 Divider()
                 completionRateContent
             }
@@ -436,15 +437,15 @@ public struct OverviewView: View {
     /// — this number is the one figure on the Work panel worth a second
     /// glance beyond the header lamp, so it earns its own signal color.
     private func completionRateColor(_ rate: Double) -> Color {
-        if rate >= 0.8 { return GlassStyle.signalGreen(for: colorScheme) }
-        if rate >= 0.5 { return GlassStyle.signalAmber(for: colorScheme) }
-        return GlassStyle.signalRed(for: colorScheme)
+        if rate >= 0.8 { return theme.signalGreen(colorScheme) }
+        if rate >= 0.5 { return theme.signalAmber(colorScheme) }
+        return theme.signalRed(colorScheme)
     }
 
     // MARK: - Productivity card
 
     private var productivityCard: some View {
-        GlassCard {
+        PanelCard {
             VStack(alignment: .leading, spacing: 16) {
                 panelHeader("Productivity", systemImage: "bolt.fill", status: productivityStatus)
                 miniTimerContent
@@ -478,7 +479,7 @@ public struct OverviewView: View {
                     Task { await timerViewModel.stop() }
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(GlassStyle.signalRed(for: colorScheme))
+                .tint(theme.signalRed(colorScheme))
             }
         } else {
             VStack(alignment: .leading, spacing: 8) {

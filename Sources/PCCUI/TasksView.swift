@@ -12,6 +12,7 @@ public struct TasksView: View {
     @State private var editingTask: PCCTask?
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
 
     public init(viewModel: TasksViewModel) {
         self.viewModel = viewModel
@@ -88,7 +89,7 @@ public struct TasksView: View {
                             }
                         } label: {
                             Image(systemName: task.isComplete ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(task.isComplete ? GlassStyle.signalGreen(for: colorScheme) : Color.secondary)
+                                .foregroundStyle(task.isComplete ? theme.signalGreen(colorScheme) : Color.secondary)
                         }
                         #if os(macOS)
                         .buttonStyle(.plain)
@@ -108,7 +109,7 @@ public struct TasksView: View {
                                 if let dueDate = task.dueDate {
                                     Text(dueDate, style: .date)
                                         .font(.system(size: 11, design: .monospaced))
-                                        .foregroundStyle(Self.isOverdue(task) ? GlassStyle.signalRed(for: colorScheme) : .secondary)
+                                        .foregroundStyle(Self.isOverdue(task) ? theme.signalRed(colorScheme) : .secondary)
                                 }
                             }
                         }
@@ -125,10 +126,10 @@ public struct TasksView: View {
                         }
                     }
                 }
-                .glassRows()
+                .panelRows()
             }
         }
-        .glassScreenBackground()
+        .panelScreenBackground()
     }
 
     // MARK: - Status strip
@@ -146,7 +147,7 @@ public struct TasksView: View {
         .padding(.bottom, 10)
         .overlay(
             Rectangle()
-                .fill(GlassStyle.panelLine(for: colorScheme))
+                .fill(theme.panelLine(colorScheme))
                 .frame(height: 1),
             alignment: .bottom
         )
@@ -275,16 +276,16 @@ struct TaskFormSheet: View {
                         if newValue != nil { projectID = nil }
                     }
                 }
-                .glassRows()
+                .panelRows()
                 Section("Deadline") {
                     Toggle("Has deadline", isOn: $hasDeadline)
                     if hasDeadline {
                         DatePicker("Due", selection: $dueDate, displayedComponents: .date)
                     }
                 }
-                .glassRows()
+                .panelRows()
             }
-            .glassScreenBackground()
+            .panelScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

@@ -11,6 +11,7 @@ public struct TimeEntriesView: View {
     @State private var editingEntry: TimeEntry?
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
 
     public init(viewModel: TimeEntriesViewModel) {
         self.viewModel = viewModel
@@ -99,7 +100,7 @@ public struct TimeEntriesView: View {
                                     StatusDot(.active)
                                     Text("Running")
                                         .pccPanelLabel()
-                                        .foregroundStyle(GlassStyle.signalCyan(for: colorScheme))
+                                        .foregroundStyle(theme.accent(colorScheme))
                                 }
                             }
                             if let notes = entry.notes {
@@ -121,10 +122,10 @@ public struct TimeEntriesView: View {
                         }
                     }
                 }
-                .glassRows()
+                .panelRows()
             }
         }
-        .glassScreenBackground()
+        .panelScreenBackground()
     }
 
     // MARK: - Status strip
@@ -142,7 +143,7 @@ public struct TimeEntriesView: View {
         .padding(.bottom, 10)
         .overlay(
             Rectangle()
-                .fill(GlassStyle.panelLine(for: colorScheme))
+                .fill(theme.panelLine(colorScheme))
                 .frame(height: 1),
             alignment: .bottom
         )
@@ -275,7 +276,7 @@ struct TimeEntryFormSheet: View {
                     TextField("Notes", text: $notes)
                         .pccField()
                 }
-                .glassRows()
+                .panelRows()
 
                 Section("Attached to") {
                     PCCMenuPicker(
@@ -312,9 +313,9 @@ struct TimeEntryFormSheet: View {
                             .foregroundStyle(.red)
                     }
                 }
-                .glassRows()
+                .panelRows()
             }
-            .glassScreenBackground()
+            .panelScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

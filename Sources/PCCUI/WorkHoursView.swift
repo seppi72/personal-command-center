@@ -10,6 +10,7 @@ public struct WorkHoursView: View {
     @ObservedObject private var viewModel: WorkHoursViewModel
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
 
     public init(viewModel: WorkHoursViewModel) {
         self.viewModel = viewModel
@@ -26,7 +27,7 @@ public struct WorkHoursView: View {
                     rowList
                 }
             }
-            .background(GlassBackground())
+            .background(PanelBackground())
             .navigationTitle("Work Hours")
             .task { await viewModel.load() }
             .refreshable { await viewModel.load() }
@@ -35,7 +36,7 @@ public struct WorkHoursView: View {
     }
 
     private var readoutColor: Color {
-        GlassStyle.signalCyan(for: colorScheme)
+        theme.accent(colorScheme)
     }
 
     /// A mono readout of the rollup's grand total — the one figure worth a
@@ -57,7 +58,7 @@ public struct WorkHoursView: View {
         .padding(.vertical, 10)
         .overlay(
             Rectangle()
-                .fill(GlassStyle.panelLine(for: colorScheme))
+                .fill(theme.panelLine(colorScheme))
                 .frame(height: 1),
             alignment: .bottom
         )
@@ -100,7 +101,7 @@ public struct WorkHoursView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .glassRows()
+        .panelRows()
         .scrollContentBackground(.hidden)
     }
 
