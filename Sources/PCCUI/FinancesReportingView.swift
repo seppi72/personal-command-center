@@ -26,28 +26,73 @@ import SwiftUI
 /// went up is green, one that went down is red, never a neutral brand
 /// color. Projected Balance's total is ruled off above it, the way a paper
 /// ledger rules off a sum, instead of sitting at plain caption weight.
+///
+/// "Trading Desk": this screen's own vibe on top of the shared chassis —
+/// the brief was "scream finance, stockbroker terminal," not just "stay
+/// on-system." Carries its own `ScreenTheme` (`.tradingDesk`, defined
+/// below) rather than the shared default: a gold primary accent in place
+/// of the app's cyan (money-coded, and deliberately a different hue/
+/// saturation from `signalAmber`'s "attention" orange so the two don't
+/// collide when both appear on this screen), plus a warmer near-black
+/// void in dark mode than the rest of the app. Green/red directional
+/// coloring is untouched — that convention was already correct, this
+/// screen just leans into it harder. The signature device is
+/// `TickerTape`: every Account's balance streaming past in a continuous
+/// scroll, stock-exchange-board style — the one thing that makes this
+/// read as a live feed rather than a report generated once.
 public struct FinancesReportingView: View {
     @ObservedObject private var viewModel: FinancesReportingViewModel
-
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.screenTheme) private var theme
 
     public init(viewModel: FinancesReportingViewModel) {
         self.viewModel = viewModel
     }
 
     public var body: some View {
+        FinancesReportingContent(viewModel: viewModel)
+            .screenTheme(.tradingDesk)
+    }
+}
+
+/// The screen's actual content, split out from `FinancesReportingView`
+/// itself so `.screenTheme(.tradingDesk)` — applied in that struct's body,
+/// above — is genuinely in effect by the time this struct's own `body`
+/// reads `@Environment(\.screenTheme)`. A view's environment modifiers
+/// only affect the subtree they wrap; they don't reach back into that
+/// same view's own body computation. `FinancesReportingView` calling
+/// `.screenTheme()` on *itself* would never change what `theme` resolved
+/// to had it tried to read the environment directly in its own body — the
+/// override only becomes visible to a genuinely separate child view,
+/// which is what this struct is. (Caught the hard way: the first build
+/// rendered the default cyan accent instead of gold, because the hero
+/// Net Worth color was computed directly in the struct that also applied
+/// the theme override, rather than in a child of it.)
+private struct FinancesReportingContent: View {
+    @ObservedObject var viewModel: FinancesReportingViewModel
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
+
+    var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    tickerStrip
+            VStack(spacing: 0) {
+                if !viewModel.accounts.isEmpty {
+                    TickerTape(accounts: viewModel.accounts)
+                        .padding(.horizontal, PCCChassis.outerMargin)
+                        .padding(.top, 12)
+                        .padding(.bottom, 4)
                 }
-                netWorthSection
-                accountBalanceSection
-                expensesSection
-                projectedBalanceSection
+                List {
+                    Section {
+                        tickerStrip
+                    }
+                    netWorthSection
+                    accountBalanceSection
+                    expensesSection
+                    projectedBalanceSection
+                }
+                .scrollContentBackground(.hidden)
             }
-            .panelScreenBackground()
+            .background(PanelBackground())
             .navigationTitle("Finances Reporting")
             .task { await viewModel.load() }
             .refreshable { await viewModel.load() }
@@ -385,14 +430,17 @@ public struct FinancesReportingView: View {
                 }
                 if let projected = viewModel.projectedBalance {
                     LabeledContent("Average Daily Net", value: Self.currency(projected.averageDailyNet))
-                    // Ruled off above the total, the way a paper ledger rules
-                    // off a sum — this is the screen's actual bottom line, so
-                    // it gets the same hero readout weight as Net Worth rather
-                    // than a plain caption.
-                    Rectangle()
-                        .fill(theme.panelLine(colorScheme))
-                        .frame(height: 1)
-                        .padding(.top, 4)
+                    // A double rule in the gold accent, the way a paper
+                    // ledger closes out its final sum with two rules
+                    // instead of one — this is the screen's actual bottom
+                    // line, so it earns the same "this is final" weight a
+                    // real ledger gives a closing total, not just a plain
+                    // hairline divider.
+                    VStack(spacing: 2) {
+                        Rectangle().fill(theme.accent(colorScheme).opacity(0.5)).frame(height: 1)
+                        Rectangle().fill(theme.accent(colorScheme).opacity(0.5)).frame(height: 1)
+                    }
+                    .padding(.top, 4)
                     HStack(alignment: .lastTextBaseline) {
                         Text("Projected Balance")
                             .pccPanelLabel()
@@ -445,5 +493,114 @@ public struct FinancesReportingView: View {
 
     private static func currency(_ amount: Double) -> String {
         amount.formatted(.currency(code: "PHP"))
+    }
+}
+
+// MARK: - Trading Desk theme
+
+extension ScreenTheme {
+    /// `FinancesReportingView`'s own vibe: a warmer, darker void than the
+    /// shared chassis default, and a gold accent standing in for cyan.
+    /// Signal colors (green/amber/red) are left as `ScreenTheme.default`'s
+    /// — this screen's directional up/down convention was already right,
+    /// nothing here needed to change it.
+    fileprivate static let tradingDesk = ScreenTheme(
+        panelVoid: { $0 == .dark ? Color(hex: 0x0C0A08) : Color(hex: 0xF8F6F1) },
+        panelSurface: { $0 == .dark ? Color(hex: 0x1A1610) : Color(hex: 0xFFFEFB) },
+        panelLine: { $0 == .dark ? Color(hex: 0x332C1F) : Color(hex: 0xE4DCC8) },
+        accent: { $0 == .dark ? Color(hex: 0xE8B923) : Color(hex: 0x8A6D14) },
+        signalGreen: ScreenTheme.default.signalGreen,
+        signalAmber: ScreenTheme.default.signalAmber,
+        signalRed: ScreenTheme.default.signalRed
+    )
+}
+
+// MARK: - Ticker tape
+
+/// This screen's signature device: every Account's balance streaming past
+/// in a continuous, looping horizontal scroll — the stock-exchange-board
+/// convention for "this is live," not a report generated once. Renders
+/// two back-to-back copies of the same row and animates offset from 0 to
+/// exactly one copy's width, on an unbounded linear repeat — since the
+/// second copy is identical, the loop point is invisible.
+private struct TickerTape: View {
+    let accounts: [Account]
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    @State private var rowWidth: CGFloat = 0
+    @State private var isAnimating = false
+
+    var body: some View {
+        HStack(spacing: 0) {
+            row
+            row
+        }
+        .fixedSize()
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: TapeWidthKey.self, value: proxy.size.width / 2)
+            }
+        )
+        .offset(x: isAnimating ? -rowWidth : 0)
+        .frame(height: 34, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .clipped()
+        .background(theme.panelSurface(colorScheme))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(theme.panelLine(colorScheme), lineWidth: 1)
+        )
+        .onPreferenceChange(TapeWidthKey.self) { width in
+            // Only the first real measurement starts the animation — this
+            // fires on every layout pass, and re-triggering it on later,
+            // near-identical widths would restart the scroll from 0 each
+            // time instead of leaving it running.
+            guard width > 0, rowWidth == 0 else { return }
+            rowWidth = width
+            guard !reduceMotion else { return }
+            withAnimation(.linear(duration: max(8, Double(width) / 40)).repeatForever(autoreverses: false)) {
+                isAnimating = true
+            }
+        }
+    }
+
+    private var row: some View {
+        HStack(spacing: 0) {
+            ForEach(accounts) { account in
+                tapeItem(for: account)
+            }
+        }
+    }
+
+    private func tapeItem(for account: Account) -> some View {
+        let color = account.balance < 0 ? theme.signalRed(colorScheme) : theme.signalGreen(colorScheme)
+        return HStack(spacing: 8) {
+            Text(account.name.uppercased())
+                .foregroundStyle(.secondary)
+            Text(Self.currency(account.balance))
+                .foregroundStyle(color)
+                .fontWeight(.semibold)
+        }
+        .font(.system(size: 11, design: .monospaced))
+        .padding(.horizontal, 18)
+        .padding(.vertical, 9)
+        .overlay(
+            Rectangle().fill(theme.panelLine(colorScheme)).frame(width: 1),
+            alignment: .trailing
+        )
+    }
+
+    private static func currency(_ amount: Double) -> String {
+        amount.formatted(.currency(code: "PHP").sign(strategy: .always()))
+    }
+}
+
+private struct TapeWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }

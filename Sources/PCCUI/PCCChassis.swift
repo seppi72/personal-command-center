@@ -131,6 +131,22 @@ extension View {
     /// that don't call this at all get `ScreenTheme.default`, which is why
     /// porting a screen onto this chassis is zero visual change until it
     /// explicitly opts into its own theme.
+    ///
+    /// **Call this from a screen's public wrapper view, not from the same
+    /// struct that reads `@Environment(\.screenTheme)` to build its own
+    /// body.** A view's environment modifiers only affect the subtree
+    /// below them — they never reach back into that same view's own body
+    /// computation. A screen's public `View` (the thing `PCCDesktop`
+    /// instantiates) should do nothing but
+    /// `SomeContent(...).screenTheme(.someTheme)`; the actual panels,
+    /// colors, and `@Environment(\.screenTheme)` reads belong in a
+    /// separate `SomeContent` struct underneath it. Skipping this split —
+    /// applying `.screenTheme()` and reading `\.screenTheme` in the same
+    /// struct — silently keeps every color computed in that struct's own
+    /// body on `ScreenTheme.default`, no matter what's passed here.
+    /// (`FinancesReportingView`/`FinancesReportingContent` is the worked
+    /// example: caught when the first build rendered the shared cyan
+    /// instead of the intended gold.)
     public func screenTheme(_ theme: ScreenTheme) -> some View {
         environment(\.screenTheme, theme)
     }
