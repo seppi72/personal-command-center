@@ -9,6 +9,7 @@ struct SyncStatusBadge: View {
     let syncStatus: PersonalCommitment.SyncStatus
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
 
     var body: some View {
         switch syncStatus {
@@ -17,7 +18,7 @@ struct SyncStatusBadge: View {
         case .failed:
             Label("Sync failed", systemImage: "exclamationmark.triangle.fill")
                 .labelStyle(.iconOnly)
-                .foregroundStyle(GlassStyle.signalRed(for: colorScheme))
+                .foregroundStyle(theme.signalRed(colorScheme))
         case .pending:
             Label("Syncing", systemImage: "arrow.triangle.2.circlepath")
                 .labelStyle(.iconOnly)

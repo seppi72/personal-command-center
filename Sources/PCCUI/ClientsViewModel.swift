@@ -9,21 +9,38 @@ import Foundation
 @MainActor
 public final class ClientsViewModel: ObservableObject {
     @Published public private(set) var clients: [PCCClient] = []
+    /// Every Project across every Client, loaded alongside `clients` —
+    /// the "Card Index" screen shows each Client's own Projects directly
+    /// on its card (`projects(for:)`), so this view model needs Project
+    /// data it previously had no reason to hold.
+    @Published public private(set) var projects: [Project] = []
     @Published public var errorMessage: String?
     @Published public private(set) var isLoading = false
 
     private let client: ClientsAPIClient
+    private let projectsClient: ProjectsAPIClient
 
-    public init(client: ClientsAPIClient) {
+    public init(client: ClientsAPIClient, projectsClient: ProjectsAPIClient) {
         self.client = client
+        self.projectsClient = projectsClient
     }
 
     public func load() async {
         isLoading = true
         defer { isLoading = false }
         await run(verb: "load") {
-            clients = try await client.listClients()
+            async let loadedClients = client.listClients()
+            async let loadedProjects = projectsClient.listProjects()
+            clients = try await loadedClients
+            projects = try await loadedProjects
         }
+    }
+
+    /// Every Project belonging to `client`, in whatever order the backend
+    /// returned them — the Card Index screen's whole reason for holding
+    /// `projects` at all.
+    public func projects(for client: PCCClient) -> [Project] {
+        projects.filter { $0.clientID == client.id }
     }
 
     public func createClient(name: String) async {

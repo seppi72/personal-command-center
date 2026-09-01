@@ -8,16 +8,31 @@ import SwiftUI
 /// "minimal" scope (mirrors `ProjectsView`/`TasksView`).
 public struct PersonalCommitmentsView: View {
     @ObservedObject private var viewModel: PersonalCommitmentsViewModel
-    @State private var isPresentingNewCommitmentSheet = false
-    @State private var editingCommitment: PersonalCommitment?
-
-    @Environment(\.colorScheme) private var colorScheme
 
     public init(viewModel: PersonalCommitmentsViewModel) {
         self.viewModel = viewModel
     }
 
     public var body: some View {
+        PersonalCommitmentsContent(viewModel: viewModel)
+            .screenTheme(.notebookPage)
+    }
+}
+
+/// The screen's actual content — split out from `PersonalCommitmentsView`
+/// itself so `.screenTheme(.notebookPage)` (applied in that struct's
+/// body, above) is genuinely in effect by the time this struct's own
+/// `body` reads `@Environment(\.screenTheme)`. See `View.screenTheme(_:)`'s
+/// doc comment in `PCCChassis.swift` for why the split is required.
+private struct PersonalCommitmentsContent: View {
+    @ObservedObject var viewModel: PersonalCommitmentsViewModel
+    @State private var isPresentingNewCommitmentSheet = false
+    @State private var editingCommitment: PersonalCommitment?
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
+
+    var body: some View {
         NavigationStack {
             Group {
                 if viewModel.commitments.isEmpty && !viewModel.isLoading {
@@ -26,6 +41,7 @@ public struct PersonalCommitmentsView: View {
                     commitmentList
                 }
             }
+            .background(PanelBackground())
             .navigationTitle("Personal Commitments")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
@@ -59,21 +75,28 @@ public struct PersonalCommitmentsView: View {
                     Button {
                         editingCommitment = commitment
                     } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(alignment: .firstTextBaseline) {
+                                // The one typographic break from every
+                                // other screen's sans/mono language —
+                                // this screen's whole signature, carrying
+                                // "more human, less instrument-panel" on
+                                // its own.
                                 Text(commitment.title)
+                                    .font(.system(size: 17, design: .serif))
                                 Spacer()
                                 SyncStatusBadge(syncStatus: commitment.syncStatus)
                             }
                             Text(commitment.startDate, style: .date)
-                                .font(.subheadline)
+                                .font(.system(size: 13, design: .serif).italic())
                                 .foregroundStyle(.secondary)
                             if let recurrenceRule = commitment.recurrenceRule {
                                 Text(recurrenceRule)
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(theme.accent(colorScheme))
                             }
                         }
+                        .padding(.vertical, 6)
                     }
                     #if os(macOS)
                     .buttonStyle(.plain)
@@ -87,28 +110,31 @@ public struct PersonalCommitmentsView: View {
                         }
                     }
                 }
-                .glassRows()
+                .notebookRows()
             }
         }
-        .glassScreenBackground()
+        .scrollContentBackground(.hidden)
     }
 
     // MARK: - Status strip
 
+    /// A plain italic sentence rather than every other screen's uppercase
+    /// tracked label — quieter, and read as something a person would
+    /// actually say, matching this screen's own brief.
     private var statusStrip: some View {
-        HStack(spacing: 10) {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
             StatusDot(overallStatus)
             Text(statusStripText)
-                .pccPanelLabel()
+                .font(.system(size: 15, design: .serif).italic())
                 .foregroundStyle(.secondary)
             Spacer()
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
-        .padding(.bottom, 10)
+        .padding(.bottom, 12)
         .overlay(
             Rectangle()
-                .fill(GlassStyle.panelLine(for: colorScheme))
+                .fill(theme.panelLine(colorScheme))
                 .frame(height: 1),
             alignment: .bottom
         )
@@ -127,17 +153,20 @@ public struct PersonalCommitmentsView: View {
 
     private var statusStripText: String {
         let count = viewModel.commitments.count
-        let noun = count == 1 ? "COMMITMENT" : "COMMITMENTS"
-        let flagText = failedSyncCount > 0 ? "\(failedSyncCount) SYNC FAILED" : "ALL SYNCED"
-        return "\(count) \(noun)   ·   \(flagText)"
+        let noun = count == 1 ? "commitment" : "commitments"
+        if failedSyncCount > 0 {
+            let failedNoun = failedSyncCount == 1 ? "one didn't sync" : "\(failedSyncCount) didn't sync"
+            return "\(count) \(noun) on your calendar — \(failedNoun)."
+        }
+        return "\(count) \(noun) on your calendar, all synced."
     }
 
     private var emptyState: some View {
         VStack(spacing: 8) {
             Text("No Personal Commitments")
-                .font(.headline)
+                .font(.system(size: 18, weight: .medium, design: .serif))
             Text("Tap + to schedule your first one.")
-                .font(.subheadline)
+                .font(.system(size: 14, design: .serif).italic())
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -212,9 +241,9 @@ struct PersonalCommitmentFormSheet: View {
                         options: [(UUID?.none, "None")] + courses.map { (Optional($0.id), $0.name) }
                     )
                 }
-                .glassRows()
+                .panelRows()
             }
-            .glassScreenBackground()
+            .panelScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -238,5 +267,62 @@ struct PersonalCommitmentFormSheet: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Notebook Page theme
+
+extension ScreenTheme {
+    /// `PersonalCommitmentsView`'s own vibe: a deliberate contrast from
+    /// the rest of the app, not another loud console device — warm paper
+    /// tones and a dusty-rose accent, quieter than the shared cyan/gold/
+    /// blue/orange/red/yellow already in use elsewhere. Not the cream +
+    /// terracotta combination that reads as a generic AI default — the
+    /// rose here is cooler and dustier than terracotta, and paired with
+    /// this screen's own serif typography rather than a high-contrast
+    /// serif display treatment. Signal colors are left as
+    /// `ScreenTheme.default`'s.
+    fileprivate static let notebookPage = ScreenTheme(
+        panelVoid: { $0 == .dark ? Color(hex: 0x221C16) : Color(hex: 0xF6EEE0) },
+        panelSurface: { $0 == .dark ? Color(hex: 0x2C241C) : Color(hex: 0xFFFBF3) },
+        panelLine: { $0 == .dark ? Color(hex: 0x4A3C2C) : Color(hex: 0xE8DCC8) },
+        accent: { $0 == .dark ? Color(hex: 0xE4A0B0) : Color(hex: 0xA85A6E) },
+        signalGreen: ScreenTheme.default.signalGreen,
+        signalAmber: ScreenTheme.default.signalAmber,
+        signalRed: ScreenTheme.default.signalRed
+    )
+}
+
+// MARK: - Notebook rows
+
+extension View {
+    /// The row-level background for this screen alone — a softer, larger
+    /// corner radius than the shared chassis's `panelRows()`, since this
+    /// screen's whole point is reading as *less* instrument-panel than
+    /// the rest of the app. A local equivalent of `panelRows()` rather
+    /// than a chassis-wide radius override, since only this screen wants
+    /// it — the rounder corners are this screen's own choice, not a
+    /// device other screens should default to.
+    fileprivate func notebookRows() -> some View {
+        modifier(NotebookRowsModifier())
+    }
+}
+
+private struct NotebookRowsModifier: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
+
+    func body(content: Content) -> some View {
+        content
+            .listRowBackground(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(theme.panelSurface(colorScheme))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .strokeBorder(theme.panelLine(colorScheme), lineWidth: 1)
+                    )
+                    .padding(.vertical, 3)
+            )
+            .listRowSeparator(.hidden)
     }
 }

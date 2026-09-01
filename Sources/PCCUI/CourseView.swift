@@ -10,15 +10,44 @@ import SwiftUI
 /// show a Project's Sprints.
 public struct CourseView: View {
     @ObservedObject private var viewModel: CoursesViewModel
-    @State private var isPresentingNewCourseSheet = false
-
-    @Environment(\.colorScheme) private var colorScheme
 
     public init(viewModel: CoursesViewModel) {
         self.viewModel = viewModel
     }
 
     public var body: some View {
+        CourseContent(viewModel: viewModel)
+            .screenTheme(.chalkboard)
+    }
+
+    /// e.g. "September 2026" — the Term's owner-facing rendering, shared by
+    /// the row caption in `CourseContent` (`CourseFormSheet` renders the
+    /// same two fields as editable controls instead) and by
+    /// `CourseDetailView`. Kept on this thin wrapper struct rather than on
+    /// `CourseContent` since it has no environment dependency and outlives
+    /// any one screen instance's theme.
+    static func termLabel(month: Int, year: Int) -> String {
+        let symbols = Calendar.current.monthSymbols
+        guard (1...12).contains(month), symbols.indices.contains(month - 1) else {
+            return "\(month)/\(year)"
+        }
+        return "\(symbols[month - 1]) \(year)"
+    }
+}
+
+/// The screen's actual content — split out from `CourseView` itself so
+/// `.screenTheme(.chalkboard)` (applied in that struct's body, above) is
+/// genuinely in effect by the time this struct's own `body` reads
+/// `@Environment(\.screenTheme)`. See `View.screenTheme(_:)`'s doc comment
+/// in `PCCChassis.swift` for why the split is required.
+private struct CourseContent: View {
+    @ObservedObject var viewModel: CoursesViewModel
+    @State private var isPresentingNewCourseSheet = false
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
+
+    var body: some View {
         NavigationStack {
             Group {
                 if viewModel.courses.isEmpty && !viewModel.isLoading {
@@ -73,18 +102,11 @@ public struct CourseView: View {
                             commitmentsViewModel: viewModel.makeCommitmentsViewModel(for: course)
                         )
                     } label: {
-                        VStack(alignment: .leading) {
-                            Text(course.name)
-                            Text(Self.termLabel(month: course.termMonth, year: course.termYear))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            if let dueDate = course.dueDate {
-                                Text(dueDate, style: .date)
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .foregroundStyle(Self.isOverdue(course) ? GlassStyle.signalRed(for: colorScheme) : .secondary)
-                            }
-                        }
+                        CourseRow(course: course, isOverdue: Self.isOverdue(course))
                     }
+                    #if os(macOS)
+                    .buttonStyle(.plain)
+                    #endif
                 }
                 .onDelete { offsets in
                     let toDelete = offsets.map { viewModel.courses[$0] }
@@ -94,10 +116,10 @@ public struct CourseView: View {
                         }
                     }
                 }
-                .glassRows()
+                .rosterRows()
             }
         }
-        .glassScreenBackground()
+        .panelScreenBackground()
     }
 
     // MARK: - Status strip
@@ -115,7 +137,7 @@ public struct CourseView: View {
         .padding(.bottom, 10)
         .overlay(
             Rectangle()
-                .fill(GlassStyle.panelLine(for: colorScheme))
+                .fill(theme.panelLine(colorScheme))
                 .frame(height: 1),
             alignment: .bottom
         )
@@ -147,7 +169,7 @@ public struct CourseView: View {
     private var emptyState: some View {
         VStack(spacing: 8) {
             Text("No Courses")
-                .font(.headline)
+                .font(.system(size: 18, weight: .bold, design: .rounded))
             Text("Tap + to create your first Course.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -160,17 +182,6 @@ public struct CourseView: View {
             get: { viewModel.errorMessage != nil },
             set: { isShowing in if !isShowing { viewModel.errorMessage = nil } }
         )
-    }
-
-    /// e.g. "September 2026" — the Term's owner-facing rendering, shared by
-    /// the row caption here (`CourseFormSheet` renders the same two fields
-    /// as editable controls instead).
-    static func termLabel(month: Int, year: Int) -> String {
-        let symbols = Calendar.current.monthSymbols
-        guard (1...12).contains(month), symbols.indices.contains(month - 1) else {
-            return "\(month)/\(year)"
-        }
-        return "\(symbols[month - 1]) \(year)"
     }
 }
 
@@ -225,7 +236,7 @@ struct CourseFormSheet: View {
                     TextField("Name", text: $name)
                         .pccField()
                 }
-                .glassRows()
+                .panelRows()
                 Section("Term") {
                     PCCMenuPicker(
                         "Month", selection: $termMonth,
@@ -233,16 +244,16 @@ struct CourseFormSheet: View {
                     )
                     Stepper("Year: \(termYear)", value: $termYear, in: 1900...3000)
                 }
-                .glassRows()
+                .panelRows()
                 Section("Deadline") {
                     Toggle("Has deadline", isOn: $hasDeadline)
                     if hasDeadline {
                         DatePicker("Due", selection: $dueDate, displayedComponents: .date)
                     }
                 }
-                .glassRows()
+                .panelRows()
             }
-            .glassScreenBackground()
+            .panelScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -294,6 +305,7 @@ struct CourseDetailView: View {
     @State private var editingCommitment: PersonalCommitment?
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
 
     /// The freshest known copy of `course` — falls back to the value passed
     /// in if `viewModel.courses` hasn't (yet) reflected an edit.
@@ -315,7 +327,7 @@ struct CourseDetailView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .glassRows()
+            .panelRows()
             Section("Tasks") {
                 listRows(
                     items: tasksViewModel.tasks,
@@ -336,7 +348,7 @@ struct CourseDetailView: View {
                             }
                         } label: {
                             Image(systemName: task.isComplete ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(task.isComplete ? GlassStyle.signalGreen(for: colorScheme) : Color.secondary)
+                                .foregroundStyle(task.isComplete ? theme.signalGreen(colorScheme) : Color.secondary)
                         }
                         #if os(macOS)
                         .buttonStyle(.plain)
@@ -366,7 +378,7 @@ struct CourseDetailView: View {
                     Label("Add Task", systemImage: "plus")
                 }
             }
-            .glassRows()
+            .panelRows()
             Section("Meetings") {
                 listRows(
                     items: commitmentsViewModel.commitments,
@@ -405,9 +417,9 @@ struct CourseDetailView: View {
                     Label("Add Meeting", systemImage: "plus")
                 }
             }
-            .glassRows()
+            .panelRows()
         }
-        .glassScreenBackground()
+        .panelScreenBackground()
         .navigationTitle(currentCourse.name)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -537,6 +549,165 @@ struct CourseDetailView: View {
         } else {
             ForEach(items, content: row)
                 .onDelete(perform: onDelete)
+        }
+    }
+}
+
+// MARK: - Chalkboard theme
+
+extension ScreenTheme {
+    /// `CourseView`'s own vibe: a lecture hall / chalkboard — cool ledger
+    /// paper in Light Mode (greyer than Commitments' warm cream or
+    /// Clients' ivory, so the three don't read as the same material), the
+    /// chalkboard itself in Dark Mode — deep slate green with chalk-white
+    /// ink — and a brass accent standing in for a chalk-holder or a
+    /// lecture hall's brass fittings. Signal colors left as
+    /// `ScreenTheme.default`'s.
+    fileprivate static let chalkboard = ScreenTheme(
+        panelVoid: { $0 == .dark ? Color(hex: 0x1E2B23) : Color(hex: 0xF0EDE1) },
+        panelSurface: { $0 == .dark ? Color(hex: 0x283A31) : Color(hex: 0xFAF8EE) },
+        panelLine: { $0 == .dark ? Color(hex: 0x3B4F42) : Color(hex: 0xD6D0B8) },
+        accent: { $0 == .dark ? Color(hex: 0xD9B36A) : Color(hex: 0x8A6A22) },
+        signalGreen: ScreenTheme.default.signalGreen,
+        signalAmber: ScreenTheme.default.signalAmber,
+        signalRed: ScreenTheme.default.signalRed
+    )
+}
+
+// MARK: - Roster row
+
+/// This screen's own row chrome — no bordered card per row (every other
+/// list-backed screen's `panelRows()`), just a dashed chalk-line under
+/// each row, since the signature device here (`TermBadge`) already carries
+/// the visual weight a card border would otherwise add. A local modifier
+/// rather than a chassis-wide alternative to `panelRows()`, since only
+/// this screen wants it — the roster look is this screen's own choice,
+/// not a device other screens should default to.
+extension View {
+    fileprivate func rosterRows() -> some View {
+        modifier(RosterRowModifier())
+    }
+}
+
+private struct RosterRowModifier: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
+
+    func body(content: Content) -> some View {
+        content
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            .overlay(alignment: .bottom) {
+                DashedLine()
+                    .stroke(theme.panelLine(colorScheme), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    .frame(height: 1)
+            }
+    }
+}
+
+/// A single horizontal dashed rule — one continuous subpath (see
+/// `View.screenTheme(_:)`'s sibling caution about multi-subpath `Shape`s
+/// in `PCCChassis.swift`; this shape only ever has the one line, but kept
+/// as a single `moveTo`/`addLine` pair on principle) rather than a plain
+/// `Rectangle`, since `Rectangle` has no dash style to give it a chalk
+/// texture.
+private struct DashedLine: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+        return path
+    }
+}
+
+// MARK: - Course row
+
+/// This screen's signature: a chalk-ring term badge — a dashed circle
+/// standing in for a lecture-hall room plate — leading each row, with the
+/// Course's name set in a rounded display face for a hand-chalk feel
+/// without depending on an unreliable custom "Chalkboard" font (per
+/// `PCCChassis.swift`'s own caution about `Font.custom` risking a silent
+/// fallback). The due date, when present, gets a chalk-underline that
+/// turns from brass to red once overdue.
+private struct CourseRow: View {
+    let course: Course
+    let isOverdue: Bool
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
+
+    var body: some View {
+        HStack(spacing: 14) {
+            TermBadge(month: course.termMonth, year: course.termYear)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(course.name)
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.primary)
+                Text(CourseView.termLabel(month: course.termMonth, year: course.termYear))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                if let dueDate = course.dueDate {
+                    dueBadge(dueDate)
+                        .padding(.top, 3)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 10)
+    }
+
+    private func dueBadge(_ dueDate: Date) -> some View {
+        Text("DUE \(Self.dueDateFormatter.string(from: dueDate).uppercased())")
+            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .foregroundStyle(isOverdue ? theme.signalRed(colorScheme) : theme.accent(colorScheme))
+            .padding(.bottom, 1)
+            .overlay(
+                Rectangle()
+                    .fill(isOverdue ? theme.signalRed(colorScheme) : theme.panelLine(colorScheme))
+                    .frame(height: 2),
+                alignment: .bottom
+            )
+    }
+
+    private static let dueDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        return formatter
+    }()
+}
+
+private struct TermBadge: View {
+    let month: Int
+    let year: Int
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
+
+    var body: some View {
+        Circle()
+            .strokeBorder(theme.accent(colorScheme), style: StrokeStyle(lineWidth: 1.5, dash: [3, 2]))
+            .frame(width: 46, height: 46)
+            .overlay(
+                Text(code)
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(theme.accent(colorScheme))
+            )
+    }
+
+    /// e.g. "FA26" — a lecture-hall room-plate-style short code (season +
+    /// 2-digit year) standing in for the full Term caption already shown
+    /// below it, so the badge reads at a glance instead of repeating text.
+    private var code: String {
+        "\(seasonCode)\(String(format: "%02d", year % 100))"
+    }
+
+    private var seasonCode: String {
+        switch month {
+        case 12, 1, 2: return "WI"
+        case 3...5: return "SP"
+        case 6...8: return "SU"
+        case 9...11: return "FA"
+        default: return "TM"
         }
     }
 }

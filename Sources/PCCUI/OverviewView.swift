@@ -10,17 +10,28 @@ import SwiftUI
 /// package's existing "minimal" scope (mirrors `DeadlinesView`/
 /// `TransactionsView`).
 ///
-/// Every panel header carries a `StatusDot` (`GlassDesignSystem.swift`)
+/// Every panel header carries a `StatusDot` (`PCCChassis.swift`)
 /// computed from the same data the panel shows — the deliberate "read the
 /// lamp, not every gauge" hierarchy device this screen is built around, so
 /// a glance at the top of the screen (or the status strip above the panels
 /// entirely) says what needs attention before you've read a single number.
 ///
+/// "Command Deck": this screen's own signature on top of the shared
+/// chassis, chosen for the one screen whose whole job is "am I in control
+/// right now" — `HUDCorners` frames the content in viewfinder/targeting-
+/// reticle brackets (you're watching a live instrument, not reading a
+/// static report), and the status strip's date is a real ticking clock
+/// rather than a static string, reinforcing that the panels below are
+/// live telemetry. Reuses the chassis's existing cyan/green/amber/red
+/// palette as-is (`ScreenTheme.default`) — the signature here is entirely
+/// in framing and motion, not a new color story.
+///
 /// Mostly a glance, with one deliberate exception: the Productivity panel's
 /// mini Timer lets the owner pick a Task/Project/Client/Course and
 /// start/stop right from here, reading and mutating the same shared
-/// `TimerViewModel` instance the full Timer screen uses — every other panel
-/// stays read-only, handing off to its full screen via a tappable header.
+/// `TimerViewModel` instance the Time Entries screen's own hero timer
+/// uses — every other panel stays read-only, handing off to its full
+/// screen via a tappable header.
 ///
 /// `Screen` (the sidebar's navigation enum) lives in the `PCCDesktop`
 /// executable target, not in this package, so this view can't reference it
@@ -35,14 +46,16 @@ public struct OverviewView: View {
     private let onTapProjects: () -> Void
     private let onTapTasks: () -> Void
 
-    /// The mini Timer's own pending selection, separate from the full
-    /// `TimerView`'s own identical `@State` — each screen owns its own
-    /// in-progress pick before `timerViewModel.start(container:)` commits
-    /// it, the same way two independent forms would.
+    /// The mini Timer's own pending selection, separate from
+    /// `TimeEntriesView`'s own identical `@State` for its hero timer — each
+    /// screen owns its own in-progress pick before
+    /// `timerViewModel.start(container:)` commits it, the same way two
+    /// independent forms would.
     @State private var timerSelectedKind: ContainerKind = .task
     @State private var timerSelectedItemID: UUID?
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
 
     /// Below this available width, Work and Productivity stack in one
     /// column instead of sitting side by side — narrower than that and two
@@ -67,25 +80,41 @@ public struct OverviewView: View {
     public var body: some View {
         NavigationStack {
             GeometryReader { proxy in
-                ScrollView {
-                    VStack(spacing: 16) {
-                        statusStrip
-                        financesCard
-                        if proxy.size.width > Self.wideLayoutThreshold {
-                            HStack(alignment: .top, spacing: 16) {
+                ZStack {
+                    ScrollView {
+                        VStack(spacing: 16) {
+                            statusStrip
+                            financesCard
+                            if proxy.size.width > Self.wideLayoutThreshold {
+                                HStack(alignment: .top, spacing: 16) {
+                                    workCard
+                                    productivityCard
+                                }
+                            } else {
                                 workCard
                                 productivityCard
                             }
-                        } else {
-                            workCard
-                            productivityCard
                         }
+                        .padding(PCCChassis.outerMargin)
+                        .frame(maxWidth: 900)
+                        .frame(maxWidth: .infinity)
                     }
-                    .padding(16)
-                    .frame(maxWidth: 900)
-                    .frame(maxWidth: .infinity)
+                    .panelScreenBackground()
+
+                    // Framed to the viewport, not the scroll content — sits
+                    // in its own ZStack layer rather than as a ScrollView
+                    // overlay so it stays put as a fixed frame instead of
+                    // scrolling away with the panels underneath.
+                    // Accent-colored, not the neutral hairline `panelLine`
+                    // divider color uses — a real HUD's reticle marks are
+                    // drawn in the display's own accent, and at panelLine's
+                    // contrast against the light-mode void these were
+                    // effectively invisible (caught on the first real
+                    // screenshot: no brackets visible at all).
+                    HUDCorners(color: theme.accent(colorScheme).opacity(0.55))
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                        .allowsHitTesting(false)
                 }
-                .glassScreenBackground()
             }
             .navigationTitle("Overview")
             .task { await viewModel.load() }
@@ -104,7 +133,7 @@ public struct OverviewView: View {
     /// for why a hero number gets this color rather than one of the
     /// urgency-signaling colors `PanelStatus` uses.
     private var readoutColor: Color {
-        GlassStyle.signalCyan(for: colorScheme)
+        theme.accent(colorScheme)
     }
 
     // MARK: - Status strip
@@ -112,7 +141,11 @@ public struct OverviewView: View {
     /// A one-line summary above every panel — the first thing read on this
     /// screen, before any individual panel's own detail. Answers "does
     /// anything need me right now?" without requiring a glance at three
-    /// separate panels to find out.
+    /// separate panels to find out. The right-hand side ticks a real clock
+    /// (`clockText(at:)`) rather than showing a static date — a still
+    /// timestamp reads as a report generated once; a moving one reads as
+    /// telemetry you're watching live, which is the whole point of the
+    /// "Command Deck" framing this screen carries.
     private var statusStrip: some View {
         HStack(spacing: 10) {
             StatusDot(overallStatus)
@@ -120,14 +153,16 @@ public struct OverviewView: View {
                 .pccPanelLabel()
                 .foregroundStyle(.secondary)
             Spacer()
-            Text(Self.dateStripText())
-                .pccPanelLabel()
-                .foregroundStyle(.secondary)
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Text(Self.clockText(at: context.date))
+                    .pccPanelLabel()
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(.bottom, 10)
         .overlay(
             Rectangle()
-                .fill(GlassStyle.panelLine(for: colorScheme))
+                .fill(theme.panelLine(colorScheme))
                 .frame(height: 1),
             alignment: .bottom
         )
@@ -144,10 +179,10 @@ public struct OverviewView: View {
         return "\(overdueText)   ·   \(timerText)"
     }
 
-    private static func dateStripText() -> String {
+    private static func clockText(at date: Date) -> String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "EEE, MMM d"
-        return formatter.string(from: Date()).uppercased()
+        formatter.dateFormat = "EEE, MMM d — HH:mm:ss"
+        return formatter.string(from: date).uppercased()
     }
 
     // MARK: - Panel header
@@ -192,7 +227,7 @@ public struct OverviewView: View {
     // MARK: - Finances card
 
     private var financesCard: some View {
-        GlassCard {
+        PanelCard {
             VStack(alignment: .leading, spacing: 16) {
                 panelHeader("Finances", systemImage: "dollarsign.circle", status: viewModel.financesStatus, action: onTapFinances)
                 HStack(alignment: .lastTextBaseline) {
@@ -271,7 +306,7 @@ public struct OverviewView: View {
         .chartYAxis {
             AxisMarks(position: .leading) { _ in
                 AxisGridLine(stroke: StrokeStyle(lineWidth: 1, dash: [2, 3]))
-                    .foregroundStyle(GlassStyle.panelLine(for: colorScheme))
+                    .foregroundStyle(theme.panelLine(colorScheme))
                 AxisValueLabel()
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(.secondary)
@@ -283,8 +318,8 @@ public struct OverviewView: View {
     private var incomeExpenseGauges: some View {
         let maxValue = max(totalIncome, totalExpense, 1)
         return VStack(spacing: 8) {
-            gaugeRow(label: "Income", value: totalIncome, maxValue: maxValue, color: GlassStyle.signalGreen(for: colorScheme))
-            gaugeRow(label: "Expense", value: totalExpense, maxValue: maxValue, color: GlassStyle.signalRed(for: colorScheme))
+            gaugeRow(label: "Income", value: totalIncome, maxValue: maxValue, color: theme.signalGreen(colorScheme))
+            gaugeRow(label: "Expense", value: totalExpense, maxValue: maxValue, color: theme.signalRed(colorScheme))
         }
     }
 
@@ -297,7 +332,7 @@ public struct OverviewView: View {
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 2)
-                        .fill(GlassStyle.panelLine(for: colorScheme))
+                        .fill(theme.panelLine(colorScheme))
                     RoundedRectangle(cornerRadius: 2)
                         .fill(color)
                         .frame(width: proxy.size.width * CGFloat(maxValue > 0 ? value / maxValue : 0))
@@ -322,17 +357,17 @@ public struct OverviewView: View {
     // MARK: - Work card
 
     private var workCard: some View {
-        GlassCard {
+        PanelCard {
             VStack(alignment: .leading, spacing: 16) {
                 panelHeader("Work", systemImage: "briefcase", status: viewModel.workStatus, action: onTapProjects)
                 projectsProgressContent
                 Divider()
                 taskList(
                     title: "Today", tasks: viewModel.tasksDueToday, emptyText: "Nothing due today",
-                    indicatorColor: GlassStyle.signalAmber(for: colorScheme))
+                    indicatorColor: theme.signalAmber(colorScheme))
                 taskList(
                     title: "Overdue", tasks: viewModel.tasksOverdue, emptyText: "Nothing overdue",
-                    indicatorColor: GlassStyle.signalRed(for: colorScheme))
+                    indicatorColor: theme.signalRed(colorScheme))
                 Divider()
                 completionRateContent
             }
@@ -436,15 +471,15 @@ public struct OverviewView: View {
     /// — this number is the one figure on the Work panel worth a second
     /// glance beyond the header lamp, so it earns its own signal color.
     private func completionRateColor(_ rate: Double) -> Color {
-        if rate >= 0.8 { return GlassStyle.signalGreen(for: colorScheme) }
-        if rate >= 0.5 { return GlassStyle.signalAmber(for: colorScheme) }
-        return GlassStyle.signalRed(for: colorScheme)
+        if rate >= 0.8 { return theme.signalGreen(colorScheme) }
+        if rate >= 0.5 { return theme.signalAmber(colorScheme) }
+        return theme.signalRed(colorScheme)
     }
 
     // MARK: - Productivity card
 
     private var productivityCard: some View {
-        GlassCard {
+        PanelCard {
             VStack(alignment: .leading, spacing: 16) {
                 panelHeader("Productivity", systemImage: "bolt.fill", status: productivityStatus)
                 miniTimerContent
@@ -478,7 +513,7 @@ public struct OverviewView: View {
                     Task { await timerViewModel.stop() }
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(GlassStyle.signalRed(for: colorScheme))
+                .tint(theme.signalRed(colorScheme))
             }
         } else {
             VStack(alignment: .leading, spacing: 8) {
@@ -502,7 +537,8 @@ public struct OverviewView: View {
     }
 
     /// The mini Timer's compact Task/Project/Client/Course tab row — reuses
-    /// `TimerView`'s own `ContainerKind` enum rather than a second copy.
+    /// the shared `ContainerKind` enum (`TimerViewModel.swift`) rather than
+    /// a second copy.
     /// Switching tabs clears `timerSelectedItemID`: an id from the old
     /// kind's list wouldn't mean anything against the new kind's items.
     private var miniKindTabs: some View {
@@ -547,7 +583,10 @@ public struct OverviewView: View {
         }
     }
 
-    /// Mirrors `TimerView.containerLabel(for:)`.
+    /// Mirrors `TimeEntriesViewModel.containerLabel(for:)`, against
+    /// `timerViewModel`'s own copies of the same picker lists rather than
+    /// `TimeEntriesViewModel`'s, since this panel only ever observes
+    /// `timerViewModel`.
     private func timerContainerLabel(for entry: TimeEntry) -> String {
         if let taskID = entry.taskID {
             return timerViewModel.tasks.first { $0.id == taskID }?.title ?? "Unknown Task"
@@ -564,7 +603,7 @@ public struct OverviewView: View {
         return "Unattached"
     }
 
-    /// Mirrors `TimerView.formattedElapsed(_:)`.
+    /// Mirrors `TimeEntriesView.formattedElapsed(_:)`.
     private static func formattedElapsed(_ seconds: TimeInterval) -> String {
         let total = max(0, Int(seconds))
         let hours = total / 3600
@@ -625,5 +664,59 @@ public struct OverviewView: View {
 
     private static func currency(_ amount: Double) -> String {
         amount.formatted(.currency(code: "PHP"))
+    }
+}
+
+// MARK: - HUD corners
+
+/// This screen's signature framing device: four independent viewfinder/
+/// targeting-reticle corner marks around the content area, rather than a
+/// single full-rectangle border stroke — a complete border reads as a
+/// panel outline (decoration); four open corners read as a frame you're
+/// looking *through*, the same device a camera viewfinder or a HUD uses to
+/// say "this is what's being tracked" without boxing it in on every side.
+/// Scoped to `OverviewView` alone, not promoted to the shared chassis —
+/// this is Overview's own vibe, not a device every screen should reach
+/// for.
+private struct HUDCorners: View {
+    var color: Color
+
+    private let length: CGFloat = 22
+    private let thickness: CGFloat = 2
+
+    var body: some View {
+        ZStack {
+            mark(top: true, leading: true)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            mark(top: true, leading: false)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            mark(top: false, leading: true)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            mark(top: false, leading: false)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+        }
+    }
+
+    /// One "L": a vertical stroke on whichever side (`leading`) plus a
+    /// horizontal stroke on whichever edge (`top`), meeting at that
+    /// corner. Built as a *single* continuous subpath (moveTo once, two
+    /// addLines through the shared corner vertex) rather than two
+    /// separate move/line pairs — the two-subpath version silently
+    /// dropped its vertical arm specifically for the top-leading corner,
+    /// where both subpaths' `move(to:)` happened to land on the exact
+    /// same point (0, 0); one continuous path has no duplicate moveTo to
+    /// trip over, for any corner.
+    private func mark(top: Bool, leading: Bool) -> some View {
+        let cornerX: CGFloat = leading ? 0 : length
+        let cornerY: CGFloat = top ? 0 : length
+        let verticalFarY: CGFloat = top ? length : 0
+        let horizontalFarX: CGFloat = leading ? length : 0
+        return Path { path in
+            path.move(to: CGPoint(x: cornerX, y: verticalFarY))
+            path.addLine(to: CGPoint(x: cornerX, y: cornerY))
+            path.addLine(to: CGPoint(x: horizontalFarX, y: cornerY))
+        }
+        .stroke(color, style: StrokeStyle(lineWidth: thickness, lineCap: .square, lineJoin: .miter))
+        .frame(width: length, height: length)
     }
 }

@@ -29,9 +29,9 @@ public struct FinanceBucket: Identifiable, Sendable {
 /// stays out of the general-purpose `TasksViewModel`/`FinancesReportingViewModel`
 /// every other screen relies on unfiltered. The Timer itself is a partial
 /// exception: the Productivity card reads and mutates the same shared
-/// `TimerViewModel` instance the full Timer screen uses (passed into
-/// `OverviewView.init` separately), rather than this view model owning any
-/// Timer state of its own.
+/// `TimerViewModel` instance the Time Entries screen's own hero timer uses
+/// (passed into `OverviewView.init` separately), rather than this view
+/// model owning any Timer state of its own.
 ///
 /// `ObservableObject` rather than the newer `@Observable` macro, since that
 /// macro needs iOS 17/macOS 14 and this package targets iOS 16/macOS 13

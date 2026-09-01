@@ -14,16 +14,31 @@ import SwiftUI
 /// calendar, at a glance" view spec #1 asks for on top of it.
 public struct CalendarView: View {
     @ObservedObject private var viewModel: CalendarViewModel
-    @State private var isPresentingNewCommitmentSheet = false
-    @State private var editingCommitment: PersonalCommitment?
-
-    @Environment(\.colorScheme) private var colorScheme
 
     public init(viewModel: CalendarViewModel) {
         self.viewModel = viewModel
     }
 
     public var body: some View {
+        CalendarContent(viewModel: viewModel)
+            .screenTheme(.departuresBoard)
+    }
+}
+
+/// The screen's actual content — split out from `CalendarView` itself so
+/// `.screenTheme(.departuresBoard)` (applied in that struct's body, above)
+/// is genuinely in effect by the time this struct's own `body` reads
+/// `@Environment(\.screenTheme)`. See `View.screenTheme(_:)`'s doc comment
+/// in `PCCChassis.swift` for why the split is required.
+private struct CalendarContent: View {
+    @ObservedObject var viewModel: CalendarViewModel
+    @State private var isPresentingNewCommitmentSheet = false
+    @State private var editingCommitment: PersonalCommitment?
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
+
+    var body: some View {
         NavigationStack {
             Group {
                 if viewModel.entries.isEmpty && !viewModel.isLoading {
@@ -32,6 +47,7 @@ public struct CalendarView: View {
                     entryList
                 }
             }
+            .background(PanelBackground())
             .navigationTitle("Calendar")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
@@ -75,10 +91,10 @@ public struct CalendarView: View {
                         }
                     }
                 }
-                .glassRows()
+                .panelRows()
             }
         }
-        .glassScreenBackground()
+        .scrollContentBackground(.hidden)
     }
 
     // MARK: - Status strip
@@ -96,7 +112,7 @@ public struct CalendarView: View {
         .padding(.bottom, 10)
         .overlay(
             Rectangle()
-                .fill(GlassStyle.panelLine(for: colorScheme))
+                .fill(theme.panelLine(colorScheme))
                 .frame(height: 1),
             alignment: .bottom
         )
@@ -155,23 +171,20 @@ public struct CalendarView: View {
     /// the trailing badge — a `SyncStatusBadge` for a Commitment, a lock
     /// glyph for a mirrored event.
     private func rowContent(for entry: CalendarEntry, commitment: PersonalCommitment?) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack {
-                Text(entry.title)
-                Spacer()
-                if let commitment {
-                    SyncStatusBadge(syncStatus: commitment.syncStatus)
-                } else {
-                    Label("Read-only", systemImage: "lock.fill")
-                        .labelStyle(.iconOnly)
-                        .foregroundStyle(.secondary)
-                        .accessibilityLabel("Read-only, mirrored from your external Calendar")
-                }
+        HStack(spacing: 14) {
+            SplitFlapDate(date: entry.startDate)
+            Text(entry.title)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if let commitment {
+                SyncStatusBadge(syncStatus: commitment.syncStatus)
+            } else {
+                Label("Read-only", systemImage: "lock.fill")
+                    .labelStyle(.iconOnly)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Read-only, mirrored from your external Calendar")
             }
-            Text(entry.startDate, style: .date)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
         }
+        .padding(.vertical, 6)
         .foregroundStyle(entry.isEditable ? .primary : .secondary)
     }
 
@@ -184,5 +197,80 @@ public struct CalendarView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - Departures Board theme
+
+extension ScreenTheme {
+    /// `CalendarView`'s own vibe: a Solari split-flap departures display.
+    /// A chrome-yellow accent — colder and brighter than Finance's gold
+    /// or Tasks' safety-orange, so the three don't blur together in the
+    /// sidebar. Signal colors are left as `ScreenTheme.default`'s.
+    fileprivate static let departuresBoard = ScreenTheme(
+        panelVoid: { $0 == .dark ? Color(hex: 0x0E0E0A) : Color(hex: 0xF3F1EA) },
+        panelSurface: { $0 == .dark ? Color(hex: 0x1C1B14) : Color(hex: 0xFFFFFF) },
+        panelLine: { $0 == .dark ? Color(hex: 0x38361F) : Color(hex: 0xDDD8C8) },
+        accent: { $0 == .dark ? Color(hex: 0xF2C230) : Color(hex: 0xA9820A) },
+        signalGreen: ScreenTheme.default.signalGreen,
+        signalAmber: ScreenTheme.default.signalAmber,
+        signalRed: ScreenTheme.default.signalRed
+    )
+}
+
+// MARK: - Split-flap date
+
+/// This screen's signature device: every date renders as a row of
+/// individually tiled characters with a seam line through the middle —
+/// the Solari-board convention every airport/train departures display
+/// uses — instead of a plain date string.
+private struct SplitFlapDate: View {
+    let date: Date
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
+
+    private static let formatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        return formatter
+    }()
+
+    private var characters: [Character] {
+        Array(Self.formatter.string(from: date).uppercased())
+    }
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(Array(characters.enumerated()), id: \.offset) { _, character in
+                if character == " " {
+                    Color.clear.frame(width: 6)
+                } else {
+                    tile(character)
+                }
+            }
+        }
+        // A fixed number of tile slots (the longest this format ever
+        // produces, "MMM DD" = 6 characters) so every row's date column
+        // lines up regardless of how many characters its own date
+        // actually rendered — a 1-digit day would otherwise be a
+        // narrower column than a 2-digit one.
+        .frame(width: 6 * 18, alignment: .leading)
+    }
+
+    private func tile(_ character: Character) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .fill(colorScheme == .dark ? Color(hex: 0x030302) : Color(hex: 0x14130D))
+            Text(String(character))
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .foregroundStyle(theme.accent(colorScheme))
+            // The flap seam — the horizontal split every physical
+            // Solari-board character has across its middle.
+            Rectangle()
+                .fill(Color.black.opacity(0.55))
+                .frame(height: 1)
+        }
+        .frame(width: 15, height: 22)
     }
 }

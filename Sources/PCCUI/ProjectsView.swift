@@ -1,22 +1,46 @@
 import SwiftUI
 
-/// A slim progress bar plus a percent label — a Project's "% of Tasks done"
-/// indicator, shared by `ProjectsView`'s row and `ProjectDetailView`'s
-/// header (a free function, not a method, since both types need it).
-/// `ProgressView` rather than a `Chart` here: a full chart per row would be
-/// visual noise in a list this dense — the real chart lives on the Overview
-/// dashboard's "Projects Progress" widget, which shows every Project at
-/// once. Tinted with this system's readout-cyan accent rather than the
-/// generic `.accentColor` a default `ProgressView` would use.
-func projectProgressBar(_ fraction: Double, colorScheme: ColorScheme) -> some View {
-    HStack(spacing: 8) {
-        ProgressView(value: fraction)
-            .tint(GlassStyle.signalCyan(for: colorScheme))
+/// A Project's "% of Tasks done" indicator, shared by `ProjectsView`'s row
+/// and `ProjectDetailView`'s header (a free function, not a method, since
+/// both types need it) — a "dimension line" in the drafting sense: tick
+/// marks at both ends and a measured span in between, the convention an
+/// architectural drawing uses to call out a length, rather than a default
+/// rounded `ProgressView` pill. `Projects`' own signature device, per its
+/// "Drafting Table" vibe (`ScreenTheme.draftingTable` below) — everything
+/// on this screen is meant to read like a measurement on a blueprint, and
+/// a plain progress bar doesn't carry that association the way this does.
+func projectProgressBar(_ fraction: Double, colorScheme: ColorScheme, theme: ScreenTheme) -> some View {
+    HStack(spacing: 10) {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Rectangle()
+                    .fill(theme.panelLine(colorScheme))
+                    .frame(height: 1)
+                    .frame(maxHeight: .infinity, alignment: .center)
+                Rectangle()
+                    .fill(theme.accent(colorScheme))
+                    .frame(width: proxy.size.width * CGFloat(fraction), height: 3)
+                    .frame(maxHeight: .infinity, alignment: .center)
+                // The two end ticks — fixed at the track's own edges, not
+                // at the fraction point, since a dimension line's ticks
+                // mark the span being measured, not the current reading.
+                tick(theme: theme, colorScheme: colorScheme).frame(width: 1)
+                tick(theme: theme, colorScheme: colorScheme)
+                    .frame(width: 1)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+        }
+        .frame(height: 9)
         Text(fraction, format: .percent.precision(.fractionLength(0)))
             .font(.system(size: 11, design: .monospaced))
             .foregroundStyle(.secondary)
             .frame(minWidth: 36, alignment: .trailing)
     }
+}
+
+/// One dimension-line end tick, shared by both ends in `projectProgressBar`.
+private func tick(theme: ScreenTheme, colorScheme: ColorScheme) -> some View {
+    Rectangle().fill(theme.panelLine(colorScheme))
 }
 
 /// Minimal Mac/iOS screen for ticket #3: lists Projects, and supports
@@ -27,15 +51,32 @@ func projectProgressBar(_ fraction: Double, colorScheme: ColorScheme) -> some Vi
 /// edit sheet directly — editing moved to that screen's own toolbar.
 public struct ProjectsView: View {
     @ObservedObject private var viewModel: ProjectsViewModel
-    @State private var isPresentingNewProjectSheet = false
-
-    @Environment(\.colorScheme) private var colorScheme
 
     public init(viewModel: ProjectsViewModel) {
         self.viewModel = viewModel
     }
 
     public var body: some View {
+        ProjectsContent(viewModel: viewModel)
+            .screenTheme(.draftingTable)
+    }
+}
+
+/// The screen's actual content — split out from `ProjectsView` itself so
+/// `.screenTheme(.draftingTable)` (applied in that struct's body, above)
+/// is genuinely in effect by the time this struct's own `body` reads
+/// `@Environment(\.screenTheme)`. See `View.screenTheme(_:)`'s doc comment
+/// in `PCCChassis.swift` for why the split is required, not optional —
+/// `FinancesReportingView`/`FinancesReportingContent` hit this the hard
+/// way first.
+private struct ProjectsContent: View {
+    @ObservedObject var viewModel: ProjectsViewModel
+    @State private var isPresentingNewProjectSheet = false
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
+
+    var body: some View {
         NavigationStack {
             Group {
                 if viewModel.projects.isEmpty && !viewModel.isLoading {
@@ -96,7 +137,7 @@ public struct ProjectsView: View {
                                     .foregroundStyle(.secondary)
                             }
                             if let fraction = viewModel.completionFraction(for: project) {
-                                projectProgressBar(fraction, colorScheme: colorScheme)
+                                projectProgressBar(fraction, colorScheme: colorScheme, theme: theme)
                             }
                         }
                         .padding(.vertical, 4)
@@ -110,10 +151,11 @@ public struct ProjectsView: View {
                         }
                     }
                 }
-                .glassRows()
+                .panelRows()
             }
         }
-        .glassScreenBackground()
+        .scrollContentBackground(.hidden)
+        .background(DraftingGridBackground())
     }
 
     // MARK: - Status strip
@@ -131,7 +173,7 @@ public struct ProjectsView: View {
         .padding(.bottom, 10)
         .overlay(
             Rectangle()
-                .fill(GlassStyle.panelLine(for: colorScheme))
+                .fill(theme.panelLine(colorScheme))
                 .frame(height: 1),
             alignment: .bottom
         )
@@ -171,6 +213,7 @@ public struct ProjectsView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(DraftingGridBackground())
     }
 
     private var isShowingError: Binding<Bool> {
@@ -217,16 +260,16 @@ struct ProjectFormSheet: View {
                     TextField("Name", text: $name)
                         .pccField()
                 }
-                .glassRows()
+                .panelRows()
                 Section("Deadline") {
                     Toggle("Has deadline", isOn: $hasDeadline)
                     if hasDeadline {
                         DatePicker("Due", selection: $dueDate, displayedComponents: .date)
                     }
                 }
-                .glassRows()
+                .panelRows()
             }
-            .glassScreenBackground()
+            .panelScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -262,6 +305,7 @@ struct ProjectDetailView: View {
     @State private var editingSprint: Sprint?
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
 
     /// The freshest known copy of `project` — falls back to the value
     /// passed in if `viewModel.projects` hasn't (yet) reflected an edit.
@@ -280,10 +324,10 @@ struct ProjectDetailView: View {
                         .foregroundStyle(.secondary)
                 }
                 if let fraction = viewModel.completionFraction(for: currentProject) {
-                    projectProgressBar(fraction, colorScheme: colorScheme)
+                    projectProgressBar(fraction, colorScheme: colorScheme, theme: theme)
                 }
             }
-            .glassRows()
+            .panelRows()
             Section("Sprints") {
                 if sprintsViewModel.sprints.isEmpty {
                     Text("No Sprints yet.")
@@ -319,9 +363,10 @@ struct ProjectDetailView: View {
                     Label("Add Sprint", systemImage: "plus")
                 }
             }
-            .glassRows()
+            .panelRows()
         }
-        .glassScreenBackground()
+        .scrollContentBackground(.hidden)
+        .background(DraftingGridBackground())
         .navigationTitle(currentProject.name)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -415,9 +460,9 @@ struct SprintFormSheet: View {
                     DatePicker("Start", selection: $startDate, displayedComponents: .date)
                     DatePicker("End", selection: $endDate, displayedComponents: .date)
                 }
-                .glassRows()
+                .panelRows()
             }
-            .glassScreenBackground()
+            .panelScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -435,5 +480,77 @@ struct SprintFormSheet: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Drafting Table theme
+
+extension ScreenTheme {
+    /// `ProjectsView`'s own vibe: everything on this screen should read
+    /// like a measurement on a blueprint. A technical blue accent in
+    /// place of the app's teal-cyan and Finance's gold, and — unlike a
+    /// generic "just go dark grey" dark mode — a dark mode that stays
+    /// genuinely blue-toned throughout, since a real blueprint sheet
+    /// doesn't lose its color at night, it just prints white-on-blue
+    /// instead of blue-on-white. Signal colors are left as
+    /// `ScreenTheme.default`'s — no urgency semantic needed changing here.
+    fileprivate static let draftingTable = ScreenTheme(
+        panelVoid: { $0 == .dark ? Color(hex: 0x0B2647) : Color(hex: 0xF2F6FC) },
+        panelSurface: { $0 == .dark ? Color(hex: 0x123661) : Color(hex: 0xFFFFFF) },
+        panelLine: { $0 == .dark ? Color(hex: 0x2C5B96) : Color(hex: 0xC7D6EC) },
+        accent: { $0 == .dark ? Color(hex: 0xD9E8FF) : Color(hex: 0x2F6FE4) },
+        signalGreen: ScreenTheme.default.signalGreen,
+        signalAmber: ScreenTheme.default.signalAmber,
+        signalRed: ScreenTheme.default.signalRed
+    )
+}
+
+// MARK: - Drafting grid background
+
+/// This screen's signature device: an engineering-graph-paper grid behind
+/// every panel — a fine 1-unit grid plus a heavier line every 5 units,
+/// the real drafting-paper convention — instead of the shared chassis's
+/// plain void + radial glow. Derives both grid tones from the active
+/// theme's own `panelLine` color (full opacity for the heavy lines, a
+/// diluted version for the fine ones) rather than adding bespoke grid
+/// tokens to `ScreenTheme` for a device only this screen uses.
+private struct DraftingGridBackground: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
+
+    private let cell: CGFloat = 14
+    private let heavyEvery = 5
+
+    var body: some View {
+        Canvas { context, size in
+            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(theme.panelVoid(colorScheme)))
+
+            var column = 0
+            var x: CGFloat = 0
+            while x <= size.width {
+                var path = Path()
+                path.move(to: CGPoint(x: x, y: 0))
+                path.addLine(to: CGPoint(x: x, y: size.height))
+                context.stroke(path, with: .color(lineColor(heavy: column % heavyEvery == 0)), lineWidth: 1)
+                x += cell
+                column += 1
+            }
+
+            var row = 0
+            var y: CGFloat = 0
+            while y <= size.height {
+                var path = Path()
+                path.move(to: CGPoint(x: 0, y: y))
+                path.addLine(to: CGPoint(x: size.width, y: y))
+                context.stroke(path, with: .color(lineColor(heavy: row % heavyEvery == 0)), lineWidth: 1)
+                y += cell
+                row += 1
+            }
+        }
+        .ignoresSafeArea()
+    }
+
+    private func lineColor(heavy: Bool) -> Color {
+        heavy ? theme.panelLine(colorScheme) : theme.panelLine(colorScheme).opacity(0.4)
     }
 }
