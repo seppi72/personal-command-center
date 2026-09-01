@@ -91,6 +91,18 @@ private struct FinancesReportingContent: View {
                     projectedBalanceSection
                 }
                 .scrollContentBackground(.hidden)
+                // Padding the `List` itself, not a per-row inset: on macOS,
+                // `.listRowInsets` only repositions a row's own foreground
+                // content — a `.listRowBackground` view (what `panelRows()`
+                // uses for each chart's visible card fill) keeps painting
+                // edge-to-edge regardless, so a per-row inset alone leaves
+                // every chart card still touching the window edge. Shrinking
+                // the whole `List`'s own frame instead moves everything
+                // inside it together, cards included. Same fix, same
+                // reasoning, as `TasksView`'s own `List` padding — this was
+                // the one screen still missing it (caught via screenshot:
+                // chart cards flush against both window edges).
+                .padding(.horizontal, PCCChassis.outerMargin)
             }
             .background(PanelBackground())
             .navigationTitle("Finances Reporting")
@@ -519,10 +531,14 @@ extension ScreenTheme {
 
 /// This screen's signature device: every Account's balance streaming past
 /// in a continuous, looping horizontal scroll — the stock-exchange-board
-/// convention for "this is live," not a report generated once. Renders
-/// two back-to-back copies of the same row and animates offset from 0 to
-/// exactly one copy's width, on an unbounded linear repeat — since the
-/// second copy is identical, the loop point is invisible.
+/// convention for "this is live," not a report generated once. Renders two
+/// back-to-back copies of a "block" — the full Account list repeated just
+/// enough times to be at least as wide as the visible bar — and animates
+/// offset from 0 to exactly one block's width, on an unbounded linear
+/// repeat — since the second copy is identical, the loop point is
+/// invisible, and because the block is never narrower than the bar itself,
+/// there's always real content to show, so the tape reads as one Account
+/// circling back into the next rather than trailing off into blank space.
 private struct TickerTape: View {
     let accounts: [Account]
 
@@ -530,46 +546,79 @@ private struct TickerTape: View {
     @Environment(\.screenTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @State private var rowWidth: CGFloat = 0
+    /// Width of exactly one pass over every Account — the unit this
+    /// marquee repeats, and the unit its scroll offset is measured in.
+    @State private var singleRowWidth: CGFloat = 0
     @State private var isAnimating = false
 
     var body: some View {
-        // The looping row needs `.fixedSize()` so it lays out at its own
-        // natural width (two full copies, back to back) instead of being
-        // squeezed into whatever width its parent proposes — otherwise the
-        // two copies wouldn't be identical-width and the loop point would
-        // jump. But `.fixedSize()` doesn't just affect this view's own
-        // layout: it also changes what size THIS view reports upward to
-        // its parent, to its natural (potentially very wide, unbounded)
-        // size rather than the parent's proposal — and with every Account
-        // rendered twice with no cap above it, that unbounded width was
-        // propagating all the way up through this screen's `NavigationStack`
-        // to the enclosing `NavigationSplitView` in `PCCDesktop`, which
-        // reacted to the detail pane's huge reported ideal width by
-        // collapsing the sidebar column to make room — permanently, since
-        // the pressure was static content, not a one-off layout pass, so
-        // the sidebar never got a reason to come back (issue: opening
-        // Finances closed the sidebar for good). A `GeometryReader` doesn't
-        // have this problem: it always reports back up exactly the size
-        // ITS OWN parent proposed, regardless of what its content wants —
-        // so wrapping the unbounded row in one here, and explicitly
-        // clamping that row to the `GeometryReader`'s own measured width
-        // rather than letting it size itself, absorbs the runaway width
-        // before it can reach `NavigationSplitView` at all.
+        // The looping content needs `.fixedSize()` so it lays out at its
+        // own natural width instead of being squeezed into whatever width
+        // its parent proposes — otherwise the copies wouldn't be
+        // identical-width and the loop point would jump. But `.fixedSize()`
+        // doesn't just affect this view's own layout: it also changes what
+        // size THIS view reports upward to its parent, to its natural
+        // (potentially very wide, unbounded) size rather than the parent's
+        // proposal — and with Accounts rendered repeatedly with no cap
+        // above it, that unbounded width was propagating all the way up
+        // through this screen's `NavigationStack` to the enclosing
+        // `NavigationSplitView` in `PCCDesktop`, which reacted to the
+        // detail pane's huge reported ideal width by collapsing the
+        // sidebar column to make room — permanently, since the pressure
+        // was static content, not a one-off layout pass, so the sidebar
+        // never got a reason to come back (issue: opening Finances closed
+        // the sidebar for good). A `GeometryReader` doesn't have this
+        // problem: it always reports back up exactly the size ITS OWN
+        // parent proposed, regardless of what its content wants — so
+        // wrapping the unbounded content in one here, and explicitly
+        // clamping it to the `GeometryReader`'s own measured width rather
+        // than letting it size itself, absorbs the runaway width before it
+        // can reach `NavigationSplitView` at all.
         GeometryReader { outer in
+            // Two back-to-back copies of the Account row (the classic
+            // marquee trick) only loop seamlessly when a single copy is
+            // already at least as wide as the visible bar — true on a
+            // phone-width ticker, but not on a wide desktop window with
+            // only a handful of Accounts. There, a single row fell short
+            // of the bar's width, so once the tape had scrolled past the
+            // last Account there was nothing left to show until the loop
+            // caught up — a stretch of blank space after "Auto Loan"
+            // (issue, caught via screenshot) instead of circling back to
+            // the first Account. Repeating the full Account list
+            // `copiesNeeded` times first turns it into one "block"
+            // guaranteed at least as wide as the bar, and it's that
+            // block — not the raw per-Account row — that gets doubled and
+            // scrolled by exactly its own width, so the loop point is
+            // always covered by real content.
+            let copiesNeeded = Self.copiesNeeded(rowWidth: singleRowWidth, containerWidth: outer.size.width)
+            let blockWidth = singleRowWidth * CGFloat(copiesNeeded)
+
             HStack(spacing: 0) {
-                row
-                row
+                ForEach(0..<(copiesNeeded * 2), id: \.self) { _ in row }
             }
             .fixedSize()
             .background(
-                GeometryReader { proxy in
-                    Color.clear.preference(key: TapeWidthKey.self, value: proxy.size.width / 2)
-                }
+                // Measures a single pass over every Account, independent of
+                // `copiesNeeded` above (which is itself derived from this
+                // measurement) — a hidden single row rather than a fraction
+                // of the visible, possibly-repeated block.
+                row.fixedSize().hidden()
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear.preference(key: TapeWidthKey.self, value: proxy.size.width)
+                        }
+                    )
             )
-            .offset(x: isAnimating ? -rowWidth : 0)
+            .offset(x: isAnimating ? -blockWidth : 0)
             .frame(width: outer.size.width, height: outer.size.height, alignment: .leading)
             .clipped()
+            .onChange(of: blockWidth) { newWidth in
+                guard newWidth > 0, !reduceMotion else { return }
+                isAnimating = false
+                withAnimation(.linear(duration: max(8, Double(newWidth) / 40)).repeatForever(autoreverses: false)) {
+                    isAnimating = true
+                }
+            }
         }
         .frame(height: 34)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -579,17 +628,22 @@ private struct TickerTape: View {
                 .strokeBorder(theme.panelLine(colorScheme), lineWidth: 1)
         )
         .onPreferenceChange(TapeWidthKey.self) { width in
-            // Only the first real measurement starts the animation — this
-            // fires on every layout pass, and re-triggering it on later,
-            // near-identical widths would restart the scroll from 0 each
-            // time instead of leaving it running.
-            guard width > 0, rowWidth == 0 else { return }
-            rowWidth = width
-            guard !reduceMotion else { return }
-            withAnimation(.linear(duration: max(8, Double(width) / 40)).repeatForever(autoreverses: false)) {
-                isAnimating = true
-            }
+            // Only the first real measurement is kept — this fires on
+            // every layout pass, and re-measuring on later, near-identical
+            // widths would restart the scroll from 0 each time instead of
+            // leaving it running.
+            guard width > 0, singleRowWidth == 0 else { return }
+            singleRowWidth = width
         }
+    }
+
+    /// How many back-to-back copies of the full Account list are needed so
+    /// the resulting block is at least as wide as `containerWidth` — the
+    /// invariant the two-copies-doubled marquee trick depends on. `1` until
+    /// `rowWidth` has its first real measurement.
+    private static func copiesNeeded(rowWidth: CGFloat, containerWidth: CGFloat) -> Int {
+        guard rowWidth > 0 else { return 1 }
+        return max(1, Int((containerWidth / rowWidth).rounded(.up)))
     }
 
     private var row: some View {

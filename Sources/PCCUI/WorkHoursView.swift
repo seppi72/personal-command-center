@@ -134,6 +134,12 @@ private struct WorkHoursContent: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        // Same edge-margin fix as `TasksView.taskList` — see that
+        // property's own doc comment for why this has to pad the `List`
+        // itself rather than each row. Also brings this row list's own
+        // edges in line with `controls`/`totalLine` above it, which already
+        // use this same `outerMargin`.
+        .padding(.horizontal, PCCChassis.outerMargin)
     }
 
     private func rowBackground(index: Int) -> some View {

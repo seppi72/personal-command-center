@@ -155,6 +155,20 @@ private struct ProjectsContent: View {
             }
         }
         .scrollContentBackground(.hidden)
+        // Padding the `List` itself, not a per-row inset: on macOS,
+        // `.listRowInsets` only repositions a row's own foreground content —
+        // a `.listRowBackground` view (what `panelRows()` uses for each
+        // card's visible bordered fill) keeps painting edge-to-edge
+        // regardless, so per-row insets alone leave every card still
+        // touching the window edge. Shrinking the whole `List`'s own frame
+        // instead moves everything inside it together, cards included.
+        // Ordered before `.background(...)` so the grid stays full-bleed
+        // behind the now-inset list, matching `ScrollView`-based screens
+        // like `AccountsView` (`.padding(...)` on the content, background
+        // applied outside/after it). Caught directly from a screenshot: a
+        // `.panelRowMargins()`-style per-row fix moved the labels in but
+        // left every card's border still flush against the edge.
+        .padding(.horizontal, PCCChassis.outerMargin)
         .background(DraftingGridBackground())
     }
 
@@ -366,6 +380,9 @@ struct ProjectDetailView: View {
             .panelRows()
         }
         .scrollContentBackground(.hidden)
+        // Same edge-margin fix as `ProjectsContent.projectList` above, for
+        // the same reason — see that property's own doc comment.
+        .padding(.horizontal, PCCChassis.outerMargin)
         .background(DraftingGridBackground())
         .navigationTitle(currentProject.name)
         .toolbar {
