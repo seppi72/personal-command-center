@@ -65,7 +65,8 @@ let accountsViewModel = AccountsViewModel(client: accountsClient)
 let transactionsViewModel = TransactionsViewModel(
     transactionsClient: transactionsClient, accountsClient: accountsClient,
     categoriesClient: categoriesClient, subcategoriesClient: subcategoriesClient)
-let categoriesViewModel = CategoriesViewModel(client: categoriesClient, subcategoriesClient: subcategoriesClient)
+let categoriesViewModel = CategoriesViewModel(
+    client: categoriesClient, subcategoriesClient: subcategoriesClient, transactionsClient: transactionsClient)
 let financesReportingViewModel = FinancesReportingViewModel(
     reportingClient: financesReportingClient, accountsClient: accountsClient)
 let notificationsViewModel = NotificationsViewModel(client: notificationsClient)
