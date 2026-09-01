@@ -166,6 +166,19 @@ private struct TasksContent: View {
             }
         }
         .scrollContentBackground(.hidden)
+        // Padding the `List` itself, not a per-row inset: on macOS,
+        // `.listRowInsets` only repositions a row's own foreground content —
+        // a `.listRowBackground` view (what `panelRows()` uses for each
+        // row's visible card fill) keeps painting edge-to-edge regardless,
+        // so a per-row inset alone leaves every card still touching the
+        // window edge. Shrinking the whole `List`'s own frame instead moves
+        // everything inside it together, cards included — the ambient
+        // `PanelBackground()` behind this screen's outer `Group` stays
+        // full-bleed since it isn't affected by the `List`'s own padding.
+        // Caught directly from a screenshot: a per-row `.listRowInsets` fix
+        // moved the labels in but left every card's border still flush
+        // against the edge.
+        .padding(.horizontal, PCCChassis.outerMargin)
     }
 
     // MARK: - Status strip

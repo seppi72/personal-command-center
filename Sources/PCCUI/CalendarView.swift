@@ -95,6 +95,10 @@ private struct CalendarContent: View {
             }
         }
         .scrollContentBackground(.hidden)
+        // Same edge-margin fix as `TasksView.taskList` — see that
+        // property's own doc comment for why this has to pad the `List`
+        // itself rather than each row.
+        .padding(.horizontal, PCCChassis.outerMargin)
     }
 
     // MARK: - Status strip
