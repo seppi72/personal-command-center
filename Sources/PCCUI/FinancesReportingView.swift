@@ -534,20 +534,45 @@ private struct TickerTape: View {
     @State private var isAnimating = false
 
     var body: some View {
-        HStack(spacing: 0) {
-            row
-            row
-        }
-        .fixedSize()
-        .background(
-            GeometryReader { proxy in
-                Color.clear.preference(key: TapeWidthKey.self, value: proxy.size.width / 2)
+        // The looping row needs `.fixedSize()` so it lays out at its own
+        // natural width (two full copies, back to back) instead of being
+        // squeezed into whatever width its parent proposes — otherwise the
+        // two copies wouldn't be identical-width and the loop point would
+        // jump. But `.fixedSize()` doesn't just affect this view's own
+        // layout: it also changes what size THIS view reports upward to
+        // its parent, to its natural (potentially very wide, unbounded)
+        // size rather than the parent's proposal — and with every Account
+        // rendered twice with no cap above it, that unbounded width was
+        // propagating all the way up through this screen's `NavigationStack`
+        // to the enclosing `NavigationSplitView` in `PCCDesktop`, which
+        // reacted to the detail pane's huge reported ideal width by
+        // collapsing the sidebar column to make room — permanently, since
+        // the pressure was static content, not a one-off layout pass, so
+        // the sidebar never got a reason to come back (issue: opening
+        // Finances closed the sidebar for good). A `GeometryReader` doesn't
+        // have this problem: it always reports back up exactly the size
+        // ITS OWN parent proposed, regardless of what its content wants —
+        // so wrapping the unbounded row in one here, and explicitly
+        // clamping that row to the `GeometryReader`'s own measured width
+        // rather than letting it size itself, absorbs the runaway width
+        // before it can reach `NavigationSplitView` at all.
+        GeometryReader { outer in
+            HStack(spacing: 0) {
+                row
+                row
             }
-        )
-        .offset(x: isAnimating ? -rowWidth : 0)
-        .frame(height: 34, alignment: .leading)
+            .fixedSize()
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(key: TapeWidthKey.self, value: proxy.size.width / 2)
+                }
+            )
+            .offset(x: isAnimating ? -rowWidth : 0)
+            .frame(width: outer.size.width, height: outer.size.height, alignment: .leading)
+            .clipped()
+        }
+        .frame(height: 34)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .clipped()
         .background(theme.panelSurface(colorScheme))
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
