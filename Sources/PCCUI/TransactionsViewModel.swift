@@ -42,6 +42,29 @@ public final class TransactionsViewModel: ObservableObject {
         subcategories.filter { $0.categoryID == categoryID }
     }
 
+    /// `transactions` bucketed by calendar day and sorted most-recent-day
+    /// first (each day's own Transactions sorted most-recent-time first) —
+    /// the Receipt Tape screen's own reason for existing: each day reads as
+    /// its own separate torn-off slip, with a per-day count and net, rather
+    /// than one flat list. `Calendar.current` rather than a fixed calendar,
+    /// since "the same day" should follow the owner's own device settings
+    /// the same way every other day-boundary computation in this app does.
+    public var groupedByDay: [TransactionDayGroup] {
+        let calendar = Calendar.current
+        var order: [Date] = []
+        var byDay: [Date: [Transaction]] = [:]
+        for transaction in transactions {
+            let day = calendar.startOfDay(for: transaction.date)
+            if byDay[day] == nil { order.append(day) }
+            byDay[day, default: []].append(transaction)
+        }
+        return order
+            .sorted(by: >)
+            .map { day in
+                TransactionDayGroup(day: day, transactions: (byDay[day] ?? []).sorted { $0.date > $1.date })
+            }
+    }
+
     public func load() async {
         isLoading = true
         defer { isLoading = false }
@@ -110,5 +133,22 @@ public final class TransactionsViewModel: ObservableObject {
         } catch {
             errorMessage = "Couldn't \(verb) Transaction: \(error.localizedDescription)"
         }
+    }
+}
+
+/// One calendar day's worth of Transactions, bucketed together by
+/// `TransactionsViewModel.groupedByDay` — `day` is that day's start
+/// (`Calendar.startOfDay`), not a domain identifier of its own.
+public struct TransactionDayGroup: Identifiable, Equatable {
+    public let day: Date
+    public let transactions: [Transaction]
+
+    public var id: Date { day }
+
+    /// The signed sum of every Transaction logged that day — expenses
+    /// subtract, income adds, mirroring `TransactionsView`'s own
+    /// (pre-grouping) `netTotal`.
+    public var netAmount: Double {
+        transactions.reduce(0) { $0 + ($1.type == .expense ? -$1.amount : $1.amount) }
     }
 }
