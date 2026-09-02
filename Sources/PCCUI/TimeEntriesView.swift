@@ -13,6 +13,16 @@ import SwiftUI
 /// full start/end/notes entry not tied to the live timer) stays available
 /// from the toolbar's +. One shared SwiftUI view for both platforms — no
 /// platform-specific chrome, per this repo's "minimal" scope.
+///
+/// On the shared Liquid Glass system since issue #70 — full-width
+/// `GlassBubble` rows on `GlassScreenBackground()`, replacing the earlier
+/// punch-clock costume (steel-grey chassis, a rotated double-ruled
+/// ink-stamp, a bordered card with a left-edge accent stripe) `git log` on
+/// this file still shows. The duration stamp survives as this screen's
+/// signature device — see `DurationStamp` below — but now renders (and
+/// ticks) for a *running* Time Entry too, where it used to be hidden behind
+/// a plain "Punched In" label; that's what makes a live entry's duration
+/// readable at a glance rather than just its aliveness.
 public struct TimeEntriesView: View {
     @ObservedObject private var viewModel: TimeEntriesViewModel
     @ObservedObject private var timerViewModel: TimerViewModel
@@ -24,12 +34,12 @@ public struct TimeEntriesView: View {
 
     public var body: some View {
         TimeEntriesContent(viewModel: viewModel, timerViewModel: timerViewModel)
-            .screenTheme(.punchClock)
+            .screenTheme(.liquidGlass)
     }
 }
 
 /// The screen's actual content — split out from `TimeEntriesView` itself so
-/// `.screenTheme(.punchClock)` (applied in that struct's body, above) is
+/// `.screenTheme(.liquidGlass)` (applied in that struct's body, above) is
 /// genuinely in effect by the time this struct's own `body` reads
 /// `@Environment(\.screenTheme)`. See `View.screenTheme(_:)`'s doc comment
 /// in `PCCChassis.swift` for why the split is required.
@@ -48,34 +58,24 @@ private struct TimeEntriesContent: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.screenTheme) private var theme
 
+    /// A `ScrollView` of glass panels rather than a `List` — the hero, the
+    /// picker, and every group row draw their own translucent
+    /// Material-backed shape (the shared `GlassBubble`), which a `List`'s
+    /// opaque native row chrome can't host (mirrors `TasksView`'s own move
+    /// from `List` to `ScrollView` + custom bubbles for the same reason).
+    /// One outer padding on the whole `VStack` — `PCCChassis.outerMargin`
+    /// — replaces what used to be the `List`'s own frame padding.
     var body: some View {
         NavigationStack {
-            List {
-                Section {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
                     hero
-                }
-                Section {
                     statusStrip
+                    groupsSection
                 }
-                Section {
-                    if viewModel.groupedTimeEntries.isEmpty {
-                        emptyGroupsRow
-                    } else {
-                        ForEach(viewModel.groupedTimeEntries) { group in
-                            NavigationLink {
-                                TimeEntryGroupDetailView(group: group, viewModel: viewModel)
-                            } label: {
-                                GroupRow(group: group)
-                            }
-                            #if os(macOS)
-                            .buttonStyle(.plain)
-                            #endif
-                            .punchRow()
-                        }
-                    }
-                }
+                .padding(PCCChassis.outerMargin)
             }
-            .panelScreenBackground()
+            .background(GlassScreenBackground())
             .navigationTitle("Time Entries")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
@@ -117,11 +117,12 @@ private struct TimeEntriesContent: View {
             if let activeTimer = timerViewModel.activeTimer {
                 runningHero(for: activeTimer)
             } else {
-                idleHero
-                itemPickerCard
+                VStack(spacing: 20) {
+                    idleHero
+                    itemPickerCard
+                }
             }
         }
-        .punchRow()
     }
 
     private var readoutColor: Color {
@@ -144,8 +145,23 @@ private struct TimeEntriesContent: View {
         }
     }
 
+    /// This screen's own glass panel — the counterpart to
+    /// `FinancesReportingContent.glassPanel(content:)`, with a configurable
+    /// floor so the hero (300pt, same as the old `PanelCard(minHeight:
+    /// 300)`) and the shorter item picker (220pt, `PanelCard`'s own default)
+    /// read as two different sizes of the same device rather than one
+    /// fixed-height box repeated twice.
+    private func heroPanel<Content: View>(
+        minHeight: CGFloat = 220, @ViewBuilder content: () -> Content
+    ) -> some View {
+        content()
+            .padding(20)
+            .frame(maxWidth: .infinity, minHeight: minHeight, alignment: .topLeading)
+            .glassBubble(.fullWidth)
+    }
+
     private func runningHero(for entry: TimeEntry) -> some View {
-        PanelCard(minHeight: 300) {
+        heroPanel(minHeight: 300) {
             VStack(spacing: 20) {
                 panelHeader("Timer", systemImage: "stopwatch", status: .active)
                 Spacer(minLength: 0)
@@ -177,7 +193,7 @@ private struct TimeEntriesContent: View {
                 }
                 Button("Cancel Timer", role: .destructive) {
                     // Reloads the roster too — since Start now does the
-                    // same, the discarded entry's "Punched In" row would
+                    // same, the discarded entry's "running" row would
                     // otherwise linger in `viewModel.timeEntries` as stale
                     // state until the next pull-to-refresh.
                     Task {
@@ -192,7 +208,7 @@ private struct TimeEntriesContent: View {
     }
 
     private var idleHero: some View {
-        PanelCard(minHeight: 300) {
+        heroPanel(minHeight: 300) {
             VStack(spacing: 20) {
                 panelHeader("Timer", systemImage: "stopwatch", status: .idle)
                 Spacer(minLength: 0)
@@ -208,8 +224,8 @@ private struct TimeEntriesContent: View {
                     guard let container else { return }
                     // Also reloads the roster below (see the Stop button's
                     // own comment) so the newly-started entry's group shows
-                    // its "Punched In" state immediately, rather than only
-                    // after a pull-to-refresh.
+                    // its running state immediately, rather than only after
+                    // a pull-to-refresh.
                     Task {
                         await timerViewModel.start(container: container)
                         await viewModel.load()
@@ -222,9 +238,9 @@ private struct TimeEntriesContent: View {
     }
 
     /// The segmented Task/Project/Client/Course tab row — the selected tab
-    /// picks up this screen's steel-blue accent instead of a generic tint.
-    /// Switching tabs clears `timerSelectedItemID`: an id from the old
-    /// kind's list wouldn't mean anything against the new kind's items.
+    /// picks up this screen's accent instead of a generic tint. Switching
+    /// tabs clears `timerSelectedItemID`: an id from the old kind's list
+    /// wouldn't mean anything against the new kind's items.
     private var kindTabs: some View {
         HStack(spacing: 4) {
             ForEach(ContainerKind.allCases) { kind in
@@ -250,7 +266,7 @@ private struct TimeEntriesContent: View {
     }
 
     private var itemPickerCard: some View {
-        PanelCard {
+        heroPanel {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Choose a \(timerSelectedKind.title)")
                     .pccPanelLabel()
@@ -302,7 +318,7 @@ private struct TimeEntriesContent: View {
 
     /// A large pill-shaped call-to-action button — Start/Stop, spanning
     /// most of the hero panel's width, tinted with this screen's signal
-    /// colors (steel-blue to start, red to stop) rather than the generic
+    /// colors (accent green to start, red to stop) rather than the generic
     /// accent color a plain `.borderedProminent` button would default to.
     private func bigButton(_ title: String, tint: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
@@ -362,9 +378,14 @@ private struct TimeEntriesContent: View {
     /// open-ended (no set session length, unlike a Pomodoro countdown), so
     /// this counts up rather than down. Also used, at `0`, to render the
     /// idle hero's dimmed placeholder digits. Distinct from
-    /// `formattedDuration(_:)` (this file, top level) — that one renders
-    /// the compact "1H 32M" duration stamps below, this one the big ticking
-    /// ":"-separated readout.
+    /// `TimeEntriesViewModel.formattedDuration(_:)` (this screen's compact
+    /// "1H 32M" duration-stamp format) — this one is the big ticking
+    /// ":"-separated readout, and stays here rather than moving onto a view
+    /// model since it's the hero's own display concern, not a value either
+    /// view model stores or a unit test needs to pin down independent of
+    /// this view (unlike the duration-stamp format, which several rows
+    /// share and issue #70 moved onto `TimeEntriesViewModel` for exactly
+    /// that reason).
     fileprivate static func formattedElapsed(_ seconds: TimeInterval) -> String {
         let total = max(0, Int(seconds))
         let hours = total / 3600
@@ -386,24 +407,40 @@ private struct TimeEntriesContent: View {
                 .foregroundStyle(.secondary)
             Spacer()
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 10)
+        .padding(.bottom, 12)
         .overlay(
             Rectangle()
                 .fill(theme.panelLine(colorScheme))
                 .frame(height: 1),
             alignment: .bottom
         )
-        .listRowInsets(EdgeInsets())
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
     }
 
     private var statusStripText: String {
         let groups = viewModel.groupedTimeEntries
         let total = groups.reduce(0) { $0 + $1.totalDuration }
-        return "\(groups.count) TRACKED   ·   \(formattedDuration(total)) TOTAL"
+        return "\(groups.count) TRACKED   ·   \(TimeEntriesViewModel.formattedDuration(total)) TOTAL"
+    }
+
+    // MARK: - Groups
+
+    private var groupsSection: some View {
+        VStack(spacing: 14) {
+            if viewModel.groupedTimeEntries.isEmpty {
+                emptyGroupsRow
+            } else {
+                ForEach(viewModel.groupedTimeEntries) { group in
+                    NavigationLink {
+                        TimeEntryGroupDetailView(group: group, viewModel: viewModel)
+                    } label: {
+                        GroupRow(group: group)
+                    }
+                    #if os(macOS)
+                    .buttonStyle(.plain)
+                    #endif
+                }
+            }
+        }
     }
 
     private var emptyGroupsRow: some View {
@@ -418,7 +455,11 @@ private struct TimeEntriesContent: View {
 /// "Edit Time Entry" — a start/end time, optional notes, and a container
 /// picker that attaches to exactly one Task, Project, Client, or Course
 /// (ADR-0004). Picking one clears the other three, the same "selecting one
-/// clears its peers" shape `TaskFormSheet` already has for its two.
+/// clears its peers" shape `TaskFormSheet` already has for its two. Its
+/// Section stays in the shared chassis look — a `Form`'s native controls
+/// don't read as glass however they're dressed (`AccountFormSheet`'s doc
+/// comment carries this reasoning in full) — but its ground now repaints to
+/// `GlassScreenBackground()` via `glassScreenBackground()`, per issue #70.
 struct TimeEntryFormSheet: View {
     let title: String
     let tasks: [PCCTask]
@@ -530,7 +571,7 @@ struct TimeEntryFormSheet: View {
                 }
                 .panelRows()
             }
-            .panelScreenBackground()
+            .glassScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -574,9 +615,11 @@ struct TimeEntryFormSheet: View {
 /// individual Time Entry making up one `TimeEntryGroup`, in case the owner
 /// needs to edit or delete a specific one rather than just seeing its
 /// total. Left in the shared chassis look (`panelRows()`) rather than a
-/// bespoke re-theme, matching how `CourseDetailView`/`ProjectDetailView`
-/// stay chassis-default while only their top-level list gets a screen's
-/// signature device.
+/// bespoke re-theme, matching how `ProjectDetailView` stays chassis-default
+/// while only its parent screen's top-level list gets a screen's signature
+/// device — but its ground repaints to `GlassScreenBackground()` via
+/// `glassScreenBackground()`, per issue #70, since it's still pushed from
+/// a screen now on the glass system.
 private struct TimeEntryGroupDetailView: View {
     let group: TimeEntryGroup
     @ObservedObject var viewModel: TimeEntriesViewModel
@@ -624,7 +667,7 @@ private struct TimeEntryGroupDetailView: View {
                 .panelRows()
             }
         }
-        .panelScreenBackground()
+        .glassScreenBackground()
         .navigationTitle(currentGroup.label)
         .errorAlert($viewModel.errorMessage)
         .sheet(item: $editingEntry) { entry in
@@ -679,7 +722,7 @@ private struct TimeEntryGroupDetailView: View {
 
     private var totalStripText: String {
         let noun = currentGroup.entries.count == 1 ? "ENTRY" : "ENTRIES"
-        return "\(currentGroup.entries.count) \(noun)   ·   \(formattedDuration(currentGroup.totalDuration)) TOTAL"
+        return "\(currentGroup.entries.count) \(noun)   ·   \(TimeEntriesViewModel.formattedDuration(currentGroup.totalDuration)) TOTAL"
     }
 }
 
@@ -692,8 +735,13 @@ private struct EntryRow: View {
     var body: some View {
         HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(entry.startDate, style: .date)
-                    .font(.system(size: 13, weight: .semibold))
+                HStack(spacing: 6) {
+                    Text(entry.startDate, style: .date)
+                        .font(.system(size: 13, weight: .semibold))
+                    if entry.isRunning {
+                        runningBadge
+                    }
+                }
                 Text(rangeText)
                     .font(.system(size: 11.5, design: .monospaced))
                     .foregroundStyle(.secondary)
@@ -705,18 +753,36 @@ private struct EntryRow: View {
                 }
             }
             Spacer(minLength: 0)
-            if entry.isRunning {
-                HStack(spacing: 5) {
-                    StatusDot(.active)
-                    Text("Punched In")
-                        .pccPanelLabel()
-                        .foregroundStyle(theme.signalGreen(colorScheme))
-                }
-            } else {
-                DurationStamp(text: formattedDuration((entry.endDate ?? Date()).timeIntervalSince(entry.startDate)))
-            }
+            durationStamp
         }
         .padding(.vertical, 6)
+    }
+
+    private var runningBadge: some View {
+        HStack(spacing: 4) {
+            StatusDot(.active)
+            Text("Running")
+                .pccPanelLabel()
+                .foregroundStyle(theme.signalGreen(colorScheme))
+        }
+    }
+
+    /// Ticks once a second while `entry` is still running (`endDate ==
+    /// nil`) rather than freezing at whatever value was true when this row
+    /// last rendered — the domain rule that at most one Time Entry runs at
+    /// a time (`CONTEXT.md`'s Time Entry definition) means at most one row
+    /// in the whole app ever pays this cost. A stopped entry's stamp is
+    /// plain static text, same as every other duration on this screen.
+    @ViewBuilder
+    private var durationStamp: some View {
+        if entry.isRunning {
+            TimelineView(.periodic(from: entry.startDate, by: 1)) { context in
+                DurationStamp(text: TimeEntriesViewModel.formattedDuration(context.date.timeIntervalSince(entry.startDate)))
+            }
+        } else {
+            DurationStamp(
+                text: TimeEntriesViewModel.formattedDuration((entry.endDate ?? Date()).timeIntervalSince(entry.startDate)))
+        }
     }
 
     private static let timeFormatter: DateFormatter = {
@@ -732,63 +798,33 @@ private struct EntryRow: View {
     }
 }
 
-// MARK: - Punch Clock theme
-
-extension ScreenTheme {
-    /// `TimeEntriesView`'s own vibe: a punch clock / timesheet — cool
-    /// steel-grey rather than another warm paper tone (Commitments/Clients/
-    /// Courses already claimed that register), with a steel-blue ink
-    /// accent for the duration stamp. Signal colors left as
-    /// `ScreenTheme.default`'s.
-    fileprivate static let punchClock = ScreenTheme(
-        panelVoid: { $0 == .dark ? Color(hex: 0x1B2023) : Color(hex: 0xE3E6E7) },
-        panelSurface: { $0 == .dark ? Color(hex: 0x23282B) : Color(hex: 0xF5F6F2) },
-        panelLine: { $0 == .dark ? Color(hex: 0x34393C) : Color(hex: 0xCBD1CD) },
-        accent: { $0 == .dark ? Color(hex: 0x8FC1E0) : Color(hex: 0x2F5872) },
-        signalGreen: ScreenTheme.default.signalGreen,
-        signalAmber: ScreenTheme.default.signalAmber,
-        signalRed: ScreenTheme.default.signalRed
-    )
-}
-
-// MARK: - Punch row chrome
-
-extension View {
-    /// Strips a `List` row down to bare content — used for the hero timer
-    /// (a `PanelCard`, which draws its own chrome) and for `GroupRow`
-    /// (which draws its own bordered card), neither of which wants the
-    /// chassis's own `panelRows()` card wrapped a second time around them.
-    fileprivate func punchRow() -> some View {
-        self
-            .listRowInsets(EdgeInsets())
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
-            .padding(.vertical, 5)
-    }
-}
-
 // MARK: - Group row
 
-/// This screen's own row chrome for the totals list: a bordered card with
-/// a left-edge accent stripe (steel-blue by default, green while that
-/// container has the active timer running) rather than the shared
-/// `panelRows()` look — the stripe is this row's own status indicator, in
-/// place of every other screen's separate leading `StatusDot`.
+/// One `TimeEntryGroup`'s row: the shared `GlassBubble` surface
+/// (`.fullWidth` size) with this screen's own content on it — the group's
+/// label, a "Running"/entry-count subline, and the `DurationStamp` hero
+/// figure — mirroring `TaskBubble`'s identical shape (bubble + leading
+/// label stack + trailing figure). Replaces the prior bespoke card with a
+/// left-edge accent stripe; a running group's own signal now lives in the
+/// "Running" `StatusDot` line and in the stamp itself ticking, not in a
+/// stripe of color down the card's edge.
 private struct GroupRow: View {
     let group: TimeEntryGroup
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.screenTheme) private var theme
 
+    private static let style: GlassBubbleStyle = .fullWidth
+
     var body: some View {
         HStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(group.label)
                     .font(.system(size: 15, weight: .semibold))
                 if group.containsRunning {
                     HStack(spacing: 5) {
                         StatusDot(.active)
-                        Text("Punched In")
+                        Text("Running")
                             .pccPanelLabel()
                             .foregroundStyle(theme.signalGreen(colorScheme))
                     }
@@ -799,28 +835,25 @@ private struct GroupRow: View {
                 }
             }
             Spacer(minLength: 0)
-            if !group.containsRunning {
-                DurationStamp(text: formattedDuration(group.totalDuration))
-            }
+            durationStamp
         }
-        .padding(.vertical, 12)
-        .padding(.horizontal, 14)
-        .background(
-            RoundedRectangle(cornerRadius: PCCChassis.cardCornerRadius, style: .continuous)
-                .fill(theme.panelSurface(colorScheme))
-                .overlay(
-                    RoundedRectangle(cornerRadius: PCCChassis.cardCornerRadius, style: .continuous)
-                        .strokeBorder(theme.panelLine(colorScheme), lineWidth: 1)
-                )
-                .overlay(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 1.5)
-                        .fill(group.containsRunning ? theme.signalGreen(colorScheme) : theme.panelLine(colorScheme))
-                        .frame(width: 3)
-                        .padding(.vertical, 6)
-                        .padding(.leading, 3)
-                }
-                .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.06), radius: 8, x: 0, y: 3)
-        )
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .glassBubble(Self.style)
+    }
+
+    /// Ticks once a second while the group has a running entry in it, for
+    /// the same reason `EntryRow.durationStamp` does — see that property's
+    /// doc comment.
+    @ViewBuilder
+    private var durationStamp: some View {
+        if group.containsRunning {
+            TimelineView(.periodic(from: .now, by: 1)) { _ in
+                DurationStamp(text: TimeEntriesViewModel.formattedDuration(group.totalDuration))
+            }
+        } else {
+            DurationStamp(text: TimeEntriesViewModel.formattedDuration(group.totalDuration))
+        }
     }
 
     private var entryCountText: String {
@@ -828,10 +861,17 @@ private struct GroupRow: View {
     }
 }
 
-/// This screen's signature: a rotated, double-ruled "duration stamp"
-/// reading like a rubber ink stamp pressed onto a time-card stub, standing
-/// in for a plain HH:MM readout wherever a total is shown (the group
-/// roster and each entry's own row).
+/// This screen's signature device, kept through the glass migration (issue
+/// #70): a small glass capsule holding the duration in monospaced digits —
+/// the glass counterpart to the old rotated, double-ruled ink stamp, cut
+/// from the same glass every bubble on this screen uses (mirrors
+/// `TasksView`'s identical redraw of its own `OverdueBadge`, issue #68).
+/// Always the theme's plain accent color, never signal-colored — a
+/// duration has no sign to color by, the same reasoning
+/// `WorkHoursRowBubble` already gives for its own total figure; a running
+/// vs. stopped Time Entry is told apart by the "Running" `StatusDot` next
+/// to this stamp, and by the stamp actually ticking while live, not by its
+/// own color.
 private struct DurationStamp: View {
     let text: String
 
@@ -840,34 +880,16 @@ private struct DurationStamp: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 12, weight: .heavy, design: .monospaced))
+            .font(.system(size: 13, weight: .bold, design: .monospaced))
+            .monospacedDigit()
             .foregroundStyle(theme.accent(colorScheme))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
             .background(
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .strokeBorder(theme.accent(colorScheme), lineWidth: 2)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 3, style: .continuous)
-                            .strokeBorder(theme.accent(colorScheme).opacity(0.5), lineWidth: 1)
-                            .padding(3)
-                    )
+                Capsule()
+                    .fill(.ultraThinMaterial)
+                    .overlay(Capsule().fill(GlassBubble.tint(for: colorScheme)))
+                    .overlay(Capsule().strokeBorder(GlassBubble.rimColor(theme, colorScheme), lineWidth: GlassBubble.rimWidth))
             )
-            .rotationEffect(.degrees(-5))
     }
-}
-
-/// "1H 32M" past an hour, "37M" until then — the compact duration-stamp
-/// format shared by `GroupRow`, `EntryRow`, and the status strips, distinct
-/// from `TimeEntriesContent.formattedElapsed(_:)`'s ":"-separated ticking
-/// readout in the hero. A free function rather than a method on any one
-/// type, since none of its three callers has a natural claim to own it.
-private func formattedDuration(_ seconds: TimeInterval) -> String {
-    let total = max(0, Int(seconds))
-    let hours = total / 3600
-    let minutes = (total % 3600) / 60
-    if hours > 0 {
-        return "\(hours)H \(String(format: "%02d", minutes))M"
-    }
-    return "\(minutes)M"
 }

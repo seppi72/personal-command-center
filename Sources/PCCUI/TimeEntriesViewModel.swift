@@ -136,6 +136,29 @@ public final class TimeEntriesViewModel: ObservableObject {
         return "Unattached"
     }
 
+    /// "1H 32M" past an hour, "37M" until then — the compact duration-stamp
+    /// format `TimeEntriesView`'s group roster, individual entry rows, and
+    /// both status strips all share. Moved here from a free function in
+    /// `TimeEntriesView.swift` (issue #70) so it's covered by a unit test at
+    /// this type's existing pure-logic seam (`TimeEntriesViewModelTests`,
+    /// mirroring `TasksViewModel.isOverdue`) rather than only exercised by
+    /// eye. `static nonisolated` rather than an instance method: it closes
+    /// over nothing but its argument, and marking it `nonisolated` lets a
+    /// test call it without hopping onto the main actor the way every other
+    /// member of this `@MainActor` class requires. Distinct from
+    /// `TimeEntriesContent.formattedElapsed(_:)`, the hero's own
+    /// ":"-separated ticking readout — that one stays a view-local concern,
+    /// per its own doc comment.
+    public static nonisolated func formattedDuration(_ seconds: TimeInterval) -> String {
+        let total = max(0, Int(seconds))
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        if hours > 0 {
+            return "\(hours)H \(String(format: "%02d", minutes))M"
+        }
+        return "\(minutes)M"
+    }
+
     /// Runs a mutation against `timeEntries`, keeping every method's
     /// success/failure handling (clear the error; on failure surface a
     /// message) in one shape instead of four copies.
