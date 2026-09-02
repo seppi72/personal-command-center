@@ -1,14 +1,15 @@
 import SwiftUI
 
-/// A Project's "% of Tasks done" indicator, shared by `ProjectsView`'s row
-/// and `ProjectDetailView`'s header (a free function, not a method, since
-/// both types need it) — a "dimension line" in the drafting sense: tick
-/// marks at both ends and a measured span in between, the convention an
-/// architectural drawing uses to call out a length, rather than a default
-/// rounded `ProgressView` pill. `Projects`' own signature device, per its
-/// "Drafting Table" vibe (`ScreenTheme.draftingTable` below) — everything
-/// on this screen is meant to read like a measurement on a blueprint, and
-/// a plain progress bar doesn't carry that association the way this does.
+/// A Project's "% of Tasks done" indicator — a "dimension line" in the
+/// drafting sense: tick marks at both ends and a measured span in between,
+/// the convention an architectural drawing uses to call out a length,
+/// rather than a default rounded `ProgressView` pill. Shared by
+/// `ProjectCard`'s grid cell and `ProjectDetailView`'s header (a free
+/// function, not a method, since both types need it). Kept as this
+/// screen's one signature device under the shared glass system (issue
+/// #69) even though the bespoke "Drafting Table" vibe that originally
+/// motivated it is gone — the percentage figure itself is set in
+/// monospaced digits, per that issue's acceptance criteria.
 func projectProgressBar(_ fraction: Double, colorScheme: ColorScheme, theme: ScreenTheme) -> some View {
     HStack(spacing: 10) {
         GeometryReader { proxy in
@@ -43,12 +44,29 @@ private func tick(theme: ScreenTheme, colorScheme: ColorScheme) -> some View {
     Rectangle().fill(theme.panelLine(colorScheme))
 }
 
+/// Whether `project` is overdue — past its due date with incomplete Tasks.
+/// Shared by `ProjectsContent`'s aggregate status strip
+/// (`hasOverdueProject`) and each `ProjectCard`'s own due-date flag, so the
+/// two can't drift apart into disagreeing about the same Project.
+func projectIsOverdue(_ project: Project, completionFraction: Double?) -> Bool {
+    guard let dueDate = project.dueDate, dueDate < Date() else { return false }
+    return (completionFraction ?? 1) < 1
+}
+
 /// Minimal Mac/iOS screen for ticket #3: lists Projects, and supports
 /// creating, editing (renaming, setting/clearing a Deadline — ticket #5),
 /// and deleting one. One shared SwiftUI view for both platforms — no
-/// platform-specific chrome, per the ticket's "minimal" scope. Tapping a row
-/// navigates into `ProjectDetailView` (ticket #18) rather than opening the
-/// edit sheet directly — editing moved to that screen's own toolbar.
+/// platform-specific chrome, per the ticket's "minimal" scope.
+///
+/// On the shared Liquid Glass system since issue #69 — a grid of
+/// `ProjectCard` bubbles (mirrors `CategoriesView`'s own grid+expand
+/// shape), replacing the earlier drafting-table costume
+/// (`DraftingGridBackground`, `ScreenTheme.draftingTable`) `git log` on
+/// this file still shows. Tapping a card expands it into a centered
+/// overlay showing its Sprints; reaching `ProjectDetailView` to rename the
+/// Project, change its Deadline, or manage Sprints in full moved to a
+/// "Manage Project" link inside that overlay, since a single tap is now
+/// spent on the expand gesture instead of navigating directly.
 public struct ProjectsView: View {
     @ObservedObject private var viewModel: ProjectsViewModel
 
@@ -58,13 +76,13 @@ public struct ProjectsView: View {
 
     public var body: some View {
         ProjectsContent(viewModel: viewModel)
-            .screenTheme(.draftingTable)
+            .screenTheme(.liquidGlass)
     }
 }
 
 /// The screen's actual content — split out from `ProjectsView` itself so
-/// `.screenTheme(.draftingTable)` (applied in that struct's body, above)
-/// is genuinely in effect by the time this struct's own `body` reads
+/// `.screenTheme(.liquidGlass)` (applied in that struct's body, above) is
+/// genuinely in effect by the time this struct's own `body` reads
 /// `@Environment(\.screenTheme)`. See `View.screenTheme(_:)`'s doc comment
 /// in `PCCChassis.swift` for why the split is required, not optional —
 /// `FinancesReportingView`/`FinancesReportingContent` hit this the hard
@@ -72,6 +90,16 @@ public struct ProjectsView: View {
 private struct ProjectsContent: View {
     @ObservedObject var viewModel: ProjectsViewModel
     @State private var isPresentingNewProjectSheet = false
+
+    /// Which card (if any) is currently expanded, and the `SprintsViewModel`
+    /// scoped to it — tapping a collapsed grid card sets both; tapping the
+    /// scrim, the close button, or the same card again clears them. Mirrors
+    /// `CategoriesContent.expandedCategoryID`; unlike that screen, expanding
+    /// a Project also needs its own view model, since a Project's Sprints
+    /// are loaded per-Project on demand rather than already held on
+    /// `ProjectsViewModel` the way Category spending is.
+    @State private var expandedProjectID: UUID?
+    @State private var expandedSprintsViewModel: SprintsViewModel?
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.screenTheme) private var theme
@@ -82,9 +110,10 @@ private struct ProjectsContent: View {
                 if viewModel.projects.isEmpty && !viewModel.isLoading {
                     emptyState
                 } else {
-                    projectList
+                    projectScroll
                 }
             }
+            .background(GlassScreenBackground())
             .navigationTitle("Projects")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
@@ -110,66 +139,150 @@ private struct ProjectsContent: View {
         }
     }
 
-    private var projectList: some View {
-        List {
-            Section {
-                statusStrip
+    /// A `ScrollView` of `ProjectCard`s in a `LazyVGrid`, with a centered
+    /// expand overlay above a dimmed scrim rather than something grown in
+    /// place out of its source grid cell — the same shape, for the same two
+    /// real-bug reasons, `CategoriesContent.categoryScroll`'s own doc
+    /// comment records in full (`LazyVGrid` not honoring `zIndex` across
+    /// its own cells, and a grown-in-place transition never actually
+    /// reading as "growing").
+    private var projectScroll: some View {
+        ZStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    statusStrip
+                    projectGrid
+                }
+                .padding(PCCChassis.outerMargin)
             }
-            Section {
-                ForEach(viewModel.projects) { project in
-                    NavigationLink {
-                        ProjectDetailView(
-                            project: project,
-                            viewModel: viewModel,
-                            sprintsViewModel: viewModel.makeSprintsViewModel(for: project)
-                        )
-                    } label: {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(project.name)
-                            if let clientName = viewModel.clientName(for: project) {
-                                Text(clientName)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            if let dueDate = project.dueDate {
-                                Text(dueDate, style: .date)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            if let fraction = viewModel.completionFraction(for: project) {
-                                projectProgressBar(fraction, colorScheme: colorScheme, theme: theme)
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                }
-                .onDelete { offsets in
-                    let toDelete = offsets.map { viewModel.projects[$0] }
-                    Task {
-                        for project in toDelete {
-                            await viewModel.deleteProject(project)
-                        }
-                    }
-                }
-                .panelRows()
+            if let expandedProjectID, let project = project(withID: expandedProjectID),
+                let sprintsViewModel = expandedSprintsViewModel {
+                expandedOverlay(project, sprintsViewModel: sprintsViewModel)
             }
         }
-        .scrollContentBackground(.hidden)
-        // Padding the `List` itself, not a per-row inset: on macOS,
-        // `.listRowInsets` only repositions a row's own foreground content —
-        // a `.listRowBackground` view (what `panelRows()` uses for each
-        // card's visible bordered fill) keeps painting edge-to-edge
-        // regardless, so per-row insets alone leave every card still
-        // touching the window edge. Shrinking the whole `List`'s own frame
-        // instead moves everything inside it together, cards included.
-        // Ordered before `.background(...)` so the grid stays full-bleed
-        // behind the now-inset list, matching `ScrollView`-based screens
-        // like `AccountsView` (`.padding(...)` on the content, background
-        // applied outside/after it). Caught directly from a screenshot: a
-        // `.panelRowMargins()`-style per-row fix moved the labels in but
-        // left every card's border still flush against the edge.
-        .padding(.horizontal, PCCChassis.outerMargin)
-        .background(DraftingGridBackground())
+        // On the enclosing `ZStack`, not the conditional content itself, so
+        // it governs the whole insert/remove transition below rather than
+        // only in-place property changes.
+        .animation(.spring(response: 0.4, dampingFraction: 0.82), value: expandedProjectID)
+    }
+
+    private func project(withID id: UUID) -> Project? {
+        viewModel.projects.first { $0.id == id }
+    }
+
+    /// A tap on a collapsed card expands it — see `expandedOverlay(_:sprintsViewModel:)`
+    /// for where the expanded state actually renders. Deletion moved from
+    /// the former `List`'s swipe-to-delete to a context menu, the same
+    /// device `ClientCard` already uses for its own grid cells.
+    private var projectGrid: some View {
+        LazyVGrid(
+            columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())],
+            spacing: 16
+        ) {
+            ForEach(viewModel.projects) { project in
+                Button {
+                    if expandedProjectID == project.id {
+                        expandedProjectID = nil
+                    } else {
+                        expandedProjectID = project.id
+                        expandedSprintsViewModel = viewModel.makeSprintsViewModel(for: project)
+                    }
+                } label: {
+                    ProjectCard(
+                        project: project,
+                        clientName: viewModel.clientName(for: project),
+                        completionFraction: viewModel.completionFraction(for: project),
+                        isExpanded: false
+                    )
+                }
+                .buttonStyle(ProjectCardPressStyle())
+                .contextMenu {
+                    Button(role: .destructive) {
+                        Task { await viewModel.deleteProject(project) }
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
+            }
+        }
+        .padding(.top, 16)
+    }
+
+    /// The single floating, enlarged `ProjectCard` for whichever Project is
+    /// tapped, its Sprints loaded into `sprintsViewModel` as soon as it
+    /// appears (`.task(id:)`, keyed on the Project's id) — a dimmed scrim
+    /// behind it (tap to dismiss), a close button on the card itself, and a
+    /// "Manage Project" link down to `ProjectDetailView` now that a tap on
+    /// the collapsed card spends itself on expanding rather than
+    /// navigating (mirrors `CategoriesContent.expandedOverlay(_:)`, with
+    /// `SprintsViewModel` swapped in for the Category screen's own
+    /// already-loaded spending totals).
+    private func expandedOverlay(_ project: Project, sprintsViewModel: SprintsViewModel) -> some View {
+        ZStack {
+            // Its own opacity-only transition — kept separate from the
+            // card's `.scale` transition below, same reasoning as
+            // `CategoriesContent.expandedOverlay(_:)`.
+            Rectangle()
+                .fill(scrimColor)
+                .ignoresSafeArea()
+                .onTapGesture { expandedProjectID = nil }
+                .transition(.opacity)
+            VStack(spacing: 14) {
+                ProjectCard(
+                    project: project,
+                    clientName: viewModel.clientName(for: project),
+                    completionFraction: viewModel.completionFraction(for: project),
+                    isExpanded: true,
+                    sprints: sprintsViewModel.sprints
+                )
+                .background(bubbleShadow)
+                .overlay(alignment: .topTrailing) {
+                    Button {
+                        expandedProjectID = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 22))
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(10)
+                }
+                NavigationLink {
+                    ProjectDetailView(project: project, viewModel: viewModel, sprintsViewModel: sprintsViewModel)
+                } label: {
+                    Label("Manage Project", systemImage: "slider.horizontal.3")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                #if os(macOS)
+                .buttonStyle(.plain)
+                #endif
+                .foregroundStyle(theme.accent(colorScheme))
+            }
+            .frame(maxWidth: 360)
+            // Distinct identity per Project so switching which card is
+            // expanded is a genuine remove-then-insert, and so `.task(id:)`
+            // below re-fires for the newly expanded Project rather than
+            // treating a swap as an in-place update of the same view.
+            .id(project.id)
+            .task(id: project.id) { await sprintsViewModel.load() }
+            .transition(.opacity.combined(with: .scale(scale: 0.92)))
+        }
+        .zIndex(1)
+    }
+
+    private var scrimColor: Color {
+        Color.black.opacity(colorScheme == .dark ? 0.6 : 0.28)
+    }
+
+    /// A drop shadow behind the expanded card — kept off the shared
+    /// `GlassBubble` itself (which the collapsed grid cells also use)
+    /// since only the enlarged overlay instance needs the heavier "lifted
+    /// toward the viewer" shadow.
+    private var bubbleShadow: some View {
+        RoundedRectangle(cornerRadius: GlassBubbleStyle.gridCell.cornerRadius, style: .continuous)
+            .fill(Color.clear)
+            .shadow(color: .black.opacity(colorScheme == .dark ? 0.55 : 0.16), radius: 26, x: 0, y: 14)
     }
 
     // MARK: - Status strip
@@ -182,18 +295,13 @@ private struct ProjectsContent: View {
                 .foregroundStyle(.secondary)
             Spacer()
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 10)
+        .padding(.bottom, 12)
         .overlay(
             Rectangle()
                 .fill(theme.panelLine(colorScheme))
                 .frame(height: 1),
             alignment: .bottom
         )
-        .listRowInsets(EdgeInsets())
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
     }
 
     /// `.critical` when any Project is past its due date with incomplete
@@ -204,11 +312,7 @@ private struct ProjectsContent: View {
     }
 
     private var hasOverdueProject: Bool {
-        viewModel.projects.contains { project in
-            guard let dueDate = project.dueDate, dueDate < Date() else { return false }
-            let fraction = viewModel.completionFraction(for: project) ?? 1
-            return fraction < 1
-        }
+        viewModel.projects.contains { projectIsOverdue($0, completionFraction: viewModel.completionFraction(for: $0)) }
     }
 
     private var statusStripText: String {
@@ -227,7 +331,6 @@ private struct ProjectsContent: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(DraftingGridBackground())
     }
 
     private var isShowingError: Binding<Bool> {
@@ -240,6 +343,10 @@ private struct ProjectsContent: View {
 
 /// Shared create/edit form: the same sheet serves "New Project" and "Edit
 /// Project" — a name field and a Deadline toggle (mirrors `TaskFormSheet`).
+/// Left in the shared chassis look rather than a bespoke glass re-theme — a
+/// `Form`'s native controls don't read as "liquid glass" however they're
+/// dressed, so there's nothing this screen's own device would add here
+/// (mirrors `AccountFormSheet`'s identical reasoning).
 struct ProjectFormSheet: View {
     let title: String
     let onSave: (ProjectFormValues) async -> Void
@@ -283,7 +390,7 @@ struct ProjectFormSheet: View {
                 }
                 .panelRows()
             }
-            .panelScreenBackground()
+            .glassScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -305,10 +412,12 @@ struct ProjectFormSheet: View {
 }
 
 /// A Project's detail screen (ticket #18): the Project's name/due date
-/// read-only at the top (editing moved here from the list row, via the
-/// toolbar's "Edit" button — same `ProjectFormSheet`/`onSave` wiring as
-/// before), plus a "Sprints" section listing the Project's Sprints with
-/// add/edit/delete.
+/// read-only at the top (editing reached via the toolbar's "Edit" button —
+/// same `ProjectFormSheet`/`onSave` wiring as before), plus a "Sprints"
+/// section listing the Project's Sprints with add/edit/delete. Reached from
+/// `ProjectsView`'s expanded-card overlay via its "Manage Project" link
+/// (issue #69) rather than a direct row tap, since a tap on the collapsed
+/// grid card now expands it instead.
 struct ProjectDetailView: View {
     let project: Project
     @ObservedObject var viewModel: ProjectsViewModel
@@ -379,11 +488,7 @@ struct ProjectDetailView: View {
             }
             .panelRows()
         }
-        .scrollContentBackground(.hidden)
-        // Same edge-margin fix as `ProjectsContent.projectList` above, for
-        // the same reason — see that property's own doc comment.
-        .padding(.horizontal, PCCChassis.outerMargin)
-        .background(DraftingGridBackground())
+        .glassScreenBackground()
         .navigationTitle(currentProject.name)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -479,7 +584,7 @@ struct SprintFormSheet: View {
                 }
                 .panelRows()
             }
-            .panelScreenBackground()
+            .glassScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -500,74 +605,114 @@ struct SprintFormSheet: View {
     }
 }
 
-// MARK: - Drafting Table theme
-
-extension ScreenTheme {
-    /// `ProjectsView`'s own vibe: everything on this screen should read
-    /// like a measurement on a blueprint. A technical blue accent in
-    /// place of the app's teal-cyan and Finance's gold, and — unlike a
-    /// generic "just go dark grey" dark mode — a dark mode that stays
-    /// genuinely blue-toned throughout, since a real blueprint sheet
-    /// doesn't lose its color at night, it just prints white-on-blue
-    /// instead of blue-on-white. Signal colors are left as
-    /// `ScreenTheme.default`'s — no urgency semantic needed changing here.
-    fileprivate static let draftingTable = ScreenTheme(
-        panelVoid: { $0 == .dark ? Color(hex: 0x0B2647) : Color(hex: 0xF2F6FC) },
-        panelSurface: { $0 == .dark ? Color(hex: 0x123661) : Color(hex: 0xFFFFFF) },
-        panelLine: { $0 == .dark ? Color(hex: 0x2C5B96) : Color(hex: 0xC7D6EC) },
-        accent: { $0 == .dark ? Color(hex: 0xD9E8FF) : Color(hex: 0x2F6FE4) },
-        signalGreen: ScreenTheme.default.signalGreen,
-        signalAmber: ScreenTheme.default.signalAmber,
-        signalRed: ScreenTheme.default.signalRed
-    )
+/// The tap feedback every collapsed `ProjectCard` button uses — a brief
+/// press-down scale dip, the same device `CategoryCard`'s own press style
+/// uses, scoped separately per screen rather than shared, matching that
+/// type's own precedent.
+private struct ProjectCardPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
 }
 
-// MARK: - Drafting grid background
+// MARK: - Project card
 
-/// This screen's signature device: an engineering-graph-paper grid behind
-/// every panel — a fine 1-unit grid plus a heavier line every 5 units,
-/// the real drafting-paper convention — instead of the shared chassis's
-/// plain void + radial glow. Derives both grid tones from the active
-/// theme's own `panelLine` color (full opacity for the heavy lines, a
-/// diluted version for the fine ones) rather than adding bespoke grid
-/// tokens to `ScreenTheme` for a device only this screen uses.
-private struct DraftingGridBackground: View {
+/// One Project's card: the shared `GlassBubble` surface (`.gridCell` size)
+/// with this screen's own content on it — name, Client, due date, and the
+/// `projectProgressBar` dimension line. Used two ways: `isExpanded: false`
+/// as the plain collapsed grid cell, and `isExpanded: true` as the single
+/// centered card `ProjectsContent.expandedOverlay(_:sprintsViewModel:)`
+/// paints above a dimmed scrim, additionally passed that Project's
+/// `sprints` to reveal (mirrors `CategoryCard`'s own two-ways-used shape).
+private struct ProjectCard: View {
+    let project: Project
+    let clientName: String?
+    let completionFraction: Double?
+    let isExpanded: Bool
+    var sprints: [Sprint] = []
+
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.screenTheme) private var theme
 
-    private let cell: CGFloat = 14
-    private let heavyEvery = 5
+    private static let baseHeight: CGFloat = 140
+    private static let style: GlassBubbleStyle = .gridCell
 
     var body: some View {
-        Canvas { context, size in
-            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(theme.panelVoid(colorScheme)))
-
-            var column = 0
-            var x: CGFloat = 0
-            while x <= size.width {
-                var path = Path()
-                path.move(to: CGPoint(x: x, y: 0))
-                path.addLine(to: CGPoint(x: x, y: size.height))
-                context.stroke(path, with: .color(lineColor(heavy: column % heavyEvery == 0)), lineWidth: 1)
-                x += cell
-                column += 1
+        VStack(alignment: .leading, spacing: 0) {
+            Text(project.name)
+                .font(.system(size: 15, weight: .semibold))
+                .lineLimit(2)
+            if let clientName {
+                Text(clientName.uppercased())
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .tracking(1.0)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 10)
             }
-
-            var row = 0
-            var y: CGFloat = 0
-            while y <= size.height {
-                var path = Path()
-                path.move(to: CGPoint(x: 0, y: y))
-                path.addLine(to: CGPoint(x: size.width, y: y))
-                context.stroke(path, with: .color(lineColor(heavy: row % heavyEvery == 0)), lineWidth: 1)
-                y += cell
-                row += 1
+            if let dueDate = project.dueDate {
+                Text(dueDate, style: .date)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(isOverdue ? theme.signalRed(colorScheme) : .secondary)
+                    .padding(.top, clientName == nil ? 10 : 3)
+            }
+            if let completionFraction {
+                projectProgressBar(completionFraction, colorScheme: colorScheme, theme: theme)
+                    .padding(.top, 12)
+            }
+            if isExpanded {
+                sprintsSection
+                    .padding(.top, 14)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .ignoresSafeArea()
+        .padding(18)
+        .frame(maxWidth: .infinity, minHeight: Self.baseHeight, alignment: .topLeading)
+        .glassBubble(Self.style)
     }
 
-    private func lineColor(heavy: Bool) -> Color {
-        heavy ? theme.panelLine(colorScheme) : theme.panelLine(colorScheme).opacity(0.4)
+    private var isOverdue: Bool {
+        projectIsOverdue(project, completionFraction: completionFraction)
     }
+
+    // MARK: Sprints (expanded reveal)
+
+    @ViewBuilder
+    private var sprintsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Rectangle()
+                .fill(theme.panelLine(colorScheme))
+                .frame(height: 1)
+                .opacity(0.7)
+                .padding(.bottom, 2)
+            if sprints.isEmpty {
+                Text("No Sprints yet")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(sprints) { sprint in
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(sprint.name)
+                            .font(.system(size: 11))
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        Text(Self.dateRangeText(sprint))
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private static func dateRangeText(_ sprint: Sprint) -> String {
+        "\(Self.dateFormatter.string(from: sprint.startDate))–\(Self.dateFormatter.string(from: sprint.endDate))"
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        return formatter
+    }()
 }
