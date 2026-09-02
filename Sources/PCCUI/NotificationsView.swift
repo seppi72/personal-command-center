@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Minimal Mac/iOS screen for ticket #46: the owner's "needs you" queue
 /// (`CONTEXT.md`'s Notification entry) — every open Notification, newest
-/// first, dismissed via swipe-to-delete — the same per-row destructive
+/// first, dismissed via context menu — the same per-row destructive
 /// action `PersonalCommitmentsView` already uses, rather than inventing a
 /// second, redundant tap target for the same action. One shared SwiftUI
 /// view for both platforms — no platform-specific chrome, per this repo's
@@ -10,25 +10,47 @@ import SwiftUI
 /// `AutomationLogView`/`DeadlinesView`). Nothing here creates a
 /// Notification — that's tickets #47/#48's automated sourcing job, not
 /// owner input.
+///
+/// On the shared Liquid Glass system since issue #71 — full-width glass
+/// rows on `GlassScreenBackground()`, with the timestamp in this chassis's
+/// monospaced digits so entries line up chronologically down the page. No
+/// signature device and no screen accent: this screen's only color is the
+/// `attention` `StatusDot`, computed from the same outstanding-items signal
+/// as before.
 public struct NotificationsView: View {
     @ObservedObject private var viewModel: NotificationsViewModel
-
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.screenTheme) private var theme
 
     public init(viewModel: NotificationsViewModel) {
         self.viewModel = viewModel
     }
 
     public var body: some View {
+        NotificationsContent(viewModel: viewModel)
+            .screenTheme(.liquidGlass)
+    }
+}
+
+/// The screen's actual content — split out from `NotificationsView` itself
+/// so `.screenTheme(.liquidGlass)` (applied in that struct's body, above)
+/// is genuinely in effect by the time this struct's own `body` reads
+/// `@Environment(\.screenTheme)`. See `View.screenTheme(_:)`'s doc comment
+/// in `PCCChassis.swift` for why the split is required.
+private struct NotificationsContent: View {
+    @ObservedObject var viewModel: NotificationsViewModel
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
+
+    var body: some View {
         NavigationStack {
             Group {
                 if viewModel.notifications.isEmpty && !viewModel.isLoading {
                     emptyState
                 } else {
-                    notificationList
+                    notificationScroll
                 }
             }
+            .background(GlassScreenBackground())
             .navigationTitle("Notifications")
             .task { await viewModel.load() }
             .refreshable { await viewModel.load() }
@@ -36,39 +58,34 @@ public struct NotificationsView: View {
         }
     }
 
-    private var notificationList: some View {
-        List {
-            Section {
+    /// A `ScrollView` of `NotificationBubble`s rather than a `List` — this
+    /// screen's whole point is liquid glass floating on plain white/black,
+    /// which needs each row to draw its own translucent Material-backed
+    /// shape (the shared `GlassBubble`) rather than a native list
+    /// container's opaque row fill (mirrors `TasksView`'s own move from
+    /// `List` to `ScrollView` + custom bubbles for the same reason).
+    /// Dismissal moves from the old `List`'s swipe gesture onto each row's
+    /// own context menu — a `ScrollView` has no `List`-style swipe gesture
+    /// to give it for free (mirrors `ClientsView`'s identical tradeoff).
+    private var notificationScroll: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
                 statusStrip
-            }
-            Section {
-                ForEach(viewModel.notifications) { notification in
-                    row(for: notification)
-                }
-                .onDelete { offsets in
-                    let toDismiss = offsets.map { viewModel.notifications[$0] }
-                    Task {
-                        for notification in toDismiss {
-                            await viewModel.dismiss(notification)
-                        }
+                VStack(spacing: 14) {
+                    ForEach(viewModel.notifications) { notification in
+                        NotificationBubble(notification: notification)
+                            .contextMenu {
+                                Button(role: .destructive) {
+                                    Task { await viewModel.dismiss(notification) }
+                                } label: {
+                                    Label("Dismiss", systemImage: "xmark.circle")
+                                }
+                            }
                     }
                 }
-                .panelRows()
+                .padding(.top, 18)
             }
-        }
-        .panelScreenBackground()
-    }
-
-    private func row(for notification: NotificationItem) -> some View {
-        HStack(alignment: .top) {
-            StatusDot(.attention)
-                .padding(.top, 5)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(notification.message)
-                Text(notification.createdAt, style: .relative)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            }
+            .padding(PCCChassis.outerMargin)
         }
     }
 
@@ -86,18 +103,13 @@ public struct NotificationsView: View {
                 .foregroundStyle(.secondary)
             Spacer()
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 10)
+        .padding(.bottom, 12)
         .overlay(
             Rectangle()
                 .fill(theme.panelLine(colorScheme))
                 .frame(height: 1),
             alignment: .bottom
         )
-        .listRowInsets(EdgeInsets())
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
     }
 
     private var overallStatus: PanelStatus {
@@ -120,5 +132,37 @@ public struct NotificationsView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - Notification bubble
+
+/// One Notification row: the shared `GlassBubble` surface (`.fullWidth`
+/// size) with this screen's own content on it — an `attention` `StatusDot`,
+/// the message, and its relative timestamp in monospaced digits so a
+/// column of rows lines up chronologically down the page. The bubble's
+/// material, tint, specular highlight and rim come from `PCCChassis`, not
+/// from here; only the layout is this screen's.
+private struct NotificationBubble: View {
+    let notification: NotificationItem
+
+    private static let style: GlassBubbleStyle = .fullWidth
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            StatusDot(.attention)
+                .padding(.top, 5)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(notification.message)
+                    .font(.system(size: 15))
+                Text(notification.createdAt, style: .relative)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .glassBubble(Self.style)
     }
 }
