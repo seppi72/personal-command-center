@@ -12,6 +12,14 @@ import SwiftUI
 /// This doesn't replace `PersonalCommitmentsView` — that screen still owns
 /// Commitment-only browsing/editing. This one is the "everything on my
 /// calendar, at a glance" view spec #1 asks for on top of it.
+///
+/// On the shared Liquid Glass system since issue #71 — full-width
+/// `GlassBubble` rows on `GlassScreenBackground()`, replacing the earlier
+/// Solari departures-board costume (a chrome-yellow instrument panel, and a
+/// split-flap tile for every date) `git log` on this file still shows. The
+/// split-flap device is deleted outright rather than redrawn in glass — a
+/// date doesn't need a prop to read as a date — and every date now just sets
+/// in this chassis's rounded font face instead.
 public struct CalendarView: View {
     @ObservedObject private var viewModel: CalendarViewModel
 
@@ -21,13 +29,13 @@ public struct CalendarView: View {
 
     public var body: some View {
         CalendarContent(viewModel: viewModel)
-            .screenTheme(.departuresBoard)
+            .screenTheme(.liquidGlass)
     }
 }
 
 /// The screen's actual content — split out from `CalendarView` itself so
-/// `.screenTheme(.departuresBoard)` (applied in that struct's body, above)
-/// is genuinely in effect by the time this struct's own `body` reads
+/// `.screenTheme(.liquidGlass)` (applied in that struct's body, above) is
+/// genuinely in effect by the time this struct's own `body` reads
 /// `@Environment(\.screenTheme)`. See `View.screenTheme(_:)`'s doc comment
 /// in `PCCChassis.swift` for why the split is required.
 private struct CalendarContent: View {
@@ -44,10 +52,10 @@ private struct CalendarContent: View {
                 if viewModel.entries.isEmpty && !viewModel.isLoading {
                     emptyState
                 } else {
-                    entryList
+                    entryScroll
                 }
             }
-            .background(PanelBackground())
+            .background(GlassScreenBackground())
             .navigationTitle("Calendar")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
@@ -71,34 +79,29 @@ private struct CalendarContent: View {
         }
     }
 
-    private var entryList: some View {
-        List {
-            Section {
+    /// A `ScrollView` of glass rows rather than a `List` — this screen's
+    /// whole point is liquid glass floating on plain white/black, which
+    /// needs each row to draw its own translucent Material-backed shape
+    /// (the shared `GlassBubble`) rather than a native list container's
+    /// opaque row fill (mirrors `TasksView`'s own move from `List` to
+    /// `ScrollView` + custom bubbles for the same reason). Deletion moves
+    /// from the old `List`'s swipe gesture onto each editable row's own
+    /// context menu — a `ScrollView` has no `List`-style swipe gesture to
+    /// give it for free (mirrors `ClientsView`'s identical grid-to-card
+    /// tradeoff).
+    private var entryScroll: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
                 statusStrip
-            }
-            Section {
-                ForEach(viewModel.entries) { entry in
-                    row(for: entry)
-                }
-                .onDelete { offsets in
-                    let toDelete = offsets.compactMap { offset -> PersonalCommitment? in
-                        guard case let .commitment(commitment) = viewModel.entries[offset] else { return nil }
-                        return commitment
-                    }
-                    Task {
-                        for commitment in toDelete {
-                            await viewModel.deleteCommitment(commitment)
-                        }
+                VStack(spacing: 14) {
+                    ForEach(viewModel.entries) { entry in
+                        row(for: entry)
                     }
                 }
-                .panelRows()
+                .padding(.top, 18)
             }
+            .padding(PCCChassis.outerMargin)
         }
-        .scrollContentBackground(.hidden)
-        // Same edge-margin fix as `TasksView.taskList` — see that
-        // property's own doc comment for why this has to pad the `List`
-        // itself rather than each row.
-        .padding(.horizontal, PCCChassis.outerMargin)
     }
 
     // MARK: - Status strip
@@ -111,18 +114,13 @@ private struct CalendarContent: View {
                 .foregroundStyle(.secondary)
             Spacer()
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 10)
+        .padding(.bottom, 12)
         .overlay(
             Rectangle()
                 .fill(theme.panelLine(colorScheme))
                 .frame(height: 1),
             alignment: .bottom
         )
-        .listRowInsets(EdgeInsets())
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
     }
 
     private var failedSyncCount: Int {
@@ -150,46 +148,26 @@ private struct CalendarContent: View {
         return "\(count) \(noun)   ·   \(todayCount) TODAY"
     }
 
+    // MARK: - Rows
+
     @ViewBuilder
     private func row(for entry: CalendarEntry) -> some View {
         switch entry {
         case .commitment(let commitment):
-            Button {
-                editingCommitment = commitment
-            } label: {
-                rowContent(for: entry, commitment: commitment)
-            }
-            #if os(macOS)
-            .buttonStyle(.plain)
-            #endif
+            CalendarEntryBubble(entry: entry, commitment: commitment, onTap: { editingCommitment = commitment })
+                .contextMenu {
+                    Button(role: .destructive) {
+                        Task { await viewModel.deleteCommitment(commitment) }
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
         case .mirroredEvent:
-            // Not a Button: a mirrored event is read-only through the
-            // Command Center (spec #1, user story 22) — nothing to tap
-            // into.
-            rowContent(for: entry, commitment: nil)
+            // No `onTap`, and no context menu: a mirrored event is
+            // read-only through the Command Center (spec #1, user story
+            // 22) — nothing to tap into or delete.
+            CalendarEntryBubble(entry: entry, commitment: nil, onTap: nil)
         }
-    }
-
-    /// One row's content, shared by both cases so an editable Commitment
-    /// and a read-only mirrored event line up visually and differ only in
-    /// the trailing badge — a `SyncStatusBadge` for a Commitment, a lock
-    /// glyph for a mirrored event.
-    private func rowContent(for entry: CalendarEntry, commitment: PersonalCommitment?) -> some View {
-        HStack(spacing: 14) {
-            SplitFlapDate(date: entry.startDate)
-            Text(entry.title)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if let commitment {
-                SyncStatusBadge(syncStatus: commitment.syncStatus)
-            } else {
-                Label("Read-only", systemImage: "lock.fill")
-                    .labelStyle(.iconOnly)
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel("Read-only, mirrored from your external Calendar")
-            }
-        }
-        .padding(.vertical, 6)
-        .foregroundStyle(entry.isEditable ? .primary : .secondary)
     }
 
     private var emptyState: some View {
@@ -204,77 +182,68 @@ private struct CalendarContent: View {
     }
 }
 
-// MARK: - Departures Board theme
+// MARK: - Calendar entry bubble
 
-extension ScreenTheme {
-    /// `CalendarView`'s own vibe: a Solari split-flap departures display.
-    /// A chrome-yellow accent — colder and brighter than Finance's gold
-    /// or Tasks' safety-orange, so the three don't blur together in the
-    /// sidebar. Signal colors are left as `ScreenTheme.default`'s.
-    fileprivate static let departuresBoard = ScreenTheme(
-        panelVoid: { $0 == .dark ? Color(hex: 0x0E0E0A) : Color(hex: 0xF3F1EA) },
-        panelSurface: { $0 == .dark ? Color(hex: 0x1C1B14) : Color(hex: 0xFFFFFF) },
-        panelLine: { $0 == .dark ? Color(hex: 0x38361F) : Color(hex: 0xDDD8C8) },
-        accent: { $0 == .dark ? Color(hex: 0xF2C230) : Color(hex: 0xA9820A) },
-        signalGreen: ScreenTheme.default.signalGreen,
-        signalAmber: ScreenTheme.default.signalAmber,
-        signalRed: ScreenTheme.default.signalRed
-    )
-}
+/// One row: the shared `GlassBubble` surface (`.fullWidth` size) with this
+/// screen's own content on it — a leading date, the title, and a trailing
+/// badge — shared by both an editable Commitment and a read-only mirrored
+/// event so the two line up visually and differ only in that badge (a
+/// `SyncStatusBadge` for a Commitment, a lock glyph for a mirrored event)
+/// and in whether `onTap` is set. The leading date sets in this chassis's
+/// rounded font face rather than any bespoke device — see this file's own
+/// doc comment. The bubble's material, tint, specular highlight and rim
+/// come from `PCCChassis`, not from here; only the layout is this screen's.
+private struct CalendarEntryBubble: View {
+    let entry: CalendarEntry
+    let commitment: PersonalCommitment?
+    let onTap: (() -> Void)?
 
-// MARK: - Split-flap date
-
-/// This screen's signature device: every date renders as a row of
-/// individually tiled characters with a seam line through the middle —
-/// the Solari-board convention every airport/train departures display
-/// uses — instead of a plain date string.
-private struct SplitFlapDate: View {
-    let date: Date
-
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.screenTheme) private var theme
-
-    private static let formatter: DateFormatter = {
+    private static let style: GlassBubbleStyle = .fullWidth
+    private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMM d"
         return formatter
     }()
 
-    private var characters: [Character] {
-        Array(Self.formatter.string(from: date).uppercased())
-    }
-
     var body: some View {
-        HStack(spacing: 3) {
-            ForEach(Array(characters.enumerated()), id: \.offset) { _, character in
-                if character == " " {
-                    Color.clear.frame(width: 6)
-                } else {
-                    tile(character)
-                }
+        Group {
+            if let onTap {
+                Button(action: onTap) { content }
+                    #if os(macOS)
+                    .buttonStyle(.plain)
+                    #endif
+            } else {
+                content
             }
         }
-        // A fixed number of tile slots (the longest this format ever
-        // produces, "MMM DD" = 6 characters) so every row's date column
-        // lines up regardless of how many characters its own date
-        // actually rendered — a 1-digit day would otherwise be a
-        // narrower column than a 2-digit one.
-        .frame(width: 6 * 18, alignment: .leading)
+        .glassBubble(Self.style)
     }
 
-    private func tile(_ character: Character) -> some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(colorScheme == .dark ? Color(hex: 0x030302) : Color(hex: 0x14130D))
-            Text(String(character))
-                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                .foregroundStyle(theme.accent(colorScheme))
-            // The flap seam — the horizontal split every physical
-            // Solari-board character has across its middle.
-            Rectangle()
-                .fill(Color.black.opacity(0.55))
-                .frame(height: 1)
+    private var content: some View {
+        HStack(spacing: 14) {
+            Text(Self.dateFormatter.string(from: entry.startDate))
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundStyle(.secondary)
+                .frame(width: 60, alignment: .leading)
+            Text(entry.title)
+                .font(.system(size: 15, weight: .semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if let commitment {
+                SyncStatusBadge(syncStatus: commitment.syncStatus)
+            } else {
+                Label("Read-only", systemImage: "lock.fill")
+                    .labelStyle(.iconOnly)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Read-only, mirrored from your external Calendar")
+            }
         }
-        .frame(width: 15, height: 22)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .foregroundStyle(entry.isEditable ? .primary : .secondary)
+        // Without this, only the rendered text/badge actually registers a
+        // tap — the `.frame(maxWidth: .infinity)` title above adds layout
+        // width but no hit-testable area on its own (the same gap
+        // `TaskBubble`'s own doc comment calls out for its row).
+        .contentShape(Rectangle())
     }
 }

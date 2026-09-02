@@ -6,6 +6,13 @@ import SwiftUI
 /// surfaced here as a per-row sync-status badge. One shared SwiftUI view
 /// for both platforms — no platform-specific chrome, per the ticket's
 /// "minimal" scope (mirrors `ProjectsView`/`TasksView`).
+///
+/// On the shared Liquid Glass system since issue #71 — full-width
+/// `GlassBubble` rows on `GlassScreenBackground()`, replacing the earlier
+/// notebook-page costume (warm paper tones, a dusty-rose accent, and a
+/// serif "handwritten" title face) `git log` on this file still shows. The
+/// notebook rules are deleted outright rather than redrawn in glass; these
+/// rows are plain glass now, same as every other screen's.
 public struct PersonalCommitmentsView: View {
     @ObservedObject private var viewModel: PersonalCommitmentsViewModel
 
@@ -15,15 +22,15 @@ public struct PersonalCommitmentsView: View {
 
     public var body: some View {
         PersonalCommitmentsContent(viewModel: viewModel)
-            .screenTheme(.notebookPage)
+            .screenTheme(.liquidGlass)
     }
 }
 
 /// The screen's actual content — split out from `PersonalCommitmentsView`
-/// itself so `.screenTheme(.notebookPage)` (applied in that struct's
-/// body, above) is genuinely in effect by the time this struct's own
-/// `body` reads `@Environment(\.screenTheme)`. See `View.screenTheme(_:)`'s
-/// doc comment in `PCCChassis.swift` for why the split is required.
+/// itself so `.screenTheme(.liquidGlass)` (applied in that struct's body,
+/// above) is genuinely in effect by the time this struct's own `body` reads
+/// `@Environment(\.screenTheme)`. See `View.screenTheme(_:)`'s doc comment
+/// in `PCCChassis.swift` for why the split is required.
 private struct PersonalCommitmentsContent: View {
     @ObservedObject var viewModel: PersonalCommitmentsViewModel
     @State private var isPresentingNewCommitmentSheet = false
@@ -38,10 +45,10 @@ private struct PersonalCommitmentsContent: View {
                 if viewModel.commitments.isEmpty && !viewModel.isLoading {
                     emptyState
                 } else {
-                    commitmentList
+                    commitmentScroll
                 }
             }
-            .background(PanelBackground())
+            .background(GlassScreenBackground())
             .navigationTitle("Personal Commitments")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
@@ -65,76 +72,47 @@ private struct PersonalCommitmentsContent: View {
         }
     }
 
-    private var commitmentList: some View {
-        List {
-            Section {
+    /// A `ScrollView` of `CommitmentBubble`s rather than a `List` — this
+    /// screen's whole point is liquid glass floating on plain white/black,
+    /// which needs each row to draw its own translucent Material-backed
+    /// shape (the shared `GlassBubble`) rather than a native list
+    /// container's opaque row fill (mirrors `TasksView`'s own move from
+    /// `List` to `ScrollView` + custom bubbles for the same reason).
+    /// Deletion moves from the old `List`'s swipe gesture onto each row's
+    /// own context menu — a `ScrollView` has no `List`-style swipe gesture
+    /// to give it for free (mirrors `ClientsView`'s identical tradeoff).
+    private var commitmentScroll: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
                 statusStrip
-            }
-            Section {
-                ForEach(viewModel.commitments) { commitment in
-                    Button {
-                        editingCommitment = commitment
-                    } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(alignment: .firstTextBaseline) {
-                                // The one typographic break from every
-                                // other screen's sans/mono language —
-                                // this screen's whole signature, carrying
-                                // "more human, less instrument-panel" on
-                                // its own.
-                                Text(commitment.title)
-                                    .font(.system(size: 17, design: .serif))
-                                Spacer()
-                                SyncStatusBadge(syncStatus: commitment.syncStatus)
+                VStack(spacing: 14) {
+                    ForEach(viewModel.commitments) { commitment in
+                        CommitmentBubble(commitment: commitment, onTap: { editingCommitment = commitment })
+                            .contextMenu {
+                                Button(role: .destructive) {
+                                    Task { await viewModel.deleteCommitment(commitment) }
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
                             }
-                            Text(commitment.startDate, style: .date)
-                                .font(.system(size: 13, design: .serif).italic())
-                                .foregroundStyle(.secondary)
-                            if let recurrenceRule = commitment.recurrenceRule {
-                                Text(recurrenceRule)
-                                    .font(.caption)
-                                    .foregroundStyle(theme.accent(colorScheme))
-                            }
-                        }
-                        .padding(.vertical, 6)
-                    }
-                    #if os(macOS)
-                    .buttonStyle(.plain)
-                    #endif
-                }
-                .onDelete { offsets in
-                    let toDelete = offsets.map { viewModel.commitments[$0] }
-                    Task {
-                        for commitment in toDelete {
-                            await viewModel.deleteCommitment(commitment)
-                        }
                     }
                 }
-                .notebookRows()
+                .padding(.top, 18)
             }
+            .padding(PCCChassis.outerMargin)
         }
-        .scrollContentBackground(.hidden)
-        // Same edge-margin fix as `TasksView.taskList` — see that
-        // property's own doc comment for why this has to pad the `List`
-        // itself rather than each row.
-        .padding(.horizontal, PCCChassis.outerMargin)
     }
 
     // MARK: - Status strip
 
-    /// A plain italic sentence rather than every other screen's uppercase
-    /// tracked label — quieter, and read as something a person would
-    /// actually say, matching this screen's own brief.
     private var statusStrip: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        HStack(spacing: 10) {
             StatusDot(overallStatus)
             Text(statusStripText)
-                .font(.system(size: 15, design: .serif).italic())
+                .pccPanelLabel()
                 .foregroundStyle(.secondary)
             Spacer()
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
         .padding(.bottom, 12)
         .overlay(
             Rectangle()
@@ -142,9 +120,6 @@ private struct PersonalCommitmentsContent: View {
                 .frame(height: 1),
             alignment: .bottom
         )
-        .listRowInsets(EdgeInsets())
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
     }
 
     private var failedSyncCount: Int {
@@ -157,20 +132,17 @@ private struct PersonalCommitmentsContent: View {
 
     private var statusStripText: String {
         let count = viewModel.commitments.count
-        let noun = count == 1 ? "commitment" : "commitments"
-        if failedSyncCount > 0 {
-            let failedNoun = failedSyncCount == 1 ? "one didn't sync" : "\(failedSyncCount) didn't sync"
-            return "\(count) \(noun) on your calendar — \(failedNoun)."
-        }
-        return "\(count) \(noun) on your calendar, all synced."
+        let noun = count == 1 ? "COMMITMENT" : "COMMITMENTS"
+        let flagText = failedSyncCount > 0 ? "\(failedSyncCount) SYNC FAILED" : "ALL SYNCED"
+        return "\(count) \(noun)   ·   \(flagText)"
     }
 
     private var emptyState: some View {
         VStack(spacing: 8) {
             Text("No Personal Commitments")
-                .font(.system(size: 18, weight: .medium, design: .serif))
+                .font(.headline)
             Text("Tap + to schedule your first one.")
-                .font(.system(size: 14, design: .serif).italic())
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -179,7 +151,11 @@ private struct PersonalCommitmentsContent: View {
 
 /// Shared create/edit form: the same sheet serves "New Commitment" and
 /// "Edit Commitment" — a title, start/end time, and an optional raw
-/// recurrence rule (mirrors `TaskFormSheet`/`ProjectFormSheet`).
+/// recurrence rule (mirrors `TaskFormSheet`/`ProjectFormSheet`). Its
+/// Section stays in the shared chassis look — a `Form`'s native controls
+/// don't read as glass however they're dressed (`AccountFormSheet`'s doc
+/// comment carries this reasoning in full) — but its ground now repaints to
+/// `GlassScreenBackground()` via `glassScreenBackground()`, per issue #71.
 struct PersonalCommitmentFormSheet: View {
     let title: String
     let courses: [Course]
@@ -247,7 +223,7 @@ struct PersonalCommitmentFormSheet: View {
                 }
                 .panelRows()
             }
-            .panelScreenBackground()
+            .glassScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -274,59 +250,48 @@ struct PersonalCommitmentFormSheet: View {
     }
 }
 
-// MARK: - Notebook Page theme
+// MARK: - Commitment bubble
 
-extension ScreenTheme {
-    /// `PersonalCommitmentsView`'s own vibe: a deliberate contrast from
-    /// the rest of the app, not another loud console device — warm paper
-    /// tones and a dusty-rose accent, quieter than the shared cyan/gold/
-    /// blue/orange/red/yellow already in use elsewhere. Not the cream +
-    /// terracotta combination that reads as a generic AI default — the
-    /// rose here is cooler and dustier than terracotta, and paired with
-    /// this screen's own serif typography rather than a high-contrast
-    /// serif display treatment. Signal colors are left as
-    /// `ScreenTheme.default`'s.
-    fileprivate static let notebookPage = ScreenTheme(
-        panelVoid: { $0 == .dark ? Color(hex: 0x221C16) : Color(hex: 0xF6EEE0) },
-        panelSurface: { $0 == .dark ? Color(hex: 0x2C241C) : Color(hex: 0xFFFBF3) },
-        panelLine: { $0 == .dark ? Color(hex: 0x4A3C2C) : Color(hex: 0xE8DCC8) },
-        accent: { $0 == .dark ? Color(hex: 0xE4A0B0) : Color(hex: 0xA85A6E) },
-        signalGreen: ScreenTheme.default.signalGreen,
-        signalAmber: ScreenTheme.default.signalAmber,
-        signalRed: ScreenTheme.default.signalRed
-    )
-}
+/// One Commitment row: the shared `GlassBubble` surface (`.fullWidth` size)
+/// with this screen's own content on it — title, start date, an optional
+/// recurrence line, and a `SyncStatusBadge` — plain glass rows now that the
+/// old notebook-page costume is gone (issue #71). The bubble's material,
+/// tint, specular highlight and rim come from `PCCChassis`, not from here;
+/// only the layout is this screen's.
+private struct CommitmentBubble: View {
+    let commitment: PersonalCommitment
+    let onTap: () -> Void
 
-// MARK: - Notebook rows
-
-extension View {
-    /// The row-level background for this screen alone — a softer, larger
-    /// corner radius than the shared chassis's `panelRows()`, since this
-    /// screen's whole point is reading as *less* instrument-panel than
-    /// the rest of the app. A local equivalent of `panelRows()` rather
-    /// than a chassis-wide radius override, since only this screen wants
-    /// it — the rounder corners are this screen's own choice, not a
-    /// device other screens should default to.
-    fileprivate func notebookRows() -> some View {
-        modifier(NotebookRowsModifier())
-    }
-}
-
-private struct NotebookRowsModifier: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.screenTheme) private var theme
 
-    func body(content: Content) -> some View {
-        content
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(theme.panelSurface(colorScheme))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .strokeBorder(theme.panelLine(colorScheme), lineWidth: 1)
-                    )
-                    .padding(.vertical, 3)
-            )
-            .listRowSeparator(.hidden)
+    private static let style: GlassBubbleStyle = .fullWidth
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(alignment: .top, spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(commitment.title)
+                        .font(.system(size: 15, weight: .semibold))
+                    Text(commitment.startDate, style: .date)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    if let recurrenceRule = commitment.recurrenceRule {
+                        Text(recurrenceRule)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                SyncStatusBadge(syncStatus: commitment.syncStatus)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+            .contentShape(Rectangle())
+        }
+        #if os(macOS)
+        .buttonStyle(.plain)
+        #endif
+        .glassBubble(Self.style)
     }
 }
