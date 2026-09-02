@@ -46,7 +46,7 @@ private struct AccountsContent: View {
                     accountScroll
                 }
             }
-            .background(DotGridBackground())
+            .background(GlassScreenBackground())
             .navigationTitle("Accounts")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
@@ -126,7 +126,7 @@ private struct AccountsContent: View {
     /// A `ScrollView` of `AccountBubble`s rather than a `List` — this
     /// screen's whole point is liquid glass floating on plain white/black,
     /// which needs each row to draw its own translucent Material-backed
-    /// shape (`AccountBubble.bubbleBackground`) rather than the shared
+    /// shape (the shared `GlassBubble`) rather than the console
     /// chassis's opaque `panelRows()` card fill (mirrors `ClientsView`'s
     /// own move from `List` to `ScrollView` + custom cards for the same
     /// reason).
@@ -264,75 +264,13 @@ struct AccountFormSheet: View {
     }
 }
 
-// MARK: - Liquid Glass theme
-
-extension ScreenTheme {
-    /// `AccountsView`'s own vibe: real liquid glass — not the flat frosted-
-    /// rectangle "glassmorphism" cliché — floating on plain white/black
-    /// with no color in the background at all, per direct product
-    /// feedback through two revisions (an original vault/safe-deposit
-    /// direction, then a colorful refractive-mesh glass direction, both
-    /// replaced by this one). `panelSurface`/`panelLine` only really
-    /// surface in `AccountFormSheet`'s standard chassis look — the glass
-    /// bubbles draw their own Material-backed fill
-    /// (`AccountBubble.bubbleBackground`) rather than reading these.
-    /// `signalGreen`/`signalRed` are overridden (unlike most other
-    /// screens, which leave them as `ScreenTheme.default`'s) since the
-    /// balance figure's color *is* this screen's signature accent, not an
-    /// incidental status flag.
-    fileprivate static let liquidGlass = ScreenTheme(
-        panelVoid: { $0 == .dark ? Color.black : Color.white },
-        panelSurface: { $0 == .dark ? Color(hex: 0x121212) : Color(hex: 0xF7F7F7) },
-        panelLine: { $0 == .dark ? Color(hex: 0x2A2A2A) : Color(hex: 0xE3E3E3) },
-        accent: { $0 == .dark ? Color(hex: 0x45C989) : Color(hex: 0x157A4C) },
-        signalGreen: { $0 == .dark ? Color(hex: 0x45C989) : Color(hex: 0x157A4C) },
-        signalAmber: ScreenTheme.default.signalAmber,
-        signalRed: { $0 == .dark ? Color(hex: 0xE8695A) : Color(hex: 0xB23226) }
-    )
-}
-
-// MARK: - Dot grid background
-
-/// A hairline dot grid, almost invisible — enough for a glass bubble's
-/// Material blur to have some texture to work with, without reading as a
-/// "background" the way a colored gradient mesh would (the direction this
-/// replaced, per feedback). Canvas-drawn rather than a repeating SwiftUI
-/// view for the same performance reason `ProjectsView`'s
-/// `DraftingGridBackground` draws its own grid lines this way.
-private struct DotGridBackground: View {
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.screenTheme) private var theme
-
-    private static let spacing: CGFloat = 22
-
-    var body: some View {
-        Canvas { context, size in
-            let dotColor = theme.panelLine(colorScheme).opacity(0.8)
-            var x: CGFloat = Self.spacing / 2
-            while x < size.width {
-                var y: CGFloat = Self.spacing / 2
-                while y < size.height {
-                    context.fill(
-                        Path(ellipseIn: CGRect(x: x - 0.5, y: y - 0.5, width: 1, height: 1)),
-                        with: .color(dotColor)
-                    )
-                    y += Self.spacing
-                }
-                x += Self.spacing
-            }
-        }
-        .background(theme.panelVoid(colorScheme))
-    }
-}
-
 // MARK: - Account bubble
 
-/// This screen's signature: a real liquid-glass bubble — a `Material`-
-/// backed shape (genuine OS-level backdrop blur/vibrancy, not a hand-rolled
-/// approximation) with a soft tint gradient, a blurred specular highlight
-/// arcing across the top like light catching a curved surface, and a
-/// hairline rim — in place of the shared chassis's opaque bordered
-/// `panelRows()` card every other List-backed screen uses.
+/// One account row: the shared `GlassBubble` surface (`.fullWidth` size) with
+/// this screen's own content on it — a glass type-icon well, the account's
+/// name and type, and the balance as the loud hero figure. The bubble's
+/// material, tint, specular highlight and rim come from `PCCChassis`, not
+/// from here; only the layout and the balance's coloring are this screen's.
 private struct AccountBubble: View {
     let account: Account
     let onTap: () -> Void
@@ -341,7 +279,7 @@ private struct AccountBubble: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.screenTheme) private var theme
 
-    private static let cornerRadius: CGFloat = 30
+    private static let style: GlassBubbleStyle = .fullWidth
 
     var body: some View {
         Button(action: onTap) {
@@ -365,8 +303,8 @@ private struct AccountBubble: View {
             }
             .padding(.horizontal, 22)
             .padding(.vertical, 20)
-            .background(bubbleBackground)
-            .contentShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
+            .glassBubble(Self.style)
+            .contentShape(RoundedRectangle(cornerRadius: Self.style.cornerRadius, style: .continuous))
         }
         #if os(macOS)
         .buttonStyle(.plain)
@@ -378,58 +316,20 @@ private struct AccountBubble: View {
         }
     }
 
-    // MARK: Glass
-
-    /// White-based regardless of theme — like real glass, the tint comes
-    /// from what's behind it (here, the `Material`'s own light/dark
-    /// vibrancy), not from the app's palette.
-    private var glassFillTop: Color {
-        colorScheme == .dark ? Color.white.opacity(0.12) : Color.white.opacity(0.72)
-    }
-
-    private var glassFillBottom: Color {
-        colorScheme == .dark ? Color.white.opacity(0.02) : Color.white.opacity(0.24)
-    }
-
-    private var bubbleBackground: some View {
-        RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
-            .fill(.ultraThinMaterial)
-            .overlay(
-                RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
-                    .fill(LinearGradient(colors: [glassFillTop, glassFillBottom], startPoint: .topLeading, endPoint: .bottomTrailing))
-            )
-            .overlay(specularHighlight)
-            .overlay(
-                RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
-                    .strokeBorder(theme.panelLine(colorScheme).opacity(0.7), lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
-            .shadow(color: .black.opacity(colorScheme == .dark ? 0.5 : 0.08), radius: 20, x: 0, y: 10)
-    }
-
-    private var specularHighlight: some View {
-        Ellipse()
-            .fill(
-                RadialGradient(
-                    colors: [.white.opacity(colorScheme == .dark ? 0.22 : 0.55), .clear],
-                    center: .center, startRadius: 0, endRadius: 90
-                )
-            )
-            .frame(width: 170, height: 90)
-            .rotationEffect(.degrees(-12))
-            .offset(x: -60, y: -46)
-            .blur(radius: 10)
-            .allowsHitTesting(false)
-    }
-
+    /// The type icon's own little glass well — cut from the same glass as
+    /// the bubble behind it (`GlassBubble`'s own tint and rim), just round
+    /// instead of a rounded rectangle, which is why it isn't a
+    /// `GlassBubble` itself.
     private var iconBubble: some View {
         Circle()
             .fill(.ultraThinMaterial)
             .overlay(
-                Circle().fill(LinearGradient(colors: [glassFillTop, glassFillBottom], startPoint: .topLeading, endPoint: .bottomTrailing))
+                Circle().fill(GlassBubble.tint(for: colorScheme))
             )
             .overlay(
-                Circle().strokeBorder(theme.panelLine(colorScheme).opacity(0.7), lineWidth: 1)
+                Circle().strokeBorder(
+                    GlassBubble.rimColor(theme, colorScheme), lineWidth: GlassBubble.rimWidth
+                )
             )
             .frame(width: 46, height: 46)
             .overlay(

@@ -19,12 +19,12 @@ public struct CategoriesView: View {
 
     public var body: some View {
         CategoriesContent(viewModel: viewModel, isPresentingNewCategorySheet: $isPresentingNewCategorySheet)
-            .screenTheme(.categoryGlass)
+            .screenTheme(.liquidGlass)
     }
 }
 
 /// The screen's actual content — split out from `CategoriesView` itself so
-/// `.screenTheme(.categoryGlass)` (applied in that struct's body, above) is
+/// `.screenTheme(.liquidGlass)` (applied in that struct's body, above) is
 /// genuinely in effect by the time this struct's own `body` reads
 /// `@Environment(\.screenTheme)`. See `View.screenTheme(_:)`'s doc comment
 /// in `PCCChassis.swift` for why the split is required.
@@ -51,7 +51,7 @@ private struct CategoriesContent: View {
                     categoryScroll
                 }
             }
-            .background(DotGridBackground())
+            .background(GlassScreenBackground())
             .navigationTitle("Categories")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
@@ -190,12 +190,12 @@ private struct CategoriesContent: View {
         Color.black.opacity(colorScheme == .dark ? 0.6 : 0.28)
     }
 
-    /// A drop shadow behind the expanded card — kept out of
-    /// `CategoryCard.bubbleBackground` itself (which the collapsed grid
-    /// cells also use) since only the enlarged overlay instance needs the
-    /// heavier "lifted toward the viewer" shadow.
+    /// A drop shadow behind the expanded card — kept off the shared
+    /// `GlassBubble` itself (which the collapsed grid cells also use)
+    /// since only the enlarged overlay instance needs the heavier "lifted
+    /// toward the viewer" shadow.
     private var bubbleShadow: some View {
-        RoundedRectangle(cornerRadius: 26, style: .continuous)
+        RoundedRectangle(cornerRadius: GlassBubbleStyle.gridCell.cornerRadius, style: .continuous)
             .fill(Color.clear)
             .shadow(color: .black.opacity(colorScheme == .dark ? 0.55 : 0.16), radius: 26, x: 0, y: 14)
     }
@@ -480,65 +480,6 @@ struct SubcategoryFormSheet: View {
     }
 }
 
-// MARK: - Category Glass theme
-
-extension ScreenTheme {
-    /// `CategoriesView`'s own vibe: the same real liquid glass as
-    /// `AccountsView` — plain white/black with no color in the
-    /// background, a genuine Material-backed bubble shape rather than a
-    /// flat frosted rectangle — reused rather than shared across files
-    /// since every other screen's `ScreenTheme` is likewise declared
-    /// `fileprivate` to its own screen file. `signalGreen`/`signalRed` are
-    /// overridden (unlike most other screens) for the same reason
-    /// `AccountsView`'s are: the Spent/Received figure's color is this
-    /// screen's actual signature accent.
-    fileprivate static let categoryGlass = ScreenTheme(
-        panelVoid: { $0 == .dark ? Color.black : Color.white },
-        panelSurface: { $0 == .dark ? Color(hex: 0x121212) : Color(hex: 0xF7F7F7) },
-        panelLine: { $0 == .dark ? Color(hex: 0x2A2A2A) : Color(hex: 0xE3E3E3) },
-        accent: { $0 == .dark ? Color(hex: 0x45C989) : Color(hex: 0x157A4C) },
-        signalGreen: { $0 == .dark ? Color(hex: 0x45C989) : Color(hex: 0x157A4C) },
-        signalAmber: ScreenTheme.default.signalAmber,
-        signalRed: { $0 == .dark ? Color(hex: 0xE2776A) : Color(hex: 0xB23226) }
-    )
-}
-
-// MARK: - Dot grid background
-
-/// A hairline dot grid, almost invisible — enough for a glass card's
-/// Material blur to have some texture to work with, without reading as a
-/// "background." Duplicated from `AccountsView.swift` rather than shared
-/// (that one's `private` to its own file) — the same per-file bespoke-
-/// device convention every other screen's bespoke `Shape`s already follow
-/// (e.g. `CourseView.swift`'s `DashedLine` and `TransactionsView.swift`'s
-/// `PerforationLine` are two separate small dashed-line shapes, not one
-/// shared utility).
-private struct DotGridBackground: View {
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.screenTheme) private var theme
-
-    private static let spacing: CGFloat = 22
-
-    var body: some View {
-        Canvas { context, size in
-            let dotColor = theme.panelLine(colorScheme).opacity(0.8)
-            var x: CGFloat = Self.spacing / 2
-            while x < size.width {
-                var y: CGFloat = Self.spacing / 2
-                while y < size.height {
-                    context.fill(
-                        Path(ellipseIn: CGRect(x: x - 0.5, y: y - 0.5, width: 1, height: 1)),
-                        with: .color(dotColor)
-                    )
-                    y += Self.spacing
-                }
-                x += Self.spacing
-            }
-        }
-        .background(theme.panelVoid(colorScheme))
-    }
-}
-
 /// The tap feedback every collapsed `CategoryCard` button uses — a brief
 /// press-down scale dip, same device as `PCCControlChipStyle` in
 /// `FormControls.swift` (`FormControls.swift:57`) but scoped to this
@@ -554,9 +495,10 @@ private struct CategoryCardPressStyle: ButtonStyle {
 
 // MARK: - Category card
 
-/// This screen's signature: a real liquid-glass bubble (same device as
-/// `AccountsView.AccountBubble` — a `Material`-backed shape, a tint
-/// gradient, a blurred specular highlight, a hairline rim). Used two ways:
+/// One Category's card: the shared `GlassBubble` surface (`.gridCell`
+/// size, the counterpart to the `.fullWidth` bubble
+/// `AccountsView` uses) with this screen's own content on it. Used two
+/// ways:
 /// `isExpanded: false` as the plain collapsed grid cell, and
 /// `isExpanded: true` as the single centered card
 /// `CategoriesContent.expandedOverlay(_:)` paints above a dimmed scrim for
@@ -571,7 +513,7 @@ private struct CategoryCard: View {
     @Environment(\.screenTheme) private var theme
 
     private static let baseHeight: CGFloat = 140
-    private static let cornerRadius: CGFloat = 26
+    private static let style: GlassBubbleStyle = .gridCell
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -597,7 +539,7 @@ private struct CategoryCard: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, minHeight: Self.baseHeight, alignment: .topLeading)
-        .background(bubbleBackground)
+        .glassBubble(Self.style)
     }
 
     // MARK: Top entries (expanded reveal)
@@ -650,47 +592,6 @@ private struct CategoryCard: View {
         formatter.dateFormat = "MMM d"
         return formatter
     }()
-
-    // MARK: Glass
-
-    private var glassFillTop: Color {
-        colorScheme == .dark ? Color.white.opacity(0.12) : Color.white.opacity(0.72)
-    }
-
-    private var glassFillBottom: Color {
-        colorScheme == .dark ? Color.white.opacity(0.02) : Color.white.opacity(0.24)
-    }
-
-    private var bubbleBackground: some View {
-        RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
-            .fill(.ultraThinMaterial)
-            .overlay(
-                RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
-                    .fill(LinearGradient(colors: [glassFillTop, glassFillBottom], startPoint: .topLeading, endPoint: .bottomTrailing))
-            )
-            .overlay(specularHighlight)
-            .overlay(
-                RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
-                    .strokeBorder(theme.panelLine(colorScheme).opacity(0.7), lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
-            .shadow(color: .black.opacity(colorScheme == .dark ? 0.4 : 0.08), radius: 16, x: 0, y: 8)
-    }
-
-    private var specularHighlight: some View {
-        Ellipse()
-            .fill(
-                RadialGradient(
-                    colors: [.white.opacity(colorScheme == .dark ? 0.22 : 0.55), .clear],
-                    center: .center, startRadius: 0, endRadius: 70
-                )
-            )
-            .frame(width: 130, height: 70)
-            .rotationEffect(.degrees(-12))
-            .offset(x: -40, y: -36)
-            .blur(radius: 8)
-            .allowsHitTesting(false)
-    }
 
     private var amountColor: Color {
         spending.isIncome ? theme.signalGreen(colorScheme) : theme.signalRed(colorScheme)
