@@ -11,7 +11,8 @@ import SwiftUI
 /// - **Liquid Glass** (`GlassBubble`, `GlassScreenBackground`,
 ///   `ScreenTheme.liquidGlass`) — genuine `Material`-backed bubbles on a
 ///   plain white/black ground with a faint dot grid. This is where every
-///   screen is headed; `AccountsView` and `CategoriesView` are there.
+///   screen is headed; `AccountsView`, `CategoriesView`, and
+///   `FinancesReportingView` are there.
 /// - **The console panel** (`PanelCard`, `PanelBackground`,
 ///   `.panelRows()`, `.panelScreenBackground()`) — bordered, solid-filled
 ///   panels, from the earlier instrument-panel phase. Still what every

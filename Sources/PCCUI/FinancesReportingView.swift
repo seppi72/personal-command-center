@@ -11,35 +11,36 @@ import SwiftUI
 /// ticket's own AC calls for actual trend/history/expense charts rather than
 /// rows of numbers.
 ///
-/// Every `Section` header is a panel nameplate — a `StatusDot` plus an
-/// uppercase tracked-out label, matching `OverviewView`'s panel headers —
-/// and every chart is restyled to that same system's hairline-trace
-/// language (dashed gridlines, monospaced axis labels, a gradient-filled
-/// `AreaMark` under a thin `LineMark`) instead of `Charts`' default chrome.
+/// Ticket #66 moved this screen onto the shared Liquid Glass chassis
+/// (`ScreenTheme.liquidGlass`, `GlassScreenBackground`, `GlassBubble`),
+/// replacing what was a screen-specific "Trading Desk" vibe — a gold accent
+/// and a warmer near-black void, both gone now — with the same plain
+/// white/black ground and translucent glass panels `AccountsView` and
+/// `CategoriesView` already carry. Every chart panel below is a
+/// `glassPanel(_:)`, the glass counterpart to the console chassis's
+/// `.panelRows()` card. Directional `signalGreen`/`signalRed` coloring is
+/// untouched — that convention was already right, and it's now the
+/// screen's *only* accent: a rising figure is green, a falling or negative
+/// one is red, and nothing on this screen reaches for a "primary" color
+/// otherwise, per the app-wide meaning rules every other converted screen
+/// follows.
 ///
-/// On top of that base instrument-panel conversion, this screen carries a
-/// finance-specific signature: a ticker-style headline strip (hero Net
-/// Worth readout + a `DeltaBadge` showing signed change and percent over
-/// the selected range, the same "number + colored delta" convention every
-/// stock/banking ticker uses) and directional `signalGreen`/`signalRed`
-/// trend-chart coloring instead of a flat, always-cyan trace — a chart that
-/// went up is green, one that went down is red, never a neutral brand
-/// color. Projected Balance's total is ruled off above it, the way a paper
-/// ledger rules off a sum, instead of sitting at plain caption weight.
+/// Every panel header is a nameplate — a `StatusDot` plus an uppercase
+/// tracked-out label, matching `OverviewView`'s panel headers — and every
+/// chart keeps that same system's hairline-trace language (dashed
+/// gridlines, monospaced axis labels, a gradient-filled `AreaMark` under a
+/// thin `LineMark`) instead of `Charts`' default chrome.
 ///
-/// "Trading Desk": this screen's own vibe on top of the shared chassis —
-/// the brief was "scream finance, stockbroker terminal," not just "stay
-/// on-system." Carries its own `ScreenTheme` (`.tradingDesk`, defined
-/// below) rather than the shared default: a gold primary accent in place
-/// of the app's cyan (money-coded, and deliberately a different hue/
-/// saturation from `signalAmber`'s "attention" orange so the two don't
-/// collide when both appear on this screen), plus a warmer near-black
-/// void in dark mode than the rest of the app. Green/red directional
-/// coloring is untouched — that convention was already correct, this
-/// screen just leans into it harder. The signature device is
-/// `TickerTape`: every Account's balance streaming past in a continuous
-/// scroll, stock-exchange-board style — the one thing that makes this
-/// read as a live feed rather than a report generated once.
+/// This screen's one signature device, kept through the glass migration: a
+/// ticker-style headline strip (hero Net Worth readout + a `DeltaBadge`
+/// showing signed change and percent over the selected range, the same
+/// "number + colored delta" convention every stock/banking ticker uses)
+/// and `TickerTape` — every Account's balance streaming past in a
+/// continuous scroll, stock-exchange-board style, now reskinned onto the
+/// same Material-backed glass every bubble on this screen uses instead of
+/// an opaque panel fill. It's the one thing that makes this read as a live
+/// feed rather than a report generated once, and the one screen that still
+/// owns that device, because the figures it shows genuinely move.
 public struct FinancesReportingView: View {
     @ObservedObject private var viewModel: FinancesReportingViewModel
 
@@ -49,12 +50,12 @@ public struct FinancesReportingView: View {
 
     public var body: some View {
         FinancesReportingContent(viewModel: viewModel)
-            .screenTheme(.tradingDesk)
+            .screenTheme(.liquidGlass)
     }
 }
 
 /// The screen's actual content, split out from `FinancesReportingView`
-/// itself so `.screenTheme(.tradingDesk)` — applied in that struct's body,
+/// itself so `.screenTheme(.liquidGlass)` — applied in that struct's body,
 /// above — is genuinely in effect by the time this struct's own `body`
 /// reads `@Environment(\.screenTheme)`. A view's environment modifiers
 /// only affect the subtree they wrap; they don't reach back into that
@@ -63,48 +64,41 @@ public struct FinancesReportingView: View {
 /// to had it tried to read the environment directly in its own body — the
 /// override only becomes visible to a genuinely separate child view,
 /// which is what this struct is. (Caught the hard way: the first build
-/// rendered the default cyan accent instead of gold, because the hero
-/// Net Worth color was computed directly in the struct that also applied
-/// the theme override, rather than in a child of it.)
+/// rendered the default cyan accent instead of this screen's own color,
+/// because the hero Net Worth color was computed directly in the struct
+/// that also applied the theme override, rather than in a child of it.)
 private struct FinancesReportingContent: View {
     @ObservedObject var viewModel: FinancesReportingViewModel
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.screenTheme) private var theme
 
+    /// A `ScrollView` of glass panels rather than a `List` — this screen's
+    /// charts and `TickerTape` need to draw their own translucent
+    /// Material-backed shapes (the shared `GlassBubble`), which a `List`'s
+    /// opaque native row chrome can't host (mirrors `AccountsView`'s and
+    /// `CategoriesView`'s own move from `List` to `ScrollView` + custom
+    /// cards for the same reason). One outer padding on the whole `VStack`
+    /// — `PCCChassis.outerMargin` — replaces what used to be the `List`'s
+    /// own frame padding, for the same reason that padding was on the
+    /// `List`'s frame rather than a per-row inset: it moves every panel in
+    /// together, not just each row's foreground content.
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                if !viewModel.accounts.isEmpty {
-                    TickerTape(accounts: viewModel.accounts)
-                        .padding(.horizontal, PCCChassis.outerMargin)
-                        .padding(.top, 12)
-                        .padding(.bottom, 4)
-                }
-                List {
-                    Section {
-                        tickerStrip
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    if !viewModel.accounts.isEmpty {
+                        TickerTape(accounts: viewModel.accounts)
                     }
+                    tickerStrip
                     netWorthSection
                     accountBalanceSection
                     expensesSection
                     projectedBalanceSection
                 }
-                .scrollContentBackground(.hidden)
-                // Padding the `List` itself, not a per-row inset: on macOS,
-                // `.listRowInsets` only repositions a row's own foreground
-                // content — a `.listRowBackground` view (what `panelRows()`
-                // uses for each chart's visible card fill) keeps painting
-                // edge-to-edge regardless, so a per-row inset alone leaves
-                // every chart card still touching the window edge. Shrinking
-                // the whole `List`'s own frame instead moves everything
-                // inside it together, cards included. Same fix, same
-                // reasoning, as `TasksView`'s own `List` padding — this was
-                // the one screen still missing it (caught via screenshot:
-                // chart cards flush against both window edges).
-                .padding(.horizontal, PCCChassis.outerMargin)
+                .padding(PCCChassis.outerMargin)
             }
-            .background(PanelBackground())
+            .background(GlassScreenBackground())
             .navigationTitle("Finances Reporting")
             .task { await viewModel.load() }
             .refreshable { await viewModel.load() }
@@ -112,8 +106,27 @@ private struct FinancesReportingContent: View {
         }
     }
 
-    private var readoutColor: Color {
-        theme.accent(colorScheme)
+    /// Net Worth's hero readout color, and the ledger rules under Projected
+    /// Balance: both are directional figures, so both take the same
+    /// green/red-by-sign coloring every balance on this screen uses
+    /// (`AccountsView.AccountBubble.balanceColor` is the same convention) —
+    /// there's no separate "primary" accent color on this screen to reach
+    /// for instead.
+    private func signedColor(_ value: Double) -> Color {
+        value < 0 ? theme.signalRed(colorScheme) : theme.signalGreen(colorScheme)
+    }
+
+    /// This screen's shared chart/figure container — the glass counterpart
+    /// to the console chassis's `.panelRows()` card, used by every section
+    /// below. A panel's own `panelHeader(_:systemImage:status:)` is meant
+    /// to be the first thing passed in.
+    private func glassPanel<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            content()
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .glassBubble(.fullWidth)
     }
 
     // MARK: - Directional signal
@@ -228,7 +241,7 @@ private struct FinancesReportingContent: View {
             StatusDot(netWorthStatus)
             Text(Self.currency(viewModel.currentNetWorth))
                 .font(.pccReadout(24))
-                .foregroundStyle(readoutColor)
+                .foregroundStyle(signedColor(viewModel.currentNetWorth))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
             deltaBadge(for: viewModel.netWorthTrend)
@@ -238,7 +251,9 @@ private struct FinancesReportingContent: View {
     /// `ViewThatFits` rather than a single fixed `HStack`: the date-range
     /// control's label plus a multi-figure PHP readout can together exceed
     /// a phone-portrait row's width, so the strip drops to two lines
-    /// instead of clipping.
+    /// instead of clipping. Full-bleed, no panel chrome, bottom hairline —
+    /// the same treatment `AccountsView`'s and `CategoriesView`'s own
+    /// `statusStrip` uses, since this is this screen's status strip.
     private var tickerStrip: some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 10) {
@@ -255,36 +270,26 @@ private struct FinancesReportingContent: View {
                 }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 10)
+        .padding(.bottom, 12)
         .overlay(
             Rectangle()
                 .fill(theme.panelLine(colorScheme))
                 .frame(height: 1),
             alignment: .bottom
         )
-        .listRowInsets(EdgeInsets())
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
     }
 
     // MARK: - Net Worth
 
     private var netWorthSection: some View {
-        Section {
-            Group {
-                if viewModel.netWorthTrend.isEmpty {
-                    emptyChartLabel
-                } else {
-                    trendChart(viewModel.netWorthTrend, valueLabel: "Net Worth")
-                }
-            }
-            .padding(.vertical, 10)
-        } header: {
+        glassPanel {
             panelHeader("Net Worth", systemImage: "chart.line.uptrend.xyaxis", status: netWorthStatus)
+            if viewModel.netWorthTrend.isEmpty {
+                emptyChartLabel
+            } else {
+                trendChart(viewModel.netWorthTrend, valueLabel: "Net Worth")
+            }
         }
-        .panelRows()
     }
 
     private var netWorthStatus: PanelStatus {
@@ -294,23 +299,18 @@ private struct FinancesReportingContent: View {
     // MARK: - Account Balance
 
     private var accountBalanceSection: some View {
-        Section {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 12) {
-                    accountPicker
-                    deltaBadge(for: viewModel.accountBalanceHistory)
-                }
-                if viewModel.accountBalanceHistory.isEmpty {
-                    emptyChartLabel
-                } else {
-                    trendChart(viewModel.accountBalanceHistory, valueLabel: "Balance")
-                }
-            }
-            .padding(.vertical, 10)
-        } header: {
+        glassPanel {
             panelHeader("Account Balance", systemImage: "building.columns", status: accountBalanceStatus)
+            HStack(spacing: 12) {
+                accountPicker
+                deltaBadge(for: viewModel.accountBalanceHistory)
+            }
+            if viewModel.accountBalanceHistory.isEmpty {
+                emptyChartLabel
+            } else {
+                trendChart(viewModel.accountBalanceHistory, valueLabel: "Balance")
+            }
         }
-        .panelRows()
     }
 
     private var accountBalanceStatus: PanelStatus {
@@ -364,19 +364,14 @@ private struct FinancesReportingContent: View {
     // MARK: - Expenses
 
     private var expensesSection: some View {
-        Section {
-            Group {
-                if viewModel.expensesPerDay.isEmpty {
-                    emptyChartLabel
-                } else {
-                    expensesChart
-                }
-            }
-            .padding(.vertical, 10)
-        } header: {
+        glassPanel {
             panelHeader("Expenses per Day", systemImage: "arrow.down.circle", status: .idle)
+            if viewModel.expensesPerDay.isEmpty {
+                emptyChartLabel
+            } else {
+                expensesChart
+            }
         }
-        .panelRows()
     }
 
     /// The period's average daily expense — a real budget-pace reference,
@@ -430,48 +425,48 @@ private struct FinancesReportingContent: View {
     // MARK: - Projected Balance
 
     private var projectedBalanceSection: some View {
-        Section {
-            VStack(alignment: .leading, spacing: 8) {
-                PCCMenuPicker(
-                    "Period",
-                    selection: $viewModel.projectedBalancePeriod,
-                    options: ProjectedBalancePeriod.allCases.map { ($0, $0.displayName) }
-                )
-                .onChange(of: viewModel.projectedBalancePeriod) { _ in
-                    Task { await viewModel.loadSelectedAccountFigures() }
-                }
-                if let projected = viewModel.projectedBalance {
-                    LabeledContent("Average Daily Net", value: Self.currency(projected.averageDailyNet))
-                    // A double rule in the gold accent, the way a paper
-                    // ledger closes out its final sum with two rules
-                    // instead of one — this is the screen's actual bottom
-                    // line, so it earns the same "this is final" weight a
-                    // real ledger gives a closing total, not just a plain
-                    // hairline divider.
-                    VStack(spacing: 2) {
-                        Rectangle().fill(theme.accent(colorScheme).opacity(0.5)).frame(height: 1)
-                        Rectangle().fill(theme.accent(colorScheme).opacity(0.5)).frame(height: 1)
-                    }
-                    .padding(.top, 4)
-                    HStack(alignment: .lastTextBaseline) {
-                        Text("Projected Balance")
-                            .pccPanelLabel()
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text(Self.currency(projected.projectedBalance))
-                            .font(.pccReadout(24))
-                            .foregroundStyle(projected.projectedBalance < 0 ? theme.signalRed(colorScheme) : theme.signalGreen(colorScheme))
-                    }
-                    .padding(.top, 4)
-                } else {
-                    Text("No Account selected").foregroundStyle(.secondary)
-                }
-            }
-            .padding(.vertical, 10)
-        } header: {
+        glassPanel {
             panelHeader("Projected Balance", systemImage: "chart.bar.doc.horizontal", status: projectedBalanceStatus)
+            PCCMenuPicker(
+                "Period",
+                selection: $viewModel.projectedBalancePeriod,
+                options: ProjectedBalancePeriod.allCases.map { ($0, $0.displayName) }
+            )
+            .onChange(of: viewModel.projectedBalancePeriod) { _ in
+                Task { await viewModel.loadSelectedAccountFigures() }
+            }
+            if let projected = viewModel.projectedBalance {
+                LabeledContent("Average Daily Net") {
+                    Text(Self.currency(projected.averageDailyNet))
+                        .font(.system(.body, design: .monospaced))
+                        .monospacedDigit()
+                }
+                // A double rule, the way a paper ledger closes out its
+                // final sum with two rules instead of one — this is the
+                // screen's actual bottom line, so it earns the same "this
+                // is final" weight a real ledger gives a closing total,
+                // not just a plain hairline divider. `panelLine`, not an
+                // accent — this screen has none; the figure below the rule
+                // already carries the color that matters.
+                VStack(spacing: 2) {
+                    Rectangle().fill(theme.panelLine(colorScheme)).frame(height: 1)
+                    Rectangle().fill(theme.panelLine(colorScheme)).frame(height: 1)
+                }
+                .padding(.top, 4)
+                HStack(alignment: .lastTextBaseline) {
+                    Text("Projected Balance")
+                        .pccPanelLabel()
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(Self.currency(projected.projectedBalance))
+                        .font(.pccReadout(24))
+                        .foregroundStyle(signedColor(projected.projectedBalance))
+                }
+                .padding(.top, 4)
+            } else {
+                Text("No Account selected").foregroundStyle(.secondary)
+            }
         }
-        .panelRows()
     }
 
     private var projectedBalanceStatus: PanelStatus {
@@ -506,25 +501,6 @@ private struct FinancesReportingContent: View {
     private static func currency(_ amount: Double) -> String {
         amount.formatted(.currency(code: "PHP"))
     }
-}
-
-// MARK: - Trading Desk theme
-
-extension ScreenTheme {
-    /// `FinancesReportingView`'s own vibe: a warmer, darker void than the
-    /// shared chassis default, and a gold accent standing in for cyan.
-    /// Signal colors (green/amber/red) are left as `ScreenTheme.default`'s
-    /// — this screen's directional up/down convention was already right,
-    /// nothing here needed to change it.
-    fileprivate static let tradingDesk = ScreenTheme(
-        panelVoid: { $0 == .dark ? Color(hex: 0x0C0A08) : Color(hex: 0xF8F6F1) },
-        panelSurface: { $0 == .dark ? Color(hex: 0x1A1610) : Color(hex: 0xFFFEFB) },
-        panelLine: { $0 == .dark ? Color(hex: 0x332C1F) : Color(hex: 0xE4DCC8) },
-        accent: { $0 == .dark ? Color(hex: 0xE8B923) : Color(hex: 0x8A6D14) },
-        signalGreen: ScreenTheme.default.signalGreen,
-        signalAmber: ScreenTheme.default.signalAmber,
-        signalRed: ScreenTheme.default.signalRed
-    )
 }
 
 // MARK: - Ticker tape
@@ -622,11 +598,7 @@ private struct TickerTape: View {
         }
         .frame(height: 34)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(theme.panelSurface(colorScheme))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(theme.panelLine(colorScheme), lineWidth: 1)
-        )
+        .background(tapeBackground)
         .onPreferenceChange(TapeWidthKey.self) { width in
             // Only the first real measurement is kept — this fires on
             // every layout pass, and re-measuring on later, near-identical
@@ -644,6 +616,21 @@ private struct TickerTape: View {
     private static func copiesNeeded(rowWidth: CGFloat, containerWidth: CGFloat) -> Int {
         guard rowWidth > 0 else { return 1 }
         return max(1, Int((containerWidth / rowWidth).rounded(.up)))
+    }
+
+    /// The tape's own glass surface — the same `Material` fill, white tint,
+    /// and hairline rim `GlassBubble` draws with, cut to this bar's own
+    /// squat shape rather than either of `GlassBubbleStyle`'s row/grid-cell
+    /// presets (mirrors `AccountsView.AccountBubble.iconBubble`'s identical
+    /// reasoning for its own non-preset shape). No specular highlight —
+    /// that device reads on a bubble's open fill, not on a thin bar this
+    /// busy with scrolling text.
+    private var tapeBackground: some View {
+        let shape = RoundedRectangle(cornerRadius: PCCChassis.cardCornerRadius, style: .continuous)
+        return shape
+            .fill(.ultraThinMaterial)
+            .overlay(shape.fill(GlassBubble.tint(for: colorScheme)))
+            .overlay(shape.strokeBorder(GlassBubble.rimColor(theme, colorScheme), lineWidth: GlassBubble.rimWidth))
     }
 
     private var row: some View {
