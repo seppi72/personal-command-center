@@ -154,6 +154,18 @@ public final class TasksViewModel: ObservableObject {
         }
     }
 
+    /// Whether `task` is overdue: has a due date, isn't complete, and that
+    /// due date has passed as of `referenceDate`. Pure and `static` — moved
+    /// off `TasksView` (issue #68) so it's unit-testable at this package's
+    /// one pure-logic test seam (`PCCUITests`) without needing a whole
+    /// `TasksViewModel` instance wired up with API clients. `referenceDate`
+    /// defaults to `Date()` for every real call site; tests pass a fixed
+    /// date instead so the result doesn't depend on when they happen to run.
+    public static nonisolated func isOverdue(_ task: PCCTask, referenceDate: Date = Date()) -> Bool {
+        guard let dueDate = task.dueDate, !task.isComplete else { return false }
+        return dueDate < referenceDate
+    }
+
     /// Swaps the freshly-updated Task into `tasks`, dropping it when scoped
     /// to a Project/Course it no longer belongs to.
     private func replace(_ updated: PCCTask) {

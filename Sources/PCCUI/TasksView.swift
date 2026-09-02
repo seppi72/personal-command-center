@@ -6,6 +6,13 @@ import SwiftUI
 /// Task's Project, and setting/clearing its Deadline (ticket #5). One shared
 /// SwiftUI view for both platforms — no platform-specific chrome, per the
 /// ticket's "minimal" scope (mirrors `ProjectsView`).
+///
+/// On the shared Liquid Glass system since issue #68 — full-width
+/// `GlassBubble` rows on `GlassScreenBackground()`, replacing the earlier
+/// field-manual costume (khaki paper, a hand-inked checkbox, an ink-stamp
+/// "OVERDUE" tag) `git log` on this file still shows. The checkbox and the
+/// overdue flag both survive as devices, just redrawn in glass — see
+/// `GlassCheckbox`/`OverdueBadge` below.
 public struct TasksView: View {
     @ObservedObject private var viewModel: TasksViewModel
 
@@ -15,12 +22,12 @@ public struct TasksView: View {
 
     public var body: some View {
         TasksContent(viewModel: viewModel)
-            .screenTheme(.fieldManual)
+            .screenTheme(.liquidGlass)
     }
 }
 
 /// The screen's actual content — split out from `TasksView` itself so
-/// `.screenTheme(.fieldManual)` (applied in that struct's body, above) is
+/// `.screenTheme(.liquidGlass)` (applied in that struct's body, above) is
 /// genuinely in effect by the time this struct's own `body` reads
 /// `@Environment(\.screenTheme)`. See `View.screenTheme(_:)`'s doc comment
 /// in `PCCChassis.swift` for why the split is required.
@@ -38,14 +45,14 @@ private struct TasksContent: View {
                 if viewModel.tasks.isEmpty && !viewModel.isLoading {
                     emptyState
                 } else {
-                    taskList
+                    taskScroll
                 }
             }
             // Applied once here, covering both branches, rather than on
-            // `taskList` alone — `emptyState` had no themed background at
+            // `taskScroll` alone — `emptyState` had no themed background at
             // all before this (a pre-existing gap; `ProjectsView` had the
             // same one, fixed the same way).
-            .background(PanelBackground())
+            .background(GlassScreenBackground())
             .navigationTitle("Tasks")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
@@ -94,91 +101,33 @@ private struct TasksContent: View {
         }
     }
 
-    private var taskList: some View {
-        List {
-            Section {
+    /// A `ScrollView` of `TaskBubble`s rather than a `List` — this screen's
+    /// whole point is liquid glass floating on plain white/black, which
+    /// needs each row to draw its own translucent Material-backed shape
+    /// (the shared `GlassBubble`) rather than a native list container's
+    /// opaque row fill (mirrors `AccountsView`'s own move from `List` to
+    /// `ScrollView` + custom cards for the same reason).
+    private var taskScroll: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
                 statusStrip
-            }
-            Section {
-                ForEach(viewModel.tasks) { task in
-                    HStack(alignment: .top, spacing: 14) {
-                        Button {
-                            Task {
-                                await viewModel.setCompletion(task, isComplete: !task.isComplete)
-                            }
-                        } label: {
-                            TacticalCheckbox(isComplete: task.isComplete)
-                        }
-                        #if os(macOS)
-                        .buttonStyle(.plain)
-                        #endif
-
-                        Button {
-                            editingTask = task
-                        } label: {
-                            VStack(alignment: .leading) {
-                                Text(task.title)
-                                    .strikethrough(task.isComplete)
-                                if let notes = task.notes {
-                                    Text(notes)
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                }
-                                if let dueDate = task.dueDate {
-                                    Text(dueDate, style: .date)
-                                        .font(.system(size: 11, design: .monospaced))
-                                        .foregroundStyle(Self.isOverdue(task) ? theme.signalRed(colorScheme) : .secondary)
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        #if os(macOS)
-                        .buttonStyle(.plain)
-                        #endif
-
-                        // A sibling in the row's own HStack, not an
-                        // overlay bled past the row's edge — an earlier
-                        // pass did that to mimic a diagonal mockup effect
-                        // and it repeatedly fought the row's real bounds
-                        // across several rounds of screenshots; see
-                        // OverdueStamp's own doc comment for why it's a
-                        // plain unrotated tag now.
-                        if Self.isOverdue(task) {
-                            OverdueStamp()
-                        }
-                    }
-                    // No horizontal padding: List already reserves its
-                    // own leading/trailing inset per row, same as every
-                    // other screen's rows — adding more on top of that
-                    // doubled up and read as "too far from the edge"
-                    // (caught via screenshot on a real Task).
-                    .padding(.vertical, 10)
-                }
-                .onDelete { offsets in
-                    let toDelete = offsets.map { viewModel.tasks[$0] }
-                    Task {
-                        for task in toDelete {
-                            await viewModel.deleteTask(task)
-                        }
+                VStack(spacing: 14) {
+                    ForEach(viewModel.tasks) { task in
+                        TaskBubble(
+                            task: task,
+                            isOverdue: TasksViewModel.isOverdue(task),
+                            onToggleComplete: {
+                                Task { await viewModel.setCompletion(task, isComplete: !task.isComplete) }
+                            },
+                            onTap: { editingTask = task },
+                            onDelete: { Task { await viewModel.deleteTask(task) } }
+                        )
                     }
                 }
-                .panelRows()
+                .padding(.top, 18)
             }
+            .padding(PCCChassis.outerMargin)
         }
-        .scrollContentBackground(.hidden)
-        // Padding the `List` itself, not a per-row inset: on macOS,
-        // `.listRowInsets` only repositions a row's own foreground content —
-        // a `.listRowBackground` view (what `panelRows()` uses for each
-        // row's visible card fill) keeps painting edge-to-edge regardless,
-        // so a per-row inset alone leaves every card still touching the
-        // window edge. Shrinking the whole `List`'s own frame instead moves
-        // everything inside it together, cards included — the ambient
-        // `PanelBackground()` behind this screen's outer `Group` stays
-        // full-bleed since it isn't affected by the `List`'s own padding.
-        // Caught directly from a screenshot: a per-row `.listRowInsets` fix
-        // moved the labels in but left every card's border still flush
-        // against the edge.
-        .padding(.horizontal, PCCChassis.outerMargin)
     }
 
     // MARK: - Status strip
@@ -191,18 +140,13 @@ private struct TasksContent: View {
                 .foregroundStyle(.secondary)
             Spacer()
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 10)
+        .padding(.bottom, 12)
         .overlay(
             Rectangle()
                 .fill(theme.panelLine(colorScheme))
                 .frame(height: 1),
             alignment: .bottom
         )
-        .listRowInsets(EdgeInsets())
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
     }
 
     private var overallStatus: PanelStatus {
@@ -210,12 +154,7 @@ private struct TasksContent: View {
     }
 
     private var overdueCount: Int {
-        viewModel.tasks.filter(Self.isOverdue).count
-    }
-
-    private static func isOverdue(_ task: PCCTask) -> Bool {
-        guard let dueDate = task.dueDate, !task.isComplete else { return false }
-        return dueDate < Date()
+        viewModel.tasks.filter { TasksViewModel.isOverdue($0) }.count
     }
 
     private var statusStripText: String {
@@ -247,6 +186,11 @@ private struct TasksContent: View {
 /// Shared create/edit form: the same sheet serves "New Task" and "Edit
 /// Task" — a title, optional notes, a Project *or* Course picker (never
 /// both — ADR-0003), and a Deadline toggle (mirrors `ProjectFormSheet`).
+/// Its Section stays in the shared chassis look — a `Form`'s native
+/// controls don't read as glass however they're dressed
+/// (`AccountFormSheet`'s doc comment carries this reasoning in full) — but
+/// its ground now repaints to `GlassScreenBackground()` via
+/// `glassScreenBackground()`, per issue #68.
 struct TaskFormSheet: View {
     let title: String
     let projects: [Project]
@@ -334,7 +278,7 @@ struct TaskFormSheet: View {
                 }
                 .panelRows()
             }
-            .panelScreenBackground()
+            .glassScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -361,57 +305,124 @@ struct TaskFormSheet: View {
     }
 }
 
-// MARK: - Field Manual theme
+// MARK: - Task bubble
 
-extension ScreenTheme {
-    /// `TasksView`'s own vibe: completing a Task is the one action this
-    /// screen exists for, so the checkbox itself carries the theme rather
-    /// than a decorative device elsewhere. Khaki paper instead of this
-    /// app's usual blue/gray voids, a safety-orange accent, and signal
-    /// green/red both shifted toward olive/rust rather than the default
-    /// palette's brighter teal-green/pink-red — this screen's own
-    /// complete/overdue colors, not the shared ones.
-    fileprivate static let fieldManual = ScreenTheme(
-        panelVoid: { $0 == .dark ? Color(hex: 0x1A1C14) : Color(hex: 0xEFEBDC) },
-        panelSurface: { $0 == .dark ? Color(hex: 0x24261C) : Color(hex: 0xFAF8EF) },
-        panelLine: { $0 == .dark ? Color(hex: 0x3F4230) : Color(hex: 0xD2CBAF) },
-        accent: { $0 == .dark ? Color(hex: 0xFF8A3D) : Color(hex: 0xC24E14) },
-        signalGreen: { $0 == .dark ? Color(hex: 0x8FBF5E) : Color(hex: 0x4C6B2A) },
-        signalAmber: ScreenTheme.default.signalAmber,
-        signalRed: { $0 == .dark ? Color(hex: 0xFF6B52) : Color(hex: 0xB23A22) }
-    )
+/// One Task row: the shared `GlassBubble` surface (`.fullWidth` size) with
+/// this screen's own content on it — a `GlassCheckbox`, the title/notes/due
+/// date, and an `OverdueBadge` when it's overdue. Set tighter than
+/// `AccountBubble`/`TransactionBubble` (14pt vertical padding, not 20) so a
+/// long Task list stays scannable rather than each row eating as much
+/// vertical space as those screens' single hero-figure rows. The bubble's
+/// material, tint, specular highlight and rim come from `PCCChassis`, not
+/// from here; only the layout is this screen's.
+private struct TaskBubble: View {
+    let task: PCCTask
+    let isOverdue: Bool
+    let onToggleComplete: () -> Void
+    let onTap: () -> Void
+    let onDelete: () -> Void
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
+
+    private static let style: GlassBubbleStyle = .fullWidth
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Button(action: onToggleComplete) {
+                GlassCheckbox(isComplete: task.isComplete)
+            }
+            #if os(macOS)
+            .buttonStyle(.plain)
+            #endif
+
+            Button(action: onTap) {
+                HStack(alignment: .top, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(task.title)
+                            .font(.system(size: 15, weight: .semibold))
+                            .strikethrough(task.isComplete)
+                        if let notes = task.notes {
+                            Text(notes)
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        if let dueDate = task.dueDate {
+                            Text(dueDate, style: .date)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(isOverdue ? theme.signalRed(colorScheme) : .secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    if isOverdue {
+                        OverdueBadge()
+                    }
+                }
+                // Without this, only the rendered text/badge actually
+                // registers a tap — the `.frame(maxWidth: .infinity)`
+                // leading VStack above adds layout width but no
+                // hit-testable area on its own, the same gap
+                // `GlassCheckbox`'s own doc comment calls out for its
+                // circle. Matches `AccountBubble`/`TransactionBubble`,
+                // which give their own single-`Button` row the same fix.
+                .contentShape(Rectangle())
+            }
+            #if os(macOS)
+            .buttonStyle(.plain)
+            #endif
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+        .glassBubble(Self.style)
+        .contextMenu {
+            Button(role: .destructive, action: onDelete) {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+    }
 }
 
-// MARK: - Tactical checkbox
+// MARK: - Glass checkbox
 
-/// This screen's signature device: a bold square marked with a hand-drawn
-/// double stroke when complete, instead of the default circle/checkmark
-/// SF Symbol — a field-manual form's checkbox is marked with a pen, not
-/// softened into a rounded UI toggle.
-private struct TacticalCheckbox: View {
+/// This screen's completion device, redrawn in the glass language (issue
+/// #68) — a small round glass well, cut from the same glass as the bubble
+/// it sits inside (mirrors `AccountBubble`'s round type-icon well), holding
+/// a checkmark tinted `signalGreen` once complete. Replaces the prior
+/// `TacticalCheckbox`'s hand-inked square, which read as a field-manual
+/// prop rather than something drawn out of this chassis's shared glass
+/// vocabulary.
+private struct GlassCheckbox: View {
     let isComplete: Bool
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.screenTheme) private var theme
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .strokeBorder(isComplete ? theme.signalGreen(colorScheme) : Color.secondary, lineWidth: 2)
-            if isComplete {
-                CheckmarkShape()
-                    .stroke(theme.signalGreen(colorScheme), style: StrokeStyle(lineWidth: 2.4, lineCap: .square, lineJoin: .miter))
-                    .padding(3)
-            }
-        }
-        .frame(width: 20, height: 20)
-        // A stroked/outlined shape only registers taps on its drawn
-        // pixels by default — the empty interior of the square isn't
-        // hit-testable on its own, unlike the filled SF Symbol icon this
-        // replaced. Without this, the checkbox looked right but tapping
-        // its center did nothing (caught directly: the user couldn't
-        // click it at all).
-        .contentShape(Rectangle())
+        Circle()
+            .fill(.ultraThinMaterial)
+            .overlay(Circle().fill(GlassBubble.tint(for: colorScheme)))
+            .overlay(
+                Circle().strokeBorder(
+                    isComplete ? theme.signalGreen(colorScheme) : GlassBubble.rimColor(theme, colorScheme),
+                    lineWidth: isComplete ? 1.5 : GlassBubble.rimWidth
+                )
+            )
+            .frame(width: 24, height: 24)
+            .overlay(
+                Group {
+                    if isComplete {
+                        CheckmarkShape()
+                            .stroke(theme.signalGreen(colorScheme), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                            .padding(6)
+                    }
+                }
+            )
+            // A mostly-transparent glass well only registers taps on its
+            // drawn rim by default — without this, the empty interior isn't
+            // hit-testable, the same gap `TacticalCheckbox`'s own doc
+            // comment called out for the shape it replaces.
+            .contentShape(Circle())
     }
 }
 
@@ -430,15 +441,13 @@ private struct CheckmarkShape: Shape {
     }
 }
 
-/// A rectangular ink-block tag on an overdue Task's row — a field-manual
-/// rubber stamp, not a soft rounded pill badge. Deliberately *not*
-/// rotated: a diagonal version looked the part in the mockup, but a
-/// rotated shape's rendered bounds don't match its layout frame, and
-/// getting that to sit cleanly against a row's real edges (rather than
-/// crowding them or clipping) turned into more fuss than the effect was
-/// worth — caught over several rounds of real screenshots. Sharp corners
-/// and a solid fill carry the "stamped," not the angle.
-private struct OverdueStamp: View {
+/// An overdue Task's flag, redrawn in the glass language (issue #68) — a
+/// small glass capsule chip tinted `signalRed`, cut from the same glass as
+/// the bubble it sits inside, rather than the prior `OverdueStamp`'s
+/// solid ink-block rubber-stamp fill. Text stays uppercase/tracked/
+/// monospaced — that much of the original device survives — but the fill
+/// is translucent Material, not solid signalRed.
+private struct OverdueBadge: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.screenTheme) private var theme
 
@@ -446,12 +455,14 @@ private struct OverdueStamp: View {
         Text("OVERDUE")
             .font(.system(size: 9, weight: .bold, design: .monospaced))
             .tracking(1.2)
-            // Fixed regardless of theme — this sits on a solid signalRed
-            // badge, not the screen's own surface, so it doesn't need to
-            // track Light/Dark the way ordinary text does.
-            .foregroundStyle(Color(hex: 0xFBF5EC))
+            .foregroundStyle(theme.signalRed(colorScheme))
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .background(theme.signalRed(colorScheme))
+            .background(
+                Capsule()
+                    .fill(.ultraThinMaterial)
+                    .overlay(Capsule().fill(theme.signalRed(colorScheme).opacity(colorScheme == .dark ? 0.28 : 0.14)))
+                    .overlay(Capsule().strokeBorder(theme.signalRed(colorScheme).opacity(0.6), lineWidth: 1))
+            )
     }
 }

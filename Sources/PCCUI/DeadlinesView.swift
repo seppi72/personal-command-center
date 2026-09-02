@@ -5,6 +5,12 @@ import SwiftUI
 /// shared SwiftUI view for both platforms — no platform-specific chrome, per
 /// the ticket's "minimal" scope (mirrors `ProjectsView`/`TasksView`).
 /// Read-only — set/clear a Deadline from the Tasks or Projects screen.
+///
+/// On the shared Liquid Glass system since issue #68 — full-width
+/// `GlassBubble` rows on `GlassScreenBackground()`, replacing the earlier
+/// countdown-clock costume (a dark-red alarm-panel palette) `git log` on
+/// this file still shows. The countdown itself survives as a badge in
+/// monospaced digits — see `CountdownBadge` below.
 public struct DeadlinesView: View {
     @ObservedObject private var viewModel: DeadlinesViewModel
 
@@ -14,13 +20,13 @@ public struct DeadlinesView: View {
 
     public var body: some View {
         DeadlinesContent(viewModel: viewModel)
-            .screenTheme(.countdownClock)
+            .screenTheme(.liquidGlass)
     }
 }
 
 /// The screen's actual content — split out from `DeadlinesView` itself so
-/// `.screenTheme(.countdownClock)` (applied in that struct's body, above)
-/// is genuinely in effect by the time this struct's own `body` reads
+/// `.screenTheme(.liquidGlass)` (applied in that struct's body, above) is
+/// genuinely in effect by the time this struct's own `body` reads
 /// `@Environment(\.screenTheme)`. See `View.screenTheme(_:)`'s doc comment
 /// in `PCCChassis.swift` for why the split is required.
 private struct DeadlinesContent: View {
@@ -35,10 +41,10 @@ private struct DeadlinesContent: View {
                 if viewModel.items.isEmpty && !viewModel.isLoading {
                     emptyState
                 } else {
-                    itemList
+                    itemScroll
                 }
             }
-            .background(PanelBackground())
+            .background(GlassScreenBackground())
             .navigationTitle("Deadlines")
             .task { await viewModel.load() }
             .refreshable { await viewModel.load() }
@@ -50,44 +56,25 @@ private struct DeadlinesContent: View {
         }
     }
 
-    private var itemList: some View {
-        List {
-            Section {
+    /// A `ScrollView` of `DeadlineBubble`s rather than a `List` — this
+    /// screen's whole point is liquid glass floating on plain white/black,
+    /// which needs each row to draw its own translucent Material-backed
+    /// shape (the shared `GlassBubble`) rather than a native list
+    /// container's opaque row fill (mirrors `AccountsView`'s own move from
+    /// `List` to `ScrollView` + custom cards for the same reason).
+    private var itemScroll: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
                 statusStrip
-            }
-            Section {
-                ForEach(viewModel.items) { item in
-                    HStack {
-                        Image(systemName: Self.symbolName(for: item.kind))
-                            .foregroundStyle(.secondary)
-                        VStack(alignment: .leading) {
-                            Text(item.title)
-                                .strikethrough(item.isComplete == true)
-                            if let dueDate = item.dueDate {
-                                Text(dueDate, style: .date)
-                                    .font(.system(size: 12, design: .monospaced))
-                                    .foregroundStyle(Self.isOverdue(item) ? theme.signalRed(colorScheme) : .secondary)
-                            } else {
-                                Text("No date")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        if let dueDate = item.dueDate {
-                            CountdownBadge(dueDate: dueDate, isComplete: item.isComplete == true)
-                        }
+                VStack(spacing: 14) {
+                    ForEach(viewModel.items) { item in
+                        DeadlineBubble(item: item)
                     }
-                    .padding(.vertical, 6)
                 }
+                .padding(.top, 18)
             }
-            .panelRows()
+            .padding(PCCChassis.outerMargin)
         }
-        .scrollContentBackground(.hidden)
-        // Same edge-margin fix as `TasksView.taskList` — see that
-        // property's own doc comment for why this has to pad the `List`
-        // itself rather than each row.
-        .padding(.horizontal, PCCChassis.outerMargin)
     }
 
     // MARK: - Status strip
@@ -100,18 +87,13 @@ private struct DeadlinesContent: View {
                 .foregroundStyle(.secondary)
             Spacer()
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 10)
+        .padding(.bottom, 12)
         .overlay(
             Rectangle()
                 .fill(theme.panelLine(colorScheme))
                 .frame(height: 1),
             alignment: .bottom
         )
-        .listRowInsets(EdgeInsets())
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
     }
 
     private var overallStatus: PanelStatus {
@@ -119,12 +101,7 @@ private struct DeadlinesContent: View {
     }
 
     private var overdueCount: Int {
-        viewModel.items.filter(Self.isOverdue).count
-    }
-
-    private static func isOverdue(_ item: DeadlineItem) -> Bool {
-        guard let dueDate = item.dueDate, item.isComplete != true else { return false }
-        return dueDate < Date()
+        viewModel.items.filter { DeadlinesViewModel.isOverdue($0) }.count
     }
 
     private var statusStripText: String {
@@ -151,6 +128,58 @@ private struct DeadlinesContent: View {
             set: { isShowing in if !isShowing { viewModel.errorMessage = nil } }
         )
     }
+}
+
+// MARK: - Deadline bubble
+
+/// One Deadline row: the shared `GlassBubble` surface (`.fullWidth` size)
+/// with this screen's own content on it — a kind glyph, the title/due date,
+/// and a `CountdownBadge` as the loud hero figure. Set tighter than
+/// `AccountBubble`/`TransactionBubble` (14pt vertical padding, not 20),
+/// matching `TaskBubble`'s own density. The bubble's material, tint,
+/// specular highlight and rim come from `PCCChassis`, not from here; only
+/// the layout is this screen's.
+private struct DeadlineBubble: View {
+    let item: DeadlineItem
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
+
+    private static let style: GlassBubbleStyle = .fullWidth
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: Self.symbolName(for: item.kind))
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .strikethrough(item.isComplete == true)
+                if let dueDate = item.dueDate {
+                    Text(dueDate, style: .date)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(isOverdue ? theme.signalRed(colorScheme) : .secondary)
+                } else {
+                    Text("No date")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if let countdown = DeadlinesViewModel.countdown(for: item) {
+                CountdownBadge(countdown: countdown)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+        .glassBubble(Self.style)
+    }
+
+    private var isOverdue: Bool {
+        DeadlinesViewModel.isOverdue(item)
+    }
 
     /// Each `DeadlineItem.Kind`'s row glyph — a Course reuses neither the
     /// Task nor the Project glyph, since it's a third, distinct kind of
@@ -164,56 +193,27 @@ private struct DeadlinesContent: View {
     }
 }
 
-// MARK: - Countdown Clock theme
-
-extension ScreenTheme {
-    /// `DeadlinesView`'s own vibe: an alarm-clock countdown console. No
-    /// separate neutral accent hue — every number on this screen is
-    /// itself an urgency signal, so `accent` is just set to the same LED
-    /// red `signalRed` already uses, rather than introducing a fourth hue
-    /// with no distinct job to do. Signal green/amber/red are left as
-    /// `ScreenTheme.default`'s — this screen's whole point is reading
-    /// those tiers correctly, no reason to shift them.
-    fileprivate static let countdownClock = ScreenTheme(
-        panelVoid: { $0 == .dark ? Color(hex: 0x180A0A) : Color(hex: 0xFAF4F2) },
-        panelSurface: { $0 == .dark ? Color(hex: 0x241210) : Color(hex: 0xFFFFFF) },
-        panelLine: { $0 == .dark ? Color(hex: 0x4A2420) : Color(hex: 0xECD9D4) },
-        accent: ScreenTheme.default.signalRed,
-        signalGreen: ScreenTheme.default.signalGreen,
-        signalAmber: ScreenTheme.default.signalAmber,
-        signalRed: ScreenTheme.default.signalRed
-    )
-}
-
 // MARK: - Countdown badge
 
-/// This screen's signature device: a big mono days-remaining readout,
-/// colored by urgency tier — the whole point of this screen is "how much
-/// time is left," so that answer gets the loudest number in the row,
-/// not the due date text next to it.
+/// This screen's signature device, kept from the pre-glass version: a big
+/// mono days-remaining readout, colored by urgency tier — the whole point
+/// of this screen is "how much time is left," so that answer gets the
+/// loudest number in the row, not the due date text next to it. Purely a
+/// rendering of `DeadlineCountdown` (issue #68) — every bit of "what does
+/// this say, what color is it" logic lives on `DeadlinesViewModel` now, so
+/// this view just lays the two strings out and reads `PanelStatus.color`.
 private struct CountdownBadge: View {
-    let dueDate: Date
-    let isComplete: Bool
+    let countdown: DeadlineCountdown
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.screenTheme) private var theme
 
-    /// Calendar-day difference between today and `dueDate`, not a raw
-    /// time-interval division — comparing by calendar day avoids an
-    /// off-by-one read near midnight that a `/ 86400` would risk.
-    private var daysRemaining: Int {
-        let calendar = Calendar.current
-        let startOfToday = calendar.startOfDay(for: Date())
-        let startOfDue = calendar.startOfDay(for: dueDate)
-        return calendar.dateComponents([.day], from: startOfToday, to: startOfDue).day ?? 0
-    }
-
     var body: some View {
         VStack(alignment: .trailing, spacing: 2) {
-            Text(numberText)
+            Text(countdown.numberText)
                 .font(.pccReadout(20))
                 .foregroundStyle(color)
-            Text(unitText)
+            Text(countdown.unitText)
                 .font(.system(size: 9, weight: .semibold, design: .monospaced))
                 .tracking(1.0)
                 .textCase(.uppercase)
@@ -222,25 +222,11 @@ private struct CountdownBadge: View {
         .frame(minWidth: 58, alignment: .trailing)
     }
 
-    private var numberText: String {
-        "\(abs(daysRemaining))D"
-    }
-
-    private var unitText: String {
-        if isComplete { return "Done" }
-        if daysRemaining < 0 { return "Overdue" }
-        if daysRemaining == 0 { return "Today" }
-        return "Left"
-    }
-
-    /// Green past the 3-day mark, amber inside it (including "today"),
-    /// red once overdue — the same three-tier urgency vocabulary
-    /// `PanelStatus` uses elsewhere in the chassis, applied directly to
-    /// this screen's own hero number instead of a header lamp.
+    /// `.idle` (the "complete" tier) reads as plain `.secondary` rather
+    /// than `PanelStatus`'s own dim chassis gray — this badge sits directly
+    /// on a glass bubble, not a panel header, so it uses the same
+    /// `.secondary` this screen already uses for its own "No date" label.
     private var color: Color {
-        if isComplete { return .secondary }
-        if daysRemaining < 0 { return theme.signalRed(colorScheme) }
-        if daysRemaining <= 3 { return theme.signalAmber(colorScheme) }
-        return theme.signalGreen(colorScheme)
+        countdown.status == .idle ? .secondary : countdown.status.color(for: colorScheme, theme: theme)
     }
 }
