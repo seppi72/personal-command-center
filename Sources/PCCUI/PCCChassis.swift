@@ -631,6 +631,21 @@ extension View {
     public func glassBubble(_ style: GlassBubbleStyle = .fullWidth) -> some View {
         background(GlassBubble(style))
     }
+
+    /// The glass counterpart to `panelScreenBackground()`, for a
+    /// `Form`-based create/edit sheet on a screen that's otherwise on the
+    /// Liquid Glass system (`TransactionFormSheet`, issue #67). Repaints
+    /// just the ground behind the `Form` to `GlassScreenBackground()` —
+    /// the Form's own Sections still render as opaque `PanelSurface`
+    /// rows via `panelRows()`, since a `Form`'s native controls don't read
+    /// as glass however they're dressed (`AccountFormSheet`'s doc comment
+    /// carries this reasoning in full); only the backdrop behind those rows
+    /// changes.
+    public func glassScreenBackground() -> some View {
+        self
+            .scrollContentBackground(.hidden)
+            .background(GlassScreenBackground())
+    }
 }
 
 extension Color {
