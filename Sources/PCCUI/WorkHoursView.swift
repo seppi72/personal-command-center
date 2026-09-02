@@ -2,10 +2,15 @@ import SwiftUI
 
 /// Ticket #25: the Work Hours rollup screen — a `Picker` for which of the
 /// five dimensions to group by, two `DatePicker`s for the range, and a
-/// plain `List` of `{name, total}` rows for the result. No chart, matching
-/// every other `PCCUI` screen's minimal convention (`TimeEntriesView`,
+/// row of `{name, total}` figures for the result. No chart, matching every
+/// other `PCCUI` screen's minimal convention (`TimeEntriesView`,
 /// `TasksView`, etc.) — this ticket's own settled scope. One shared SwiftUI
 /// view for both platforms, no platform-specific chrome.
+///
+/// On the shared Liquid Glass system since issue #67 — full-width
+/// `GlassBubble` rows on `GlassScreenBackground()`, replacing the earlier
+/// green-bar ledger costume (alternating row stripes, the boxed double-ruled
+/// total line) `git log` on this file still shows.
 public struct WorkHoursView: View {
     @ObservedObject private var viewModel: WorkHoursViewModel
 
@@ -15,12 +20,12 @@ public struct WorkHoursView: View {
 
     public var body: some View {
         WorkHoursContent(viewModel: viewModel)
-            .screenTheme(.greenLedger)
+            .screenTheme(.liquidGlass)
     }
 }
 
 /// The screen's actual content — split out from `WorkHoursView` itself so
-/// `.screenTheme(.greenLedger)` (applied in that struct's body, above) is
+/// `.screenTheme(.liquidGlass)` (applied in that struct's body, above) is
 /// genuinely in effect by the time this struct's own `body` reads
 /// `@Environment(\.screenTheme)`. See `View.screenTheme(_:)`'s doc comment
 /// in `PCCChassis.swift` for why the split is required.
@@ -33,20 +38,20 @@ private struct WorkHoursContent: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                controls
+                statusStrip
                     .padding(.horizontal, PCCChassis.outerMargin)
                     .padding(.top, PCCChassis.outerMargin)
-                totalLine
+                controls
                     .padding(.horizontal, PCCChassis.outerMargin)
                     .padding(.top, 14)
                     .padding(.bottom, 14)
                 if viewModel.rows.isEmpty && !viewModel.isLoading {
                     emptyState
                 } else {
-                    rowList
+                    rowScroll
                 }
             }
-            .background(PanelBackground())
+            .background(GlassScreenBackground())
             .navigationTitle("Work Hours")
             .task { await viewModel.load() }
             .refreshable { await viewModel.load() }
@@ -54,40 +59,44 @@ private struct WorkHoursContent: View {
         }
     }
 
-    // MARK: - Total line
+    // MARK: - Status strip
 
-    /// This screen's signature: a boxed, double-ruled grand total — the
-    /// bottom line of a real accounting ledger — in place of the shared
-    /// chassis's plain mono readout strip every other screen's hero number
-    /// uses.
-    private var totalLine: some View {
-        HStack(alignment: .lastTextBaseline) {
-            Text("Total")
+    /// `.idle` — like `CategoriesView`'s own roster, a Work Hours rollup has
+    /// no urgency signal of its own to flag (a total is never "bad" the way
+    /// a negative balance is); kept for layout consistency and to carry the
+    /// grand total, which the deleted boxed double-ruled `totalLine` used to
+    /// own on its own.
+    private var statusStrip: some View {
+        HStack(spacing: 10) {
+            StatusDot(.idle)
+            Text(statusStripText)
                 .pccPanelLabel()
                 .foregroundStyle(.secondary)
             Spacer()
             Text(Self.formattedDuration(totalSeconds))
-                .font(.pccReadout(22))
+                .font(.pccReadout(14, weight: .semibold))
                 .foregroundStyle(theme.accent(colorScheme))
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(theme.panelSurface(colorScheme))
+        .padding(.bottom, 12)
         .overlay(
-            Rectangle().fill(theme.accent(colorScheme)).frame(height: 2),
-            alignment: .top
+            Rectangle()
+                .fill(theme.panelLine(colorScheme))
+                .frame(height: 1),
+            alignment: .bottom
         )
-        .overlay(alignment: .bottom) {
-            VStack(spacing: 2) {
-                Rectangle().fill(theme.accent(colorScheme)).frame(height: 1.5)
-                Rectangle().fill(theme.accent(colorScheme)).frame(height: 1.5)
-            }
-        }
     }
 
     private var totalSeconds: Double {
         viewModel.rows.reduce(0) { $0 + $1.totalSeconds }
     }
+
+    private var statusStripText: String {
+        let count = viewModel.rows.count
+        let noun = count == 1 ? "ROW" : "ROWS"
+        return "\(count) \(noun)"
+    }
+
+    // MARK: - Controls
 
     /// A compact filter bar — reloads on every control change rather than
     /// needing an explicit "Apply" button, since a Work Hours rollup is
@@ -113,41 +122,21 @@ private struct WorkHoursContent: View {
 
     // MARK: - Rows
 
-    /// Alternating "green-bar" row stripes — classic tractor-feed
-    /// accounting paper — rather than the shared chassis's per-row bordered
-    /// cards (`panelRows()`); a faint accent-tinted wash over every other
-    /// row instead of a dedicated theme color, since `ScreenTheme` has no
-    /// field of its own for a striping color and this is the only screen
-    /// that wants one.
-    private var rowList: some View {
-        List(Array(viewModel.rows.enumerated()), id: \.offset) { index, row in
-            HStack {
-                Text(Self.label(for: row))
-                Spacer()
-                Text(Self.formattedDuration(row.totalSeconds))
-                    .font(.system(size: 13, design: .monospaced))
-                    .foregroundStyle(.secondary)
+    /// A `ScrollView` of `WorkHoursRowBubble`s — each row draws the shared
+    /// `GlassBubble` surface rather than a `List`'s opaque native row chrome
+    /// (mirrors `AccountsView`'s own move from `List` to `ScrollView` +
+    /// custom cards for the same reason). Replaces the prior alternating
+    /// "green-bar" row stripes with plain full-width bubbles — no signature
+    /// device left here, per issue #67; the numbers are the content.
+    private var rowScroll: some View {
+        ScrollView {
+            VStack(spacing: 18) {
+                ForEach(Array(viewModel.rows.enumerated()), id: \.offset) { _, row in
+                    WorkHoursRowBubble(row: row)
+                }
             }
-            .padding(.vertical, 4)
-            .listRowBackground(rowBackground(index: index))
-            .listRowSeparatorTint(theme.panelLine(colorScheme))
-        }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        // Same edge-margin fix as `TasksView.taskList` — see that
-        // property's own doc comment for why this has to pad the `List`
-        // itself rather than each row. Also brings this row list's own
-        // edges in line with `controls`/`totalLine` above it, which already
-        // use this same `outerMargin`.
-        .padding(.horizontal, PCCChassis.outerMargin)
-    }
-
-    private func rowBackground(index: Int) -> some View {
-        ZStack {
-            theme.panelSurface(colorScheme)
-            if index % 2 == 1 {
-                theme.accent(colorScheme).opacity(colorScheme == .dark ? 0.16 : 0.10)
-            }
+            .padding(.horizontal, PCCChassis.outerMargin)
+            .padding(.bottom, PCCChassis.outerMargin)
         }
     }
 
@@ -160,6 +149,57 @@ private struct WorkHoursContent: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// "1h 30m" / "45m" — whole minutes only, matching every other
+    /// `PCCUI` screen's plain-text, no-chart convention rather than adding
+    /// a `DateComponentsFormatter` dependency for one label. `fileprivate`
+    /// rather than the more usual per-bubble `private static func`
+    /// (`TransactionBubble.formattedAmount`'s own convention): both
+    /// `statusStrip`'s grand total and every `WorkHoursRowBubble`'s own
+    /// figure need the identical formatting, so this lives once on the type
+    /// that owns the strip rather than being duplicated onto the bubble too.
+    fileprivate static func formattedDuration(_ totalSeconds: Double) -> String {
+        let totalMinutes = Int(totalSeconds / 60)
+        let hours = totalMinutes / 60
+        let minutes = totalMinutes % 60
+        if hours > 0 {
+            return "\(hours)h \(minutes)m"
+        }
+        return "\(minutes)m"
+    }
+}
+
+// MARK: - Work Hours row bubble
+
+/// One rollup row: the shared `GlassBubble` surface (`.fullWidth` size) with
+/// this screen's own content on it — the row's label (a day, or a
+/// Project/Client/Task/Course name) and its total as the hero figure, in
+/// monospaced tabular digits so totals compare down the column. Unlike
+/// `TransactionBubble`'s signed amount, a duration has no sign to color by,
+/// so the figure stays in the theme's plain accent rather than a
+/// signal color.
+private struct WorkHoursRowBubble: View {
+    let row: WorkHoursRow
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
+
+    private static let style: GlassBubbleStyle = .fullWidth
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Text(Self.label(for: row))
+                .font(.system(size: 16, weight: .semibold))
+            Spacer(minLength: 0)
+            Text(WorkHoursContent.formattedDuration(row.totalSeconds))
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(theme.accent(colorScheme))
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 20)
+        .glassBubble(Self.style)
     }
 
     /// A `day` row's `date` is set (`name`/`id` both `nil`); every other
@@ -177,36 +217,4 @@ private struct WorkHoursContent: View {
         formatter.dateStyle = .medium
         return formatter
     }()
-
-    /// "1h 30m" / "45m" — whole minutes only, matching every other
-    /// `PCCUI` screen's plain-text, no-chart convention rather than adding
-    /// a `DateComponentsFormatter` dependency for one label.
-    private static func formattedDuration(_ totalSeconds: Double) -> String {
-        let totalMinutes = Int(totalSeconds / 60)
-        let hours = totalMinutes / 60
-        let minutes = totalMinutes % 60
-        if hours > 0 {
-            return "\(hours)h \(minutes)m"
-        }
-        return "\(minutes)m"
-    }
-}
-
-// MARK: - Green Ledger theme
-
-extension ScreenTheme {
-    /// `WorkHoursView`'s own vibe: a green-bar accounting ledger — pale
-    /// mint-and-white striped paper in Light Mode, a green-phosphor
-    /// accounting-terminal read of the same numbers in Dark Mode (glowing
-    /// after hours rather than printed on stock). Signal colors left as
-    /// `ScreenTheme.default`'s.
-    fileprivate static let greenLedger = ScreenTheme(
-        panelVoid: { $0 == .dark ? Color(hex: 0x10201A) : Color(hex: 0xF4F5EF) },
-        panelSurface: { $0 == .dark ? Color(hex: 0x17251D) : Color(hex: 0xFFFFFF) },
-        panelLine: { $0 == .dark ? Color(hex: 0x2C4536) : Color(hex: 0xC4D1C0) },
-        accent: { $0 == .dark ? Color(hex: 0x7FE0A0) : Color(hex: 0x2E5C3E) },
-        signalGreen: ScreenTheme.default.signalGreen,
-        signalAmber: ScreenTheme.default.signalAmber,
-        signalRed: ScreenTheme.default.signalRed
-    )
 }

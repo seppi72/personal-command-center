@@ -5,6 +5,11 @@ import SwiftUI
 /// Account. One shared SwiftUI view for both platforms — no
 /// platform-specific chrome, per this codebase's existing "minimal" scope
 /// (mirrors `AccountsView`/`TimeEntriesView`).
+///
+/// On the shared Liquid Glass system since issue #67 — full-width
+/// `GlassBubble` rows on `GlassScreenBackground()`, one per Transaction,
+/// replacing the earlier receipt-tape costume (torn-paper day cards,
+/// perforation lines) `git log` on this file still shows.
 public struct TransactionsView: View {
     @ObservedObject private var viewModel: TransactionsViewModel
     @State private var isPresentingNewTransactionSheet = false
@@ -20,12 +25,12 @@ public struct TransactionsView: View {
             isPresentingNewTransactionSheet: $isPresentingNewTransactionSheet,
             editingTransaction: $editingTransaction
         )
-        .screenTheme(.receiptTape)
+        .screenTheme(.liquidGlass)
     }
 }
 
 /// The screen's actual content — split out from `TransactionsView` itself
-/// so `.screenTheme(.receiptTape)` (applied in that struct's body, above)
+/// so `.screenTheme(.liquidGlass)` (applied in that struct's body, above)
 /// is genuinely in effect by the time this struct's own `body` reads
 /// `@Environment(\.screenTheme)`. See `View.screenTheme(_:)`'s doc comment
 /// in `PCCChassis.swift` for why the split is required.
@@ -43,10 +48,10 @@ private struct TransactionsContent: View {
                 if viewModel.transactions.isEmpty && !viewModel.isLoading {
                     emptyState
                 } else {
-                    receiptScroll
+                    transactionScroll
                 }
             }
-            .background(theme.panelVoid(colorScheme))
+            .background(GlassScreenBackground())
             .navigationTitle("Transactions")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
@@ -98,25 +103,62 @@ private struct TransactionsContent: View {
         }
     }
 
-    /// A `ScrollView` of `ReceiptCard`s — one torn-off slip per day
-    /// (`TransactionsViewModel.groupedByDay`) — rather than a `List`: each
-    /// slip draws its own zigzag torn-paper silhouette
-    /// (`TornPaperShape`), which a `List`'s opaque native row chrome can't
-    /// host (mirrors `AccountsView`'s own move from `List` to `ScrollView`
-    /// + custom cards for the same reason).
-    private var receiptScroll: some View {
+    /// A `ScrollView` of `TransactionBubble`s, most-recent-first — each row
+    /// draws the shared `GlassBubble` surface (mirrors `AccountsView`'s own
+    /// move from `List` to `ScrollView` + custom cards for the same reason).
+    /// Replaces the prior per-day `ReceiptCard` grouping: with no receipt
+    /// costume left to hang a day boundary off of, every row just states its
+    /// own full date, matching the flat "list of a label plus a figure"
+    /// shape issue #67 asks for.
+    private var transactionScroll: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 statusStrip
-                VStack(spacing: 26) {
-                    ForEach(viewModel.groupedByDay) { group in
-                        ReceiptCard(group: group, viewModel: viewModel, onTap: { editingTransaction = $0 })
+                VStack(spacing: 18) {
+                    ForEach(sortedTransactions) { transaction in
+                        TransactionBubble(
+                            transaction: transaction,
+                            accountName: accountName(for: transaction),
+                            tagLabel: tagLabel(for: transaction),
+                            onTap: { editingTransaction = transaction }
+                        )
                     }
                 }
-                .padding(.top, 20)
+                .padding(.top, 18)
             }
             .padding(PCCChassis.outerMargin)
         }
+    }
+
+    /// `viewModel.transactions`, most-recent first — the flat ordering
+    /// `transactionScroll` renders, now that there's no per-day grouping to
+    /// sort within (`TransactionsViewModel.groupedByDay`'s replacement).
+    private var sortedTransactions: [Transaction] {
+        viewModel.transactions.sorted { $0.date > $1.date }
+    }
+
+    /// The name of whichever Account `transaction` is logged against,
+    /// looked up from the view model's already-loaded picker data — falls
+    /// back to a placeholder rather than crashing if the referenced Account
+    /// isn't in the loaded list (e.g. deleted between loads), mirroring
+    /// `TimeEntriesViewModel.containerLabel`.
+    private func accountName(for transaction: Transaction) -> String {
+        viewModel.accounts.first { $0.id == transaction.accountID }?.name ?? "Unknown Account"
+    }
+
+    /// "Category", "Category ▸ Subcategory", or `nil` if untagged.
+    private func tagLabel(for transaction: Transaction) -> String? {
+        guard let categoryID = transaction.categoryID,
+              let categoryName = viewModel.categories.first(where: { $0.id == categoryID })?.name
+        else {
+            return nil
+        }
+        guard let subcategoryID = transaction.subcategoryID,
+              let subcategoryName = viewModel.subcategories.first(where: { $0.id == subcategoryID })?.name
+        else {
+            return categoryName
+        }
+        return "\(categoryName) ▸ \(subcategoryName)"
     }
 
     // MARK: - Status strip
@@ -189,10 +231,10 @@ private struct TransactionsContent: View {
 /// `TimeEntryFormSheet`'s "exactly one container" gate, narrowed to
 /// Transaction's single required container; the Category/Subcategory
 /// pickers have no such gate, since "untagged" is a valid, ordinary state.
-/// Left in the shared chassis look rather than a bespoke receipt re-theme —
-/// a `Form`'s native controls don't read as "printed on paper" however
-/// they're dressed, so there's nothing this screen's own device would add
-/// here (mirrors `AccountFormSheet`'s identical reasoning).
+/// Its Sections stay in the shared chassis look — a `Form`'s native controls
+/// don't read as glass however they're dressed (`AccountFormSheet`'s doc
+/// comment carries this reasoning in full) — but its ground now repaints to
+/// `GlassScreenBackground()` via `glassScreenBackground()`, per issue #67.
 struct TransactionFormSheet: View {
     let title: String
     let accounts: [Account]
@@ -296,7 +338,7 @@ struct TransactionFormSheet: View {
                 }
                 .panelRows()
             }
-            .panelScreenBackground()
+            .glassScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -339,195 +381,17 @@ struct TransactionFormSheet: View {
     }
 }
 
-// MARK: - Receipt Tape theme
+// MARK: - Transaction bubble
 
-extension ScreenTheme {
-    /// `TransactionsView`'s own vibe: a cash-register receipt — warm cream
-    /// thermal-paper stock in Light Mode, a dim till-counter read of the
-    /// same paper in Dark Mode (deep warm charcoal with pale "burned" ink,
-    /// since thermal paper has no real dark-mode form of its own).
-    /// `signalGreen`/`signalRed` are overridden (unlike most other screens,
-    /// which leave them as `ScreenTheme.default`'s) toward print-ink hues
-    /// rather than screen neon, since income/expense color is this
-    /// screen's whole reason to use color at all.
-    fileprivate static let receiptTape = ScreenTheme(
-        panelVoid: { $0 == .dark ? Color(hex: 0x1B1812) : Color(hex: 0xF5F1E4) },
-        panelSurface: { $0 == .dark ? Color(hex: 0x242019) : Color(hex: 0xFFFFFF) },
-        panelLine: { $0 == .dark ? Color(hex: 0x3A342A) : Color(hex: 0xD8D2BE) },
-        accent: { $0 == .dark ? Color(hex: 0xEDE6D6) : Color(hex: 0x2B2820) },
-        signalGreen: { $0 == .dark ? Color(hex: 0x5FBF8B) : Color(hex: 0x1F6B44) },
-        signalAmber: ScreenTheme.default.signalAmber,
-        signalRed: { $0 == .dark ? Color(hex: 0xE2776A) : Color(hex: 0xA83226) }
-    )
-}
-
-// MARK: - Torn paper shape
-
-/// A rounded-rectangle-like silhouette with a zigzag torn edge along its
-/// top and bottom instead of a straight one — one continuous subpath (a
-/// single `moveTo` followed by `addLine`s and a `closeSubpath`), per
-/// `View.screenTheme(_:)`'s own caution in `PCCChassis.swift` about
-/// multi-subpath `Shape`s silently dropping a piece. Scales to whatever
-/// frame it's given (`path(in rect:)`), so the tooth count adapts to each
-/// day's card width rather than being fixed.
-private struct TornPaperShape: Shape {
-    var toothWidth: CGFloat = 14
-    var toothHeight: CGFloat = 5
-
-    func path(in rect: CGRect) -> Path {
-        let toothCount = max(2, Int((rect.width / toothWidth).rounded()))
-        let actualToothWidth = rect.width / CGFloat(toothCount)
-
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.minY + toothHeight))
-
-        // Top edge, left to right — alternates each tooth's peak between
-        // the outer and inner edge.
-        for tooth in 0..<toothCount {
-            let xStart = rect.minX + CGFloat(tooth) * actualToothWidth
-            let xMid = xStart + actualToothWidth / 2
-            let xEnd = xStart + actualToothWidth
-            let peakY = tooth.isMultiple(of: 2) ? rect.minY : rect.minY + toothHeight
-            path.addLine(to: CGPoint(x: xMid, y: peakY))
-            path.addLine(to: CGPoint(x: xEnd, y: rect.minY + toothHeight))
-        }
-
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - toothHeight))
-
-        // Bottom edge, right to left.
-        for tooth in stride(from: toothCount - 1, through: 0, by: -1) {
-            let xEnd = rect.minX + CGFloat(tooth) * actualToothWidth
-            let xMid = xEnd + actualToothWidth / 2
-            let xStart = xEnd + actualToothWidth
-            let peakY = tooth.isMultiple(of: 2) ? rect.maxY : rect.maxY - toothHeight
-            path.addLine(to: CGPoint(x: xStart, y: rect.maxY - toothHeight))
-            path.addLine(to: CGPoint(x: xMid, y: peakY))
-        }
-
-        path.closeSubpath()
-        return path
-    }
-}
-
-// MARK: - Perforation
-
-/// A single horizontal dashed rule standing in for the punched tear-line
-/// between two Transactions logged on the same day. One continuous
-/// subpath, same reasoning as `TornPaperShape`.
-private struct PerforationLine: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
-        return path
-    }
-}
-
-// MARK: - Receipt card
-
-/// This screen's signature: one calendar day's Transactions as their own
-/// separate torn-off slip of receipt tape — a `TornPaperShape` background,
-/// a header carrying that day's date/count/net, and each Transaction
-/// printed as a dot-matrix-style monospace line with a punched
-/// `PerforationLine` between entries.
-private struct ReceiptCard: View {
-    let group: TransactionDayGroup
-    /// Not `@ObservedObject` — `TransactionsContent` already observes this
-    /// same instance and rebuilds `ReceiptCard` (via `ForEach`) whenever it
-    /// publishes a change, so this card just needs a snapshot to resolve
-    /// each row's Account/Category names against (mirrors `ClientCard`
-    /// taking an already-resolved `projects: [Project]` rather than a
-    /// whole view model).
-    let viewModel: TransactionsViewModel
-    let onTap: (Transaction) -> Void
-
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.screenTheme) private var theme
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            dayHeader
-            ForEach(Array(group.transactions.enumerated()), id: \.element.id) { index, transaction in
-                if index > 0 {
-                    PerforationLine()
-                        .stroke(theme.panelLine(colorScheme), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                        .frame(height: 1)
-                }
-                TransactionRow(
-                    transaction: transaction,
-                    accountName: accountName(for: transaction),
-                    tagLabel: tagLabel(for: transaction),
-                    onTap: { onTap(transaction) }
-                )
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 18)
-        .background(
-            TornPaperShape()
-                .fill(theme.panelSurface(colorScheme))
-                .overlay(TornPaperShape().stroke(theme.panelLine(colorScheme), lineWidth: 1))
-                .shadow(color: .black.opacity(colorScheme == .dark ? 0.4 : 0.10), radius: 14, x: 0, y: 8)
-        )
-    }
-
-    private var dayHeader: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Text(Self.dayFormatter.string(from: group.day))
-                .font(.system(size: 12.5, weight: .heavy, design: .monospaced))
-                .tracking(0.6)
-                .textCase(.uppercase)
-            Text(countText)
-                .font(.system(size: 10.5, design: .monospaced))
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 8)
-            Text(Self.formattedNet(group.netAmount))
-                .font(.system(size: 12.5, weight: .heavy, design: .monospaced))
-                .foregroundStyle(group.netAmount < 0 ? theme.signalRed(colorScheme) : theme.signalGreen(colorScheme))
-        }
-        .padding(.bottom, 10)
-    }
-
-    private var countText: String {
-        group.transactions.count == 1 ? "1 TRANSACTION" : "\(group.transactions.count) TRANSACTIONS"
-    }
-
-    private static let dayFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "EEE, MMM d, yyyy"
-        return formatter
-    }()
-
-    private static func formattedNet(_ amount: Double) -> String {
-        amount.formatted(.currency(code: "PHP").sign(strategy: .always()))
-    }
-
-    /// The name of whichever Account `transaction` is logged against,
-    /// looked up from the view model's already-loaded picker data — falls
-    /// back to a placeholder rather than crashing if the referenced Account
-    /// isn't in the loaded list (e.g. deleted between loads), mirroring
-    /// `TimeEntriesViewModel.containerLabel`.
-    private func accountName(for transaction: Transaction) -> String {
-        viewModel.accounts.first { $0.id == transaction.accountID }?.name ?? "Unknown Account"
-    }
-
-    /// "Category", "Category ▸ Subcategory", or `nil` if untagged.
-    private func tagLabel(for transaction: Transaction) -> String? {
-        guard let categoryID = transaction.categoryID,
-              let categoryName = viewModel.categories.first(where: { $0.id == categoryID })?.name
-        else {
-            return nil
-        }
-        guard let subcategoryID = transaction.subcategoryID,
-              let subcategoryName = viewModel.subcategories.first(where: { $0.id == subcategoryID })?.name
-        else {
-            return categoryName
-        }
-        return "\(categoryName) ▸ \(subcategoryName)"
-    }
-}
-
-private struct TransactionRow: View {
+/// One Transaction row: the shared `GlassBubble` surface (`.fullWidth` size)
+/// with this screen's own content on it — the Account it's logged against,
+/// its date/tag/notes as a secondary label, and the signed amount as the
+/// loud hero figure, colored red/green by expense/income the same
+/// "read the color, not just the number" language `AccountBubble` uses for
+/// balance sign. The bubble's material, tint, specular highlight and rim
+/// come from `PCCChassis`, not from here; only the layout and the amount's
+/// coloring are this screen's.
+private struct TransactionBubble: View {
     let transaction: Transaction
     let accountName: String
     let tagLabel: String?
@@ -536,48 +400,57 @@ private struct TransactionRow: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.screenTheme) private var theme
 
+    private static let style: GlassBubbleStyle = .fullWidth
+
     var body: some View {
         Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline) {
+            HStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(accountName)
-                        .font(.system(size: 13.5, weight: .bold, design: .monospaced))
-                        .foregroundStyle(.primary)
-                    Spacer()
-                    Text(Self.formattedAmount(transaction))
-                        .font(.system(size: 13.5, weight: .bold, design: .monospaced))
-                        .foregroundStyle(transaction.type == .expense ? theme.signalRed(colorScheme) : theme.signalGreen(colorScheme))
-                }
-                Text(metaText)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                if let notes = transaction.notes {
-                    Text("\u{201C}\(notes)\u{201D}")
-                        .font(.system(size: 11, design: .monospaced))
-                        .italic()
+                        .font(.system(size: 16, weight: .semibold))
+                    Text(metaText)
+                        .font(.system(size: 11.5))
                         .foregroundStyle(.secondary)
+                    if let notes = transaction.notes {
+                        Text("\u{201C}\(notes)\u{201D}")
+                            .font(.system(size: 11.5))
+                            .italic()
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                Spacer(minLength: 0)
+                Text(Self.formattedAmount(transaction))
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(amountColor)
+                    .shadow(color: amountColor.opacity(colorScheme == .dark ? 0.5 : 0.28), radius: 10)
             }
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
+            .padding(.horizontal, 22)
+            .padding(.vertical, 20)
+            .glassBubble(Self.style)
+            .contentShape(RoundedRectangle(cornerRadius: Self.style.cornerRadius, style: .continuous))
         }
         #if os(macOS)
         .buttonStyle(.plain)
         #endif
     }
 
-    /// "9:03 AM · Salary ▸ Monthly" — the transaction's time (its day
-    /// already appears once, in `ReceiptCard.dayHeader`, not once per row)
-    /// followed by its Category/Subcategory tag, if any.
+    /// "Sep 2, 9:03 AM · Salary ▸ Monthly" — the full date now that there's
+    /// no day-grouping header stating it once for every row underneath, per
+    /// `TransactionRow`'s prior (day-relative) `metaText`.
     private var metaText: String {
-        let time = Self.timeFormatter.string(from: transaction.date)
-        guard let tagLabel else { return time }
-        return "\(time) · \(tagLabel)"
+        let dateTime = Self.dateTimeFormatter.string(from: transaction.date)
+        guard let tagLabel else { return dateTime }
+        return "\(dateTime) · \(tagLabel)"
     }
 
-    private static let timeFormatter: DateFormatter = {
+    private var amountColor: Color {
+        transaction.type == .expense ? theme.signalRed(colorScheme) : theme.signalGreen(colorScheme)
+    }
+
+    private static let dateTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.timeStyle = .short
+        formatter.dateFormat = "MMM d, h:mm a"
         return formatter
     }()
 
