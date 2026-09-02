@@ -144,10 +144,10 @@ extension ScreenTheme {
     /// #65) they no longer differ by design, so they collapse into this one
     /// public value. The two literals disagreed on exactly one channel —
     /// dark-mode `signalRed`, `0xE8695A` on Accounts against `0xE2776A` on
-    /// Categories — and this takes Accounts' value, the original, so
-    /// Categories' dark-mode negative amounts shift by that one
-    /// imperceptible step rather than the system carrying two reds that
-    /// mean the same thing.
+    /// Categories — and this takes Categories' value, per owner's
+    /// direction, so Accounts' dark-mode negative balances shift by that
+    /// one imperceptible step rather than the system carrying two reds
+    /// that mean the same thing.
     ///
     /// `panelSurface`/`panelLine` still matter even though a glass bubble
     /// draws its own Material-backed fill: the chassis's opaque
@@ -162,7 +162,7 @@ extension ScreenTheme {
         accent: { $0 == .dark ? Color(hex: 0x45C989) : Color(hex: 0x157A4C) },
         signalGreen: { $0 == .dark ? Color(hex: 0x45C989) : Color(hex: 0x157A4C) },
         signalAmber: ScreenTheme.default.signalAmber,
-        signalRed: { $0 == .dark ? Color(hex: 0xE8695A) : Color(hex: 0xB23226) }
+        signalRed: { $0 == .dark ? Color(hex: 0xE2776A) : Color(hex: 0xB23226) }
     )
 }
 
