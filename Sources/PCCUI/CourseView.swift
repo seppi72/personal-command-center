@@ -15,17 +15,15 @@ import SwiftUI
 /// "Manage Course" link inside that overlay, since a single tap is now
 /// spent on the expand gesture instead of navigating directly. The screen's
 /// one surviving piece of "lecture hall" flavor is its typography — Course
-/// titles set in a serif — now that the chalkboard fill and dashed roster
-/// chrome are gone; the Term badge survives too, redrawn as a glass well
-/// rather than a chalk ring.
+/// titles set in a serif, the only screen in the app that uses one — now
+/// that the chalkboard fill and dashed roster chrome are gone; the Term
+/// badge survives too, redrawn as a glass well rather than a chalk ring.
 ///
-/// Issue #72's acceptance criteria call this screen's serif "the only
-/// screen in the app that uses one," but that's no longer true independent
-/// of this migration: `ClientsView`'s `ClientCard` (issue #69) already sets
-/// the Client name and monogram seal in `design: .serif`. Not something
-/// this file can unilaterally fix — pick a resolution (drop Course's serif,
-/// or file a follow-up to move Clients off its own) with the ticket's
-/// owner before treating that criterion as met.
+/// `ClientsView`'s `ClientCard` (issue #69) briefly also set the Client
+/// name and monogram seal in `design: .serif`, which would have made this
+/// screen's "only screen" claim false — stripped back to the plain system
+/// face there per issue #72's own acceptance criteria, so this screen keeps
+/// the serif exclusively.
 public struct CourseView: View {
     @ObservedObject private var viewModel: CoursesViewModel
 
@@ -55,8 +53,8 @@ public struct CourseView: View {
 
 /// This screen's one deliberate typographic signature — Course titles set
 /// in a serif, kept local to this file rather than added to `PCCChassis`
-/// since it's meant as a Course-specific device (see the caveat on
-/// `CourseView`'s own doc comment about `ClientsView` already using one).
+/// since no other screen is meant to adopt it (per issue #72's acceptance
+/// criteria).
 private func courseTitleFont(_ size: CGFloat, weight: Font.Weight = .semibold) -> Font {
     .system(size: size, weight: weight, design: .serif)
 }
