@@ -1,31 +1,48 @@
 import SwiftUI
 
-/// Shared "instrument panel" chassis for every `PCCUI` screen: bordered,
-/// solid-filled panels — a console/readout aesthetic, not soft frosted
-/// glass — plus a small status-signal vocabulary (`PanelStatus`/
-/// `StatusDot`) every panel header uses to say "nominal," "needs you," or
-/// "running" at a glance, the same way a real instrument panel uses
-/// colored lamps rather than making you read every gauge to know what
+/// Shared chassis for every `PCCUI` screen — every surface a screen can be
+/// built out of, plus the small status-signal vocabulary (`PanelStatus`/
+/// `StatusDot`) every screen's header strip uses to say "nominal," "needs
+/// you," or "running" at a glance, the same way a real instrument panel
+/// uses colored lamps rather than making you read every gauge to know what
 /// needs attention.
 ///
-/// Was `GlassDesignSystem.swift` — renamed once the design direction moved
-/// past "one shared frosted-glass look" into "one shared *chassis*, many
-/// per-screen *themes*" (see `ScreenTheme` below), which made the old
-/// `Glass*` names doubly stale.
+/// Two surface families live here, mid-migration (issue #65):
+/// - **Liquid Glass** (`GlassBubble`, `GlassScreenBackground`,
+///   `ScreenTheme.liquidGlass`) — genuine `Material`-backed bubbles on a
+///   plain white/black ground with a faint dot grid. This is where every
+///   screen is headed; `AccountsView` and `CategoriesView` are there.
+/// - **The console panel** (`PanelCard`, `PanelBackground`,
+///   `.panelRows()`, `.panelScreenBackground()`) — bordered, solid-filled
+///   panels, from the earlier instrument-panel phase. Still what every
+///   not-yet-converted screen renders, and what create/edit sheets use on
+///   converted screens too, since a `Form`'s native controls don't read as
+///   glass however they're dressed.
+///
+/// Was `GlassDesignSystem.swift` — renamed during the instrument-panel
+/// phase, when the shared look genuinely wasn't glass at all; the name
+/// still holds, since what's shared is now *two* surface families and the
+/// status vocabulary rather than one look.
 ///
 /// Splits what every screen shares from what's free to vary per screen:
-/// - **This file's `PCCChassis` enum** — structural constants (corner
-///   radii, the hard minimum outer margin) and the shape-level views
-///   (`PanelCard`, `StatusDot`, `.panelRows()`) that give every screen the
-///   same *device* for showing a panel and a status signal, regardless of
-///   that screen's own colors.
+/// - **This file's `PCCChassis` enum, plus `GlassBubbleStyle`** —
+///   structural constants (corner radii, specular geometry, the hard
+///   minimum outer margin) and the shape-level views (`PanelCard`,
+///   `GlassBubble`, `StatusDot`, `.panelRows()`) that give every screen the
+///   same *devices*, regardless of that screen's own colors. `PCCChassis`
+///   holds the console family's constants and `GlassBubbleStyle` the
+///   glass family's, rather than one flat namespace where
+///   `rowCornerRadius` (10) and a glass bubble's radius (30) would sit
+///   side by side meaning unrelated things.
 /// - **`ScreenTheme`** — the *material*: panel surface/void/line colors
 ///   and the signal-color palette a screen's `StatusDot`s and readouts
 ///   resolve against. Injected per screen via
-///   `\.screenTheme`/`.screenTheme(_:)`, defaulting to `.default` (today's
-///   one shared cyan/green/amber/red palette) so every screen not yet
-///   carrying its own distinct vibe renders exactly as before without
-///   having to opt into anything.
+///   `\.screenTheme`/`.screenTheme(_:)`, defaulting to `.default` (the
+///   console family's cyan/green/amber/red palette) so every screen not yet
+///   converted renders exactly as before without having to opt into
+///   anything. A glass bubble's white tint is the one deliberate exception
+///   — see `GlassBubble` for why glass takes its color from what's behind
+///   it rather than from the palette.
 ///
 /// Colors here key off `@Environment(\.colorScheme)` rather than system
 /// dynamic colors (`NSColor`/`UIColor`) — the app has its own explicit
@@ -111,6 +128,41 @@ public struct ScreenTheme: Sendable {
         signalGreen: { $0 == .dark ? Color(hex: 0x34D399) : Color(hex: 0x0F9960) },
         signalAmber: { $0 == .dark ? Color(hex: 0xFFB454) : Color(hex: 0xB5730A) },
         signalRed: { $0 == .dark ? Color(hex: 0xFF5C5C) : Color(hex: 0xC6362E) }
+    )
+}
+
+extension ScreenTheme {
+    /// The one shared Liquid Glass palette — plain white (Light) / plain
+    /// black (Dark) ground with no color in the background at all, and a
+    /// green/red pair that is this system's real accent because the figure
+    /// a glass bubble carries (a balance, an amount spent) *is* the point
+    /// of the screen it sits on.
+    ///
+    /// Was two near-identical `fileprivate` literals, `AccountsView`'s
+    /// `liquidGlass` and `CategoriesView`'s `categoryGlass`, back when each
+    /// screen genuinely owned its own vibe. Under the uniform system (issue
+    /// #65) they no longer differ by design, so they collapse into this one
+    /// public value. The two literals disagreed on exactly one channel —
+    /// dark-mode `signalRed`, `0xE8695A` on Accounts against `0xE2776A` on
+    /// Categories — and this takes Categories' value, per owner's
+    /// direction, so Accounts' dark-mode negative balances shift by that
+    /// one imperceptible step rather than the system carrying two reds
+    /// that mean the same thing.
+    ///
+    /// `panelSurface`/`panelLine` still matter even though a glass bubble
+    /// draws its own Material-backed fill: the chassis's opaque
+    /// `PanelSurface` is what create/edit sheets (`AccountFormSheet`,
+    /// `CategoryFormSheet`) keep using, since a `Form`'s native controls
+    /// don't read as glass however they're dressed, and `panelLine` is the
+    /// hairline rim every bubble strokes itself with.
+    public static let liquidGlass = ScreenTheme(
+        panelVoid: { $0 == .dark ? Color.black : Color.white },
+        panelSurface: { $0 == .dark ? Color(hex: 0x121212) : Color(hex: 0xF7F7F7) },
+        panelLine: { $0 == .dark ? Color(hex: 0x2A2A2A) : Color(hex: 0xE3E3E3) },
+        accent: { $0 == .dark ? Color(hex: 0x45C989) : Color(hex: 0x157A4C) },
+        signalGreen: { $0 == .dark ? Color(hex: 0x45C989) : Color(hex: 0x157A4C) },
+        signalAmber: ScreenTheme.default.signalAmber,
+        signalRed: { $0 == .dark ? Color(hex: 0xE2776A) : Color(hex: 0xB23226) }
     )
 }
 
@@ -347,6 +399,236 @@ extension View {
                     .padding(.vertical, 2)
             )
             .listRowSeparator(.hidden)
+    }
+}
+
+// MARK: - Liquid Glass
+
+/// The ground every Liquid Glass screen sits on: a hairline dot grid,
+/// almost invisible, over the theme's plain white/black void — enough
+/// texture for a bubble's `Material` blur to lens against, without reading
+/// as a "background" the way a colored gradient mesh would (the direction
+/// this replaced, per direct product feedback). Canvas-drawn rather than a
+/// repeating SwiftUI view, so the grid costs one draw call rather than one
+/// view per dot.
+///
+/// The glass counterpart to `PanelBackground`, which stays for screens
+/// still on the older console chassis: apply this behind a screen's
+/// content (`.background(GlassScreenBackground())`), not in place of
+/// `panelScreenBackground()` on a `Form`-based sheet.
+public struct GlassScreenBackground: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
+
+    /// Distance between neighboring dots, in points, both axes.
+    private static let spacing: CGFloat = 22
+
+    public init() {}
+
+    public var body: some View {
+        Canvas { context, size in
+            let dotColor = theme.panelLine(colorScheme).opacity(0.8)
+            var x: CGFloat = Self.spacing / 2
+            while x < size.width {
+                var y: CGFloat = Self.spacing / 2
+                while y < size.height {
+                    context.fill(
+                        Path(ellipseIn: CGRect(x: x - 0.5, y: y - 0.5, width: 1, height: 1)),
+                        with: .color(dotColor)
+                    )
+                    y += Self.spacing
+                }
+                x += Self.spacing
+            }
+        }
+        .background(theme.panelVoid(colorScheme))
+    }
+}
+
+/// The dimensions one glass bubble is cut to — everything that
+/// legitimately differs between a full-width row bubble and a smaller grid
+/// cell, and nothing that doesn't. The material, the tint, the rim color
+/// and the highlight's *shape* are fixed by `GlassBubble` itself; only
+/// size-dependent geometry lives here, so a bubble can't accidentally be
+/// given a different kind of glass, just a different size of it.
+///
+/// The two presets below are the whole vocabulary — the memberwise
+/// initializer is deliberately not `public`, since a third size would mean
+/// some screen's *layout* wants rethinking, not the glass. Named
+/// `.fullWidth`/`.gridCell` rather than `row`/`card` so they can't be read
+/// as glass counterparts of `PCCChassis.rowCornerRadius`/
+/// `cardCornerRadius`, which are the console chassis's own (much tighter)
+/// panel radii.
+public struct GlassBubbleStyle: Sendable, Equatable {
+    /// The blurred highlight arcing across a bubble's top, like light
+    /// catching a curved surface. Its three numbers only ever travel
+    /// together, so they're one value rather than three loose fields.
+    public struct Specular: Sendable, Equatable {
+        /// The highlight's ellipse. Its radial gradient fades out over
+        /// exactly this height, so the highlight always dies at its own
+        /// edge rather than being clipped mid-falloff.
+        public let size: CGSize
+        /// Where that ellipse sits relative to the bubble's center — up
+        /// and to the left on both presets, so light reads as coming from
+        /// one consistent direction app-wide.
+        public let offset: CGSize
+        public let blur: CGFloat
+
+        init(size: CGSize, offset: CGSize, blur: CGFloat) {
+            self.size = size
+            self.offset = offset
+            self.blur = blur
+        }
+    }
+
+    public let cornerRadius: CGFloat
+    public let specular: Specular
+    public let shadowRadius: CGFloat
+    public let shadowOffsetY: CGFloat
+    /// Heavier in Dark Mode, where a soft shadow is the only thing
+    /// separating a dim bubble from a black ground.
+    public let shadowOpacityDark: Double
+    public let shadowOpacityLight: Double
+
+    init(
+        cornerRadius: CGFloat,
+        specular: Specular,
+        shadowRadius: CGFloat,
+        shadowOffsetY: CGFloat,
+        shadowOpacityDark: Double,
+        shadowOpacityLight: Double
+    ) {
+        self.cornerRadius = cornerRadius
+        self.specular = specular
+        self.shadowRadius = shadowRadius
+        self.shadowOffsetY = shadowOffsetY
+        self.shadowOpacityDark = shadowOpacityDark
+        self.shadowOpacityLight = shadowOpacityLight
+    }
+
+    /// A full-width list row's bubble — `AccountsView`'s account rows.
+    public static let fullWidth = GlassBubbleStyle(
+        cornerRadius: 30,
+        specular: Specular(
+            size: CGSize(width: 170, height: 90),
+            offset: CGSize(width: -60, height: -46),
+            blur: 10
+        ),
+        shadowRadius: 20,
+        shadowOffsetY: 10,
+        shadowOpacityDark: 0.5,
+        shadowOpacityLight: 0.08
+    )
+
+    /// A grid cell's bubble — `CategoriesView`'s category cards. Smaller
+    /// radius, highlight and shadow than `.fullWidth`, in proportion to a
+    /// cell that's roughly a third of the width.
+    public static let gridCell = GlassBubbleStyle(
+        cornerRadius: 26,
+        specular: Specular(
+            size: CGSize(width: 130, height: 70),
+            offset: CGSize(width: -40, height: -36),
+            blur: 8
+        ),
+        shadowRadius: 16,
+        shadowOffsetY: 8,
+        shadowOpacityDark: 0.4,
+        shadowOpacityLight: 0.08
+    )
+}
+
+/// The one glass surface every Liquid Glass screen's bubbles are drawn
+/// with: a genuine `Material` fill (real OS-level backdrop blur and
+/// vibrancy, not a hand-rolled translucent rectangle), a soft white tint
+/// over it, a blurred specular highlight, and a hairline rim in the
+/// theme's `panelLine`. The glass counterpart to `PanelSurface`, which the
+/// console chassis's opaque `PanelCard`/`panelRows()` still use.
+///
+/// Public, and a surface rather than a container, because the content that
+/// sits on glass differs wildly per screen (a row's icon/name/balance, a
+/// cell's stacked label and total) while the glass itself must not. Use it
+/// as a background — `content.padding(...).background(GlassBubble())` — or
+/// via `View.glassBubble(_:)` just below.
+///
+/// The white-based tint is deliberate and *not* theme-derived: like real
+/// glass, the color comes from whatever is behind it — here the
+/// `Material`'s own light/dark vibrancy — rather than from the app's
+/// palette. The rim is the one part that does read the theme, since a
+/// hairline edge has to sit against that screen's ground to be visible at
+/// all.
+public struct GlassBubble: View {
+    private let style: GlassBubbleStyle
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
+
+    public init(_ style: GlassBubbleStyle = .fullWidth) {
+        self.style = style
+    }
+
+    /// The tint laid over the `Material`, and the rim stroked around it.
+    /// Both are reachable beyond `body` so a screen's own non-rectangular
+    /// glass prop — `AccountsView`'s round type-icon well — is cut from the
+    /// same glass as the bubble it sits inside, instead of re-deriving
+    /// these opacities by eye. `internal`: every caller is a screen in this
+    /// package, and nothing outside it should be hand-rolling glass.
+    static func tint(for colorScheme: ColorScheme) -> LinearGradient {
+        LinearGradient(
+            colors: [
+                colorScheme == .dark ? Color.white.opacity(0.12) : Color.white.opacity(0.72),
+                colorScheme == .dark ? Color.white.opacity(0.02) : Color.white.opacity(0.24),
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    static func rimColor(_ theme: ScreenTheme, _ colorScheme: ColorScheme) -> Color {
+        theme.panelLine(colorScheme).opacity(0.7)
+    }
+
+    static let rimWidth: CGFloat = 1
+
+    public var body: some View {
+        let shape = RoundedRectangle(cornerRadius: style.cornerRadius, style: .continuous)
+        shape
+            .fill(.ultraThinMaterial)
+            .overlay(shape.fill(Self.tint(for: colorScheme)))
+            .overlay(specularHighlight)
+            .overlay(shape.strokeBorder(Self.rimColor(theme, colorScheme), lineWidth: Self.rimWidth))
+            .clipShape(shape)
+            .shadow(
+                color: .black.opacity(colorScheme == .dark ? style.shadowOpacityDark : style.shadowOpacityLight),
+                radius: style.shadowRadius,
+                x: 0,
+                y: style.shadowOffsetY
+            )
+    }
+
+    private var specularHighlight: some View {
+        Ellipse()
+            .fill(
+                RadialGradient(
+                    colors: [.white.opacity(colorScheme == .dark ? 0.22 : 0.55), .clear],
+                    center: .center,
+                    startRadius: 0,
+                    endRadius: style.specular.size.height
+                )
+            )
+            .frame(width: style.specular.size.width, height: style.specular.size.height)
+            .rotationEffect(.degrees(-12))
+            .offset(x: style.specular.offset.width, y: style.specular.offset.height)
+            .blur(radius: style.specular.blur)
+            .allowsHitTesting(false)
+    }
+}
+
+extension View {
+    /// Puts this content on a `GlassBubble` — the glass counterpart to
+    /// `panelRows()`, for content laid out by hand in a `ScrollView` rather
+    /// than by a `List`.
+    public func glassBubble(_ style: GlassBubbleStyle = .fullWidth) -> some View {
+        background(GlassBubble(style))
     }
 }
 
