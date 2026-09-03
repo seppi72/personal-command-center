@@ -16,15 +16,21 @@ import SwiftUI
 /// a glance at the top of the screen (or the status strip above the panels
 /// entirely) says what needs attention before you've read a single number.
 ///
-/// "Command Deck": this screen's own signature on top of the shared
-/// chassis, chosen for the one screen whose whole job is "am I in control
-/// right now" — `HUDCorners` frames the content in viewfinder/targeting-
-/// reticle brackets (you're watching a live instrument, not reading a
-/// static report), and the status strip's date is a real ticking clock
-/// rather than a static string, reinforcing that the panels below are
-/// live telemetry. Reuses the chassis's existing cyan/green/amber/red
-/// palette as-is (`ScreenTheme.default`) — the signature here is entirely
-/// in framing and motion, not a new color story.
+/// On the shared Liquid Glass system since issue #73, landed last among the
+/// sixteen screens (issue #65) so this hub's own summaries could be tuned
+/// against every other screen's finished glass look rather than the other
+/// way around. The earlier "Command Deck" identity — `HUDCorners`'
+/// viewfinder brackets, a live ticking clock, and every hero readout in the
+/// chassis's own cyan accent — is gone along with it: this screen
+/// deliberately carries **no accent of its own**, since it exists to
+/// summarize the screens beneath it rather than to have a vibe those
+/// screens compete with. Its `StatusDot`s, plus the app-wide green/red/amber
+/// meaning rules (money in vs. out, overdue vs. on schedule, a completion
+/// rate's tier) are the only color anywhere on it; a figure with no such
+/// rule to apply — Projects Progress, the mini Timer's elapsed digits, this
+/// week's Work Hours — renders in plain `.primary`/`.secondary`, same as "a
+/// task count and a client name get no accent" reads everywhere else in the
+/// glass system.
 ///
 /// Mostly a glance, with one deliberate exception: the Productivity panel's
 /// mini Timer lets the owner pick a Task/Project/Client/Course and
@@ -46,6 +52,46 @@ public struct OverviewView: View {
     private let onTapProjects: () -> Void
     private let onTapTasks: () -> Void
 
+    public init(
+        viewModel: OverviewViewModel,
+        timerViewModel: TimerViewModel,
+        onTapFinances: @escaping () -> Void,
+        onTapProjects: @escaping () -> Void,
+        onTapTasks: @escaping () -> Void
+    ) {
+        self.viewModel = viewModel
+        self.timerViewModel = timerViewModel
+        self.onTapFinances = onTapFinances
+        self.onTapProjects = onTapProjects
+        self.onTapTasks = onTapTasks
+    }
+
+    public var body: some View {
+        OverviewContent(
+            viewModel: viewModel,
+            timerViewModel: timerViewModel,
+            onTapFinances: onTapFinances,
+            onTapProjects: onTapProjects,
+            onTapTasks: onTapTasks
+        )
+        .screenTheme(.liquidGlass)
+    }
+}
+
+/// The screen's actual content — split out from `OverviewView` itself so
+/// `.screenTheme(.liquidGlass)` (applied in that struct's body, above) is
+/// genuinely in effect by the time this struct's own `body` reads
+/// `@Environment(\.screenTheme)`. See `View.screenTheme(_:)`'s doc comment
+/// in `PCCChassis.swift` for why the split is required, not optional —
+/// `FinancesReportingView`/`FinancesReportingContent` hit this the hard
+/// way first.
+private struct OverviewContent: View {
+    @ObservedObject var viewModel: OverviewViewModel
+    @ObservedObject var timerViewModel: TimerViewModel
+    let onTapFinances: () -> Void
+    let onTapProjects: () -> Void
+    let onTapTasks: () -> Void
+
     /// The mini Timer's own pending selection, separate from
     /// `TimeEntriesView`'s own identical `@State` for its hero timer — each
     /// screen owns its own in-progress pick before
@@ -63,58 +109,28 @@ public struct OverviewView: View {
     /// to read.
     private static let wideLayoutThreshold: CGFloat = 620
 
-    public init(
-        viewModel: OverviewViewModel,
-        timerViewModel: TimerViewModel,
-        onTapFinances: @escaping () -> Void,
-        onTapProjects: @escaping () -> Void,
-        onTapTasks: @escaping () -> Void
-    ) {
-        self.viewModel = viewModel
-        self.timerViewModel = timerViewModel
-        self.onTapFinances = onTapFinances
-        self.onTapProjects = onTapProjects
-        self.onTapTasks = onTapTasks
-    }
-
-    public var body: some View {
+    var body: some View {
         NavigationStack {
             GeometryReader { proxy in
-                ZStack {
-                    ScrollView {
-                        VStack(spacing: 16) {
-                            statusStrip
-                            financesCard
-                            if proxy.size.width > Self.wideLayoutThreshold {
-                                HStack(alignment: .top, spacing: 16) {
-                                    workCard
-                                    productivityCard
-                                }
-                            } else {
+                ScrollView {
+                    VStack(spacing: 16) {
+                        statusStrip
+                        financesCard
+                        if proxy.size.width > Self.wideLayoutThreshold {
+                            HStack(alignment: .top, spacing: 16) {
                                 workCard
                                 productivityCard
                             }
+                        } else {
+                            workCard
+                            productivityCard
                         }
-                        .padding(PCCChassis.outerMargin)
-                        .frame(maxWidth: 900)
-                        .frame(maxWidth: .infinity)
                     }
-                    .panelScreenBackground()
-
-                    // Framed to the viewport, not the scroll content — sits
-                    // in its own ZStack layer rather than as a ScrollView
-                    // overlay so it stays put as a fixed frame instead of
-                    // scrolling away with the panels underneath.
-                    // Accent-colored, not the neutral hairline `panelLine`
-                    // divider color uses — a real HUD's reticle marks are
-                    // drawn in the display's own accent, and at panelLine's
-                    // contrast against the light-mode void these were
-                    // effectively invisible (caught on the first real
-                    // screenshot: no brackets visible at all).
-                    HUDCorners(color: theme.accent(colorScheme).opacity(0.55))
-                        .frame(width: proxy.size.width, height: proxy.size.height)
-                        .allowsHitTesting(false)
+                    .padding(PCCChassis.outerMargin)
+                    .frame(maxWidth: 900)
+                    .frame(maxWidth: .infinity)
                 }
+                .background(GlassScreenBackground())
             }
             .navigationTitle("Overview")
             .task { await viewModel.load() }
@@ -129,11 +145,50 @@ public struct OverviewView: View {
         }
     }
 
-    /// The primary "readout" accent — see `Font.pccReadout`'s doc comment
-    /// for why a hero number gets this color rather than one of the
-    /// urgency-signaling colors `PanelStatus` uses.
-    private var readoutColor: Color {
-        theme.accent(colorScheme)
+    /// This screen's shared chart/figure container — the glass counterpart
+    /// to the console chassis's `PanelCard`, matching
+    /// `FinancesReportingContent.glassPanel(content:)`. A fixed `minHeight`
+    /// (rather than `FinancesReportingContent`'s content-sized panels) keeps
+    /// Work and Productivity the same height when the wide layout sits them
+    /// side by side, the same floor `PanelCard.defaultMinHeight` gave every
+    /// widget on the old console chassis.
+    private func glassPanel<Content: View>(minHeight: CGFloat = 220, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            content()
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, minHeight: minHeight, maxHeight: .infinity, alignment: .topLeading)
+        .glassBubble(.fullWidth)
+    }
+
+    // MARK: - Directional signal
+    //
+    // Mirrors `FinancesReportingContent`'s identically-named helpers: the
+    // one comparison every trend chart's color on this screen is derived
+    // from, and the sign-based coloring a real money figure (Net Worth)
+    // takes under the app-wide "green means money in or a positive
+    // position, red means money out or negative" rule.
+
+    private enum TrendDirection {
+        case up, down, flat
+    }
+
+    private static func trendDirection(from buckets: [FinanceBucket]) -> TrendDirection {
+        guard buckets.count > 1, let first = buckets.first, let last = buckets.last else { return .flat }
+        if last.net > first.net { return .up }
+        if last.net < first.net { return .down }
+        return .flat
+    }
+
+    /// Chart traces are never neutral — unlike a strict up/down/flat
+    /// reading, `.flat` still reads as green here, since a flat net trace
+    /// isn't a loss.
+    private func chartColor(for direction: TrendDirection) -> Color {
+        direction == .down ? theme.signalRed(colorScheme) : theme.signalGreen(colorScheme)
+    }
+
+    private func signedColor(_ value: Double) -> Color {
+        value < 0 ? theme.signalRed(colorScheme) : theme.signalGreen(colorScheme)
     }
 
     // MARK: - Status strip
@@ -141,11 +196,11 @@ public struct OverviewView: View {
     /// A one-line summary above every panel — the first thing read on this
     /// screen, before any individual panel's own detail. Answers "does
     /// anything need me right now?" without requiring a glance at three
-    /// separate panels to find out. The right-hand side ticks a real clock
-    /// (`clockText(at:)`) rather than showing a static date — a still
-    /// timestamp reads as a report generated once; a moving one reads as
-    /// telemetry you're watching live, which is the whole point of the
-    /// "Command Deck" framing this screen carries.
+    /// separate panels to find out. The right-hand side still ticks a real
+    /// clock (`clockText(at:)`), kept through the glass migration — unlike
+    /// `HUDCorners`, a live clock carries actual information rather than
+    /// being costume, so it's untouched by issue #73's "no accent" and
+    /// "HUD corners deleted" acceptance criteria.
     private var statusStrip: some View {
         HStack(spacing: 10) {
             StatusDot(overallStatus)
@@ -227,23 +282,21 @@ public struct OverviewView: View {
     // MARK: - Finances card
 
     private var financesCard: some View {
-        PanelCard {
-            VStack(alignment: .leading, spacing: 16) {
-                panelHeader("Finances", systemImage: "dollarsign.circle", status: viewModel.financesStatus, action: onTapFinances)
-                HStack(alignment: .lastTextBaseline) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Net Worth")
-                            .pccPanelLabel()
-                            .foregroundStyle(.secondary)
-                        Text(Self.currency(viewModel.currentNetWorth))
-                            .font(.pccReadout(40))
-                            .foregroundStyle(readoutColor)
-                    }
-                    Spacer()
-                    financesRangeControl
+        glassPanel {
+            panelHeader("Finances", systemImage: "dollarsign.circle", status: viewModel.financesStatus, action: onTapFinances)
+            HStack(alignment: .lastTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Net Worth")
+                        .pccPanelLabel()
+                        .foregroundStyle(.secondary)
+                    Text(Self.currency(viewModel.currentNetWorth))
+                        .font(.pccReadout(40))
+                        .foregroundStyle(signedColor(viewModel.currentNetWorth))
                 }
-                incomeExpenseChart
+                Spacer()
+                financesRangeControl
             }
+            incomeExpenseChart
         }
     }
 
@@ -264,24 +317,27 @@ public struct OverviewView: View {
     @ViewBuilder
     private var incomeExpenseChart: some View {
         if viewModel.financeBuckets.isEmpty {
-            Text("Nothing logged for this range yet.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            emptyChartLabel
         } else {
             netTrendChart
             incomeExpenseGauges
         }
     }
 
+    /// Colored by whether the range's net figure rose or fell, matching
+    /// `FinancesReportingContent.trendChart(_:valueLabel:)` — the same
+    /// directional green/red rule, not the chassis's own accent, since a
+    /// net trend genuinely has a "good direction" to signal.
     private var netTrendChart: some View {
-        Chart(viewModel.financeBuckets) { bucket in
+        let color = chartColor(for: Self.trendDirection(from: viewModel.financeBuckets))
+        return Chart(viewModel.financeBuckets) { bucket in
             AreaMark(
                 x: .value("Period", bucket.periodStart, unit: viewModel.financeBucketUnit),
                 y: .value("Net", bucket.net)
             )
             .foregroundStyle(
                 LinearGradient(
-                    colors: [readoutColor.opacity(0.30), readoutColor.opacity(0)],
+                    colors: [color.opacity(0.30), color.opacity(0)],
                     startPoint: .top,
                     endPoint: .bottom
                 )
@@ -292,7 +348,7 @@ public struct OverviewView: View {
                 x: .value("Period", bucket.periodStart, unit: viewModel.financeBucketUnit),
                 y: .value("Net", bucket.net)
             )
-            .foregroundStyle(readoutColor)
+            .foregroundStyle(color)
             .lineStyle(StrokeStyle(lineWidth: 1.5))
             .interpolationMethod(.catmullRom)
         }
@@ -357,20 +413,18 @@ public struct OverviewView: View {
     // MARK: - Work card
 
     private var workCard: some View {
-        PanelCard {
-            VStack(alignment: .leading, spacing: 16) {
-                panelHeader("Work", systemImage: "briefcase", status: viewModel.workStatus, action: onTapProjects)
-                projectsProgressContent
-                Divider()
-                taskList(
-                    title: "Today", tasks: viewModel.tasksDueToday, emptyText: "Nothing due today",
-                    indicatorColor: theme.signalAmber(colorScheme))
-                taskList(
-                    title: "Overdue", tasks: viewModel.tasksOverdue, emptyText: "Nothing overdue",
-                    indicatorColor: theme.signalRed(colorScheme))
-                Divider()
-                completionRateContent
-            }
+        glassPanel {
+            panelHeader("Work", systemImage: "briefcase", status: viewModel.workStatus, action: onTapProjects)
+            projectsProgressContent
+            Divider()
+            taskList(
+                title: "Today", tasks: viewModel.tasksDueToday, emptyText: "Nothing due today",
+                indicatorColor: theme.signalAmber(colorScheme))
+            taskList(
+                title: "Overdue", tasks: viewModel.tasksOverdue, emptyText: "Nothing overdue",
+                indicatorColor: theme.signalRed(colorScheme))
+            Divider()
+            completionRateContent
         }
     }
 
@@ -378,7 +432,10 @@ public struct OverviewView: View {
     /// fraction of that Project's Tasks that are complete. Capped to the 5
     /// furthest-from-done Projects so a busy Projects list doesn't turn this
     /// panel into its own scroll view — sorted ascending by completion so
-    /// the Projects most needing attention are the ones shown.
+    /// the Projects most needing attention are the ones shown. Bars render
+    /// in plain `.secondary` rather than a signal color: completion has no
+    /// green/red/amber meaning of its own on this screen (that's what the
+    /// Work panel's `StatusDot` and the Today/Overdue lists already carry).
     @ViewBuilder
     private var projectsProgressContent: some View {
         let rows = viewModel.projectCompletion.sorted { $0.fraction < $1.fraction }.prefix(5)
@@ -391,7 +448,7 @@ public struct OverviewView: View {
                     x: .value("Complete", row.fraction),
                     y: .value("Project", row.project.name)
                 )
-                .foregroundStyle(readoutColor)
+                .foregroundStyle(.secondary)
                 .cornerRadius(2)
                 .annotation(position: .trailing) {
                     Text(row.fraction, format: .percent.precision(.fractionLength(0)))
@@ -479,20 +536,20 @@ public struct OverviewView: View {
     // MARK: - Productivity card
 
     private var productivityCard: some View {
-        PanelCard {
-            VStack(alignment: .leading, spacing: 16) {
-                panelHeader("Productivity", systemImage: "bolt.fill", status: productivityStatus)
-                miniTimerContent
-                Divider()
-                workHoursContent
-            }
+        glassPanel {
+            panelHeader("Productivity", systemImage: "bolt.fill", status: productivityStatus)
+            miniTimerContent
+            Divider()
+            workHoursContent
         }
     }
 
-    /// `.active` (the readout-cyan lamp) while a Timer is running, `.idle`
-    /// otherwise — this panel's lamp signals live state rather than
-    /// urgency, the other meaning `PanelStatus` carries (see its own doc
-    /// comment).
+    /// `.active` while a Timer is running, `.idle` otherwise — this panel's
+    /// lamp signals live state rather than urgency, the other meaning
+    /// `PanelStatus` carries (see its own doc comment). `.active` resolves
+    /// to `theme.accent`, which on `ScreenTheme.liquidGlass` is the same
+    /// green as `signalGreen` — this screen's "no accent" rule holds
+    /// without this shared, chassis-wide mapping needing a special case.
     private var productivityStatus: PanelStatus {
         timerViewModel.activeTimer != nil ? .active : .idle
     }
@@ -507,8 +564,13 @@ public struct OverviewView: View {
                 TimelineView(.periodic(from: activeTimer.startDate, by: 1)) { context in
                     Text(Self.formattedElapsed(context.date.timeIntervalSince(activeTimer.startDate)))
                         .font(.pccReadout(30))
-                        .foregroundStyle(readoutColor)
+                        .foregroundStyle(.primary)
                 }
+                // `signalRed`, not an accent — predates the glass migration
+                // and is untouched by it: stopping a running Timer maps
+                // cleanly enough onto "ending something" that this stayed
+                // as-is rather than being flattened to neutral along with
+                // everything else this screen no longer accents.
                 Button("Stop") {
                     Task { await timerViewModel.stop() }
                 }
@@ -525,12 +587,17 @@ public struct OverviewView: View {
                     style: .boxed,
                     placeholder: "Choose a \(timerSelectedKind.title)"
                 )
+                // `.primary`, not `signalGreen`: unlike Stop above,
+                // starting a Timer has no ready-made green/red/amber
+                // meaning under this screen's rules, and `readoutColor`
+                // (what this button tinted pre-migration) no longer
+                // exists now that Overview carries no accent of its own.
                 Button("Start") {
                     guard let timerSelectedItemID else { return }
                     Task { await timerViewModel.start(container: miniContainer(itemID: timerSelectedItemID)) }
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(readoutColor)
+                .tint(.primary)
                 .disabled(timerSelectedItemID == nil)
             }
         }
@@ -541,6 +608,9 @@ public struct OverviewView: View {
     /// a second copy.
     /// Switching tabs clears `timerSelectedItemID`: an id from the old
     /// kind's list wouldn't mean anything against the new kind's items.
+    /// The selected tab is marked by weight and a neutral capsule fill
+    /// rather than an accent color — which kind is picked carries no
+    /// green/red/amber meaning of its own.
     private var miniKindTabs: some View {
         HStack(spacing: 4) {
             ForEach(ContainerKind.allCases) { kind in
@@ -551,11 +621,11 @@ public struct OverviewView: View {
                 } label: {
                     Text(kind.title)
                         .font(.caption.weight(kind == timerSelectedKind ? .bold : .regular))
-                        .foregroundStyle(kind == timerSelectedKind ? readoutColor : Color.secondary)
+                        .foregroundStyle(kind == timerSelectedKind ? Color.primary : Color.secondary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
                         .background(
-                            Capsule().fill(kind == timerSelectedKind ? readoutColor.opacity(0.15) : Color.clear)
+                            Capsule().fill(kind == timerSelectedKind ? theme.panelLine(colorScheme) : Color.clear)
                         )
                 }
                 #if os(macOS)
@@ -636,7 +706,7 @@ public struct OverviewView: View {
                         x: .value("Day", row.date ?? Date(), unit: .day),
                         y: .value("Hours", row.totalSeconds / 3600)
                     )
-                    .foregroundStyle(readoutColor)
+                    .foregroundStyle(.secondary)
                     .cornerRadius(2)
                 }
                 .chartXAxis {
@@ -662,61 +732,13 @@ public struct OverviewView: View {
             .foregroundStyle(.secondary)
     }
 
+    private var emptyChartLabel: some View {
+        Text("Nothing logged for this range yet.")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+    }
+
     private static func currency(_ amount: Double) -> String {
         amount.formatted(.currency(code: "PHP"))
-    }
-}
-
-// MARK: - HUD corners
-
-/// This screen's signature framing device: four independent viewfinder/
-/// targeting-reticle corner marks around the content area, rather than a
-/// single full-rectangle border stroke — a complete border reads as a
-/// panel outline (decoration); four open corners read as a frame you're
-/// looking *through*, the same device a camera viewfinder or a HUD uses to
-/// say "this is what's being tracked" without boxing it in on every side.
-/// Scoped to `OverviewView` alone, not promoted to the shared chassis —
-/// this is Overview's own vibe, not a device every screen should reach
-/// for.
-private struct HUDCorners: View {
-    var color: Color
-
-    private let length: CGFloat = 22
-    private let thickness: CGFloat = 2
-
-    var body: some View {
-        ZStack {
-            mark(top: true, leading: true)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            mark(top: true, leading: false)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-            mark(top: false, leading: true)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-            mark(top: false, leading: false)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-        }
-    }
-
-    /// One "L": a vertical stroke on whichever side (`leading`) plus a
-    /// horizontal stroke on whichever edge (`top`), meeting at that
-    /// corner. Built as a *single* continuous subpath (moveTo once, two
-    /// addLines through the shared corner vertex) rather than two
-    /// separate move/line pairs — the two-subpath version silently
-    /// dropped its vertical arm specifically for the top-leading corner,
-    /// where both subpaths' `move(to:)` happened to land on the exact
-    /// same point (0, 0); one continuous path has no duplicate moveTo to
-    /// trip over, for any corner.
-    private func mark(top: Bool, leading: Bool) -> some View {
-        let cornerX: CGFloat = leading ? 0 : length
-        let cornerY: CGFloat = top ? 0 : length
-        let verticalFarY: CGFloat = top ? length : 0
-        let horizontalFarX: CGFloat = leading ? length : 0
-        return Path { path in
-            path.move(to: CGPoint(x: cornerX, y: verticalFarY))
-            path.addLine(to: CGPoint(x: cornerX, y: cornerY))
-            path.addLine(to: CGPoint(x: horizontalFarX, y: cornerY))
-        }
-        .stroke(color, style: StrokeStyle(lineWidth: thickness, lineCap: .square, lineJoin: .miter))
-        .frame(width: length, height: length)
     }
 }
