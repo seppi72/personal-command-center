@@ -19,9 +19,9 @@ import SwiftUI
 // MARK: - Shared control chip surface
 
 /// The compact "chip" background `PCCDateRangeControl` and boxed
-/// `PCCMenuPicker`s use — a small pill/rounded-rect distinct from
-/// `PanelCard`'s bigger, softer card surface, sized and tinted to read as a
-/// clickable control rather than a static panel. Built from `.primary`
+/// `PCCMenuPicker`s use — a small pill/rounded-rect distinct from a
+/// standalone panel's bigger, softer card surface, sized and tinted to read
+/// as a clickable control rather than a static panel. Built from `.primary`
 /// opacity rather than `PanelSurface`'s explicit light/dark branching: a
 /// semantic color already adapts (dark tint in light mode, light tint in
 /// dark mode) without needing its own `colorScheme` check.

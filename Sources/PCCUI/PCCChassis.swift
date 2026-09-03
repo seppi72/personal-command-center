@@ -7,18 +7,18 @@ import SwiftUI
 /// uses colored lamps rather than making you read every gauge to know what
 /// needs attention.
 ///
-/// Two surface families live here, mid-migration (issue #65):
+/// Two surface families live here:
 /// - **Liquid Glass** (`GlassBubble`, `GlassScreenBackground`,
 ///   `ScreenTheme.liquidGlass`) — genuine `Material`-backed bubbles on a
-///   plain white/black ground with a faint dot grid. This is where every
-///   screen is headed; `AccountsView`, `CategoriesView`, and
-///   `FinancesReportingView` are there.
-/// - **The console panel** (`PanelCard`, `PanelBackground`,
-///   `.panelRows()`, `.panelScreenBackground()`) — bordered, solid-filled
-///   panels, from the earlier instrument-panel phase. Still what every
-///   not-yet-converted screen renders, and what create/edit sheets use on
-///   converted screens too, since a `Form`'s native controls don't read as
-///   glass however they're dressed.
+///   plain white/black ground with a faint dot grid. Every screen in
+///   `PCCUI` renders on this now (issue #65); it's the only surface family
+///   a screen itself ever opts into.
+/// - **The console panel** (`PanelBackground`, `.panelRows()`,
+///   `.panelScreenBackground()`) — bordered, solid-filled panels, from the
+///   earlier instrument-panel phase. No screen renders on this directly any
+///   more; it survives as what every `Form`-based create/edit sheet uses,
+///   since a `Form`'s native controls don't read as glass however they're
+///   dressed.
 ///
 /// Was `GlassDesignSystem.swift` — renamed during the instrument-panel
 /// phase, when the shared look genuinely wasn't glass at all; the name
@@ -28,22 +28,24 @@ import SwiftUI
 /// Splits what every screen shares from what's free to vary per screen:
 /// - **This file's `PCCChassis` enum, plus `GlassBubbleStyle`** —
 ///   structural constants (corner radii, specular geometry, the hard
-///   minimum outer margin) and the shape-level views (`PanelCard`,
-///   `GlassBubble`, `StatusDot`, `.panelRows()`) that give every screen the
-///   same *devices*, regardless of that screen's own colors. `PCCChassis`
-///   holds the console family's constants and `GlassBubbleStyle` the
-///   glass family's, rather than one flat namespace where
-///   `rowCornerRadius` (10) and a glass bubble's radius (30) would sit
-///   side by side meaning unrelated things.
+///   minimum outer margin) and the shape-level views (`GlassBubble`,
+///   `StatusDot`, `.panelRows()`) that give every screen the same
+///   *devices*, regardless of that screen's own colors. `PCCChassis` holds
+///   the console family's constants and `GlassBubbleStyle` the glass
+///   family's, rather than one flat namespace where `rowCornerRadius` (10)
+///   and a glass bubble's radius (30) would sit side by side meaning
+///   unrelated things.
 /// - **`ScreenTheme`** — the *material*: panel surface/void/line colors
 ///   and the signal-color palette a screen's `StatusDot`s and readouts
 ///   resolve against. Injected per screen via
-///   `\.screenTheme`/`.screenTheme(_:)`, defaulting to `.default` (the
-///   console family's cyan/green/amber/red palette) so every screen not yet
-///   converted renders exactly as before without having to opt into
-///   anything. A glass bubble's white tint is the one deliberate exception
-///   — see `GlassBubble` for why glass takes its color from what's behind
-///   it rather than from the palette.
+///   `\.screenTheme`/`.screenTheme(_:)`. Every screen now injects
+///   `.liquidGlass` explicitly; `.default` (the console family's
+///   cyan/green/amber/red palette) survives as the `EnvironmentKey`'s
+///   fallback — the value a screen would render with if it skipped that
+///   call — not as a look any screen currently ships with. A glass
+///   bubble's white tint is the one deliberate exception to theming — see
+///   `GlassBubble` for why glass takes its color from what's behind it
+///   rather than from the palette.
 ///
 /// Colors here key off `@Environment(\.colorScheme)` rather than system
 /// dynamic colors (`NSColor`/`UIColor`) — the app has its own explicit
@@ -55,9 +57,10 @@ import SwiftUI
 public enum PCCChassis {
     /// Corner radius for a single `List`/`Form` row's panel background.
     public static let rowCornerRadius: CGFloat = 10
-    /// Corner radius for a standalone `PanelCard` widget — slightly larger
+    /// Corner radius for a standalone card-sized surface — slightly larger
     /// than a row's, but a tight bezel rather than a fully-rounded, soft
-    /// panel.
+    /// panel. `FinancesReportingView`'s ticker-tape bar borrows this radius
+    /// for its own glass shape.
     public static let cardCornerRadius: CGFloat = 14
     /// Corner radius for a compact interactive control chip
     /// (`FormControls.swift`'s `PCCDateRangeControl`/boxed `PCCMenuPicker`).
@@ -83,7 +86,7 @@ public enum PCCChassis {
 /// data (a bundle of color-resolvers), so a new per-screen vibe is a new
 /// `ScreenTheme` literal, not a new type. Inject a screen's theme once at
 /// its own root via `.screenTheme(_:)`; every chassis view underneath
-/// (`PanelCard`, `StatusDot`, `.panelRows()`, and any shared control like
+/// (`StatusDot`, `.panelRows()`, `GlassBubble`, and any shared control like
 /// `SyncStatusBadge`) reads it back via `\.screenTheme` and re-skins to
 /// match, so dropping a shared control into a themed screen doesn't
 /// require that control to know about the theme by name.
@@ -118,9 +121,13 @@ public struct ScreenTheme: Sendable {
         self.signalRed = signalRed
     }
 
-    /// Today's one shared instrument-panel palette — every screen not yet
-    /// carrying its own distinct vibe uses this, unchanged from what was
-    /// previously the global `GlassStyle`.
+    /// The instrument-panel palette every screen rendered before the move
+    /// to Liquid Glass (issue #65), unchanged from what was previously the
+    /// global `GlassStyle`. No screen injects this by name any more; it
+    /// lives on as `ScreenThemeKey`'s `EnvironmentKey` fallback, so a
+    /// screen that skipped `.screenTheme(_:)` would degrade to this rather
+    /// than to an undefined color, and as the source `.liquidGlass` below
+    /// borrows its `signalAmber` from.
     public static let `default` = ScreenTheme(
         panelVoid: { $0 == .dark ? Color(hex: 0x0B0D10) : Color(hex: 0xF5F7F8) },
         panelSurface: { $0 == .dark ? Color(hex: 0x14171C) : .white },
@@ -317,9 +324,8 @@ public struct PanelBackground: View {
 }
 
 /// The one surface shape every panel in this chassis uses — a solid
-/// panel-fill rounded rectangle with a hairline border. Used directly by
-/// `PanelCard` (a standalone widget) and, as a `List`/`Form` row
-/// background, by `View.panelRows()` below.
+/// panel-fill rounded rectangle with a hairline border. Used as a
+/// `List`/`Form` row background by `View.panelRows()` below.
 private struct PanelSurface: View {
     var cornerRadius: CGFloat
     @Environment(\.colorScheme) private var colorScheme
@@ -332,44 +338,6 @@ private struct PanelSurface: View {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .strokeBorder(theme.panelLine(colorScheme), lineWidth: 1)
             )
-    }
-}
-
-/// Wraps `content` in a standalone panel — `OverviewView`'s dashboard is
-/// built entirely out of these, one per widget (Finances, Work,
-/// Productivity), and `TimeEntriesView` uses the same shape for its own
-/// hero timer cards.
-/// Fills the full width it's given (`maxWidth: .infinity`) and grows past
-/// `minHeight` if its content needs more (`maxHeight: .infinity`), rather
-/// than shrinking to its content's own size — `LazyVGrid` does *not*
-/// stretch a short cell to match its taller row-mates on its own (a common,
-/// easy-to-miss gap in its layout, unlike the newer `Grid`), so a light
-/// widget like Timer needs an explicit floor to avoid visibly leaving a gap
-/// of bare backdrop around a smaller box.
-public struct PanelCard<Content: View>: View {
-    /// Every dashboard widget shares this floor so the grid reads as evenly
-    /// sized tiles rather than whichever height each widget's own content
-    /// happens to need. `public` only because a `public` initializer's
-    /// default argument must be able to reference it, not because callers
-    /// are expected to read it directly — pass `minHeight:` to override.
-    public static var defaultMinHeight: CGFloat { 220 }
-
-    private let content: Content
-    private let minHeight: CGFloat
-
-    @Environment(\.colorScheme) private var colorScheme
-
-    public init(minHeight: CGFloat = PanelCard.defaultMinHeight, @ViewBuilder content: () -> Content) {
-        self.minHeight = minHeight
-        self.content = content()
-    }
-
-    public var body: some View {
-        content
-            .padding(20)
-            .frame(maxWidth: .infinity, minHeight: minHeight, maxHeight: .infinity, alignment: .topLeading)
-            .background(PanelSurface(cornerRadius: PCCChassis.cardCornerRadius))
-            .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.06), radius: 8, x: 0, y: 3)
     }
 }
 
@@ -413,9 +381,10 @@ extension View {
 /// repeating SwiftUI view, so the grid costs one draw call rather than one
 /// view per dot.
 ///
-/// The glass counterpart to `PanelBackground`, which stays for screens
-/// still on the older console chassis: apply this behind a screen's
-/// content (`.background(GlassScreenBackground())`), not in place of
+/// The glass counterpart to `PanelBackground`, which survives only behind
+/// `Form`-based create/edit sheets now, no screen rendering on it directly
+/// any more: apply this behind a screen's content
+/// (`.background(GlassScreenBackground())`), not in place of
 /// `panelScreenBackground()` on a `Form`-based sheet.
 public struct GlassScreenBackground: View {
     @Environment(\.colorScheme) private var colorScheme
@@ -542,8 +511,9 @@ public struct GlassBubbleStyle: Sendable, Equatable {
 /// with: a genuine `Material` fill (real OS-level backdrop blur and
 /// vibrancy, not a hand-rolled translucent rectangle), a soft white tint
 /// over it, a blurred specular highlight, and a hairline rim in the
-/// theme's `panelLine`. The glass counterpart to `PanelSurface`, which the
-/// console chassis's opaque `PanelCard`/`panelRows()` still use.
+/// theme's `panelLine`. The glass counterpart to `PanelSurface`, which
+/// every `Form`-based create/edit sheet still draws its rows with, via the
+/// console chassis's opaque `.panelRows()`.
 ///
 /// Public, and a surface rather than a container, because the content that
 /// sits on glass differs wildly per screen (a row's icon/name/balance, a

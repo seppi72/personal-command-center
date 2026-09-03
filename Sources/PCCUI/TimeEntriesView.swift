@@ -147,10 +147,10 @@ private struct TimeEntriesContent: View {
 
     /// This screen's own glass panel — the counterpart to
     /// `FinancesReportingContent.glassPanel(content:)`, with a configurable
-    /// floor so the hero (300pt, same as the old `PanelCard(minHeight:
-    /// 300)`) and the shorter item picker (220pt, `PanelCard`'s own default)
-    /// read as two different sizes of the same device rather than one
-    /// fixed-height box repeated twice.
+    /// floor so the hero (300pt, same as the now-deleted console chassis's
+    /// `PanelCard(minHeight: 300)`) and the shorter item picker (220pt,
+    /// that same widget's own default) read as two different sizes of the
+    /// same device rather than one fixed-height box repeated twice.
     private func heroPanel<Content: View>(
         minHeight: CGFloat = 220, @ViewBuilder content: () -> Content
     ) -> some View {
