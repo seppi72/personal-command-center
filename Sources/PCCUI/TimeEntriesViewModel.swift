@@ -81,9 +81,9 @@ public final class TimeEntriesViewModel: ObservableObject {
     }
 
     /// `timeEntries` bucketed by whichever single Task/Project/Client/Course
-    /// each one is attached to (ADR-0004) and totaled — the Punch Clock
-    /// screen's own reason for existing: "how many hours for each Task"
-    /// rather than a flat log of individual entries. Sorted by total
+    /// each one is attached to (ADR-0004) and totaled — this screen's own
+    /// reason for existing: "how many hours for each Task" rather than a
+    /// flat log of individual entries. Sorted by total
     /// duration, most-logged first, so the roster doubles as a quick
     /// leaderboard of where time actually went. Recomputed on every access
     /// rather than cached, since it's cheap for the data volumes this app
