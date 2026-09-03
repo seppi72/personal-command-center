@@ -3,11 +3,27 @@ import SwiftUI
 /// Minimal Mac/iOS screen for ticket #19, extended by ticket #20: lists
 /// Courses, and supports creating and deleting one. One shared SwiftUI view
 /// for both platforms — no platform-specific chrome, per the ticket's
-/// "minimal" scope (mirrors `ProjectsView`). Tapping a row navigates into
-/// `CourseDetailView` (ticket #20) rather than opening the edit sheet
-/// directly — editing moved to that screen's own toolbar, the same
-/// evolution `ProjectsView` went through in ticket #18 once it needed to
-/// show a Project's Sprints.
+/// "minimal" scope (mirrors `ProjectsView`).
+///
+/// On the shared Liquid Glass system since issue #72 — a grid of
+/// `CourseCard` bubbles (mirrors `ProjectsView`'s/`ClientsView`'s own
+/// grid+expand shape), replacing the earlier chalkboard costume
+/// (`ScreenTheme.chalkboard`, the dashed-rule `RosterRowModifier`) `git log`
+/// on this file still shows. Tapping a card expands it into a centered
+/// overlay revealing that Course's Tasks and Meetings; reaching
+/// `CourseDetailView` to edit the Course or manage those in full moved to a
+/// "Manage Course" link inside that overlay, since a single tap is now
+/// spent on the expand gesture instead of navigating directly. The screen's
+/// one surviving piece of "lecture hall" flavor is its typography — Course
+/// titles set in a serif, the only screen in the app that uses one — now
+/// that the chalkboard fill and dashed roster chrome are gone; the Term
+/// badge survives too, redrawn as a glass well rather than a chalk ring.
+///
+/// `ClientsView`'s `ClientCard` (issue #69) briefly also set the Client
+/// name and monogram seal in `design: .serif`, which would have made this
+/// screen's "only screen" claim false — stripped back to the plain system
+/// face there per issue #72's own acceptance criteria, so this screen keeps
+/// the serif exclusively.
 public struct CourseView: View {
     @ObservedObject private var viewModel: CoursesViewModel
 
@@ -17,15 +33,15 @@ public struct CourseView: View {
 
     public var body: some View {
         CourseContent(viewModel: viewModel)
-            .screenTheme(.chalkboard)
+            .screenTheme(.liquidGlass)
     }
 
     /// e.g. "September 2026" — the Term's owner-facing rendering, shared by
-    /// the row caption in `CourseContent` (`CourseFormSheet` renders the
-    /// same two fields as editable controls instead) and by
-    /// `CourseDetailView`. Kept on this thin wrapper struct rather than on
-    /// `CourseContent` since it has no environment dependency and outlives
-    /// any one screen instance's theme.
+    /// `CourseCard`'s caption (`CourseFormSheet` renders the same two
+    /// fields as editable controls instead) and by `CourseDetailView`. Kept
+    /// on this thin wrapper struct rather than on `CourseContent` since it
+    /// has no environment dependency and outlives any one screen instance's
+    /// theme.
     static func termLabel(month: Int, year: Int) -> String {
         let symbols = Calendar.current.monthSymbols
         guard (1...12).contains(month), symbols.indices.contains(month - 1) else {
@@ -35,14 +51,35 @@ public struct CourseView: View {
     }
 }
 
+/// This screen's one deliberate typographic signature — Course titles set
+/// in a serif, kept local to this file rather than added to `PCCChassis`
+/// since no other screen is meant to adopt it (per issue #72's acceptance
+/// criteria).
+private func courseTitleFont(_ size: CGFloat, weight: Font.Weight = .semibold) -> Font {
+    .system(size: size, weight: weight, design: .serif)
+}
+
 /// The screen's actual content — split out from `CourseView` itself so
-/// `.screenTheme(.chalkboard)` (applied in that struct's body, above) is
+/// `.screenTheme(.liquidGlass)` (applied in that struct's body, above) is
 /// genuinely in effect by the time this struct's own `body` reads
 /// `@Environment(\.screenTheme)`. See `View.screenTheme(_:)`'s doc comment
-/// in `PCCChassis.swift` for why the split is required.
+/// in `PCCChassis.swift` for why the split is required, not optional —
+/// `FinancesReportingView`/`FinancesReportingContent` hit this the hard
+/// way first.
 private struct CourseContent: View {
     @ObservedObject var viewModel: CoursesViewModel
     @State private var isPresentingNewCourseSheet = false
+
+    /// Which card (if any) is currently expanded, and the `TasksViewModel`/
+    /// `PersonalCommitmentsViewModel` scoped to it — tapping a collapsed
+    /// grid card sets all three; tapping the scrim, the close button, or the
+    /// same card again clears them. Mirrors `ProjectsContent`'s
+    /// `expandedProjectID`/`expandedSprintsViewModel`, just with a second
+    /// scoped view model since a Course's expanded card reveals both its
+    /// Tasks and its Meetings.
+    @State private var expandedCourseID: UUID?
+    @State private var expandedTasksViewModel: TasksViewModel?
+    @State private var expandedCommitmentsViewModel: PersonalCommitmentsViewModel?
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.screenTheme) private var theme
@@ -53,9 +90,10 @@ private struct CourseContent: View {
                 if viewModel.courses.isEmpty && !viewModel.isLoading {
                     emptyState
                 } else {
-                    courseList
+                    courseScroll
                 }
             }
+            .background(GlassScreenBackground())
             .navigationTitle("Courses")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
@@ -87,39 +125,162 @@ private struct CourseContent: View {
         }
     }
 
-    private var courseList: some View {
-        List {
-            Section {
-                statusStrip
+    /// A `ScrollView` of `CourseCard`s in a `LazyVGrid`, with a centered
+    /// expand overlay above a dimmed scrim rather than something grown in
+    /// place out of its source grid cell — the same shape, for the same two
+    /// real-bug reasons, `CategoriesContent.categoryScroll`'s own doc
+    /// comment records in full (`LazyVGrid` not honoring `zIndex` across
+    /// its own cells, and a grown-in-place transition never actually
+    /// reading as "growing").
+    private var courseScroll: some View {
+        ZStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    statusStrip
+                    courseGrid
+                }
+                .padding(PCCChassis.outerMargin)
             }
-            Section {
-                ForEach(viewModel.courses) { course in
-                    NavigationLink {
-                        CourseDetailView(
-                            course: course,
-                            viewModel: viewModel,
-                            tasksViewModel: viewModel.makeTasksViewModel(for: course),
-                            commitmentsViewModel: viewModel.makeCommitmentsViewModel(for: course)
-                        )
-                    } label: {
-                        CourseRow(course: course, isOverdue: Self.isOverdue(course))
-                    }
-                    #if os(macOS)
-                    .buttonStyle(.plain)
-                    #endif
-                }
-                .onDelete { offsets in
-                    let toDelete = offsets.map { viewModel.courses[$0] }
-                    Task {
-                        for course in toDelete {
-                            await viewModel.deleteCourse(course)
-                        }
-                    }
-                }
-                .rosterRows()
+            if let expandedCourseID, let course = course(withID: expandedCourseID),
+                let tasksViewModel = expandedTasksViewModel,
+                let commitmentsViewModel = expandedCommitmentsViewModel {
+                expandedOverlay(course, tasksViewModel: tasksViewModel, commitmentsViewModel: commitmentsViewModel)
             }
         }
-        .panelScreenBackground()
+        // On the enclosing `ZStack`, not the conditional content itself, so
+        // it governs the whole insert/remove transition below rather than
+        // only in-place property changes.
+        .animation(.spring(response: 0.4, dampingFraction: 0.82), value: expandedCourseID)
+    }
+
+    private func course(withID id: UUID) -> Course? {
+        viewModel.courses.first { $0.id == id }
+    }
+
+    /// A tap on a collapsed card expands it — see
+    /// `expandedOverlay(_:tasksViewModel:commitmentsViewModel:)` for where
+    /// the expanded state actually renders. Deletion moved from the former
+    /// `List`'s swipe-to-delete to a context menu, the same device
+    /// `ProjectCard`/`ClientCard` already use for their own grid cells.
+    private var courseGrid: some View {
+        LazyVGrid(
+            columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())],
+            spacing: 16
+        ) {
+            ForEach(viewModel.courses) { course in
+                Button {
+                    if expandedCourseID == course.id {
+                        expandedCourseID = nil
+                    } else {
+                        expandedCourseID = course.id
+                        expandedTasksViewModel = viewModel.makeTasksViewModel(for: course)
+                        expandedCommitmentsViewModel = viewModel.makeCommitmentsViewModel(for: course)
+                    }
+                } label: {
+                    CourseCard(course: course, isOverdue: Self.isOverdue(course), isExpanded: false)
+                }
+                .buttonStyle(CourseCardPressStyle())
+                .contextMenu {
+                    Button(role: .destructive) {
+                        Task { await viewModel.deleteCourse(course) }
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
+            }
+        }
+        .padding(.top, 16)
+    }
+
+    /// The single floating, enlarged `CourseCard` for whichever Course is
+    /// tapped, its Tasks and Meetings loaded into `tasksViewModel`/
+    /// `commitmentsViewModel` as soon as it appears (`.task(id:)`, keyed on
+    /// the Course's id) — a dimmed scrim behind it (tap to dismiss), a close
+    /// button on the card itself, and a "Manage Course" link down to
+    /// `CourseDetailView` now that a tap on the collapsed card spends itself
+    /// on expanding rather than navigating (mirrors
+    /// `ProjectsContent.expandedOverlay(_:sprintsViewModel:)`, with the pair
+    /// of scoped view models swapped in for that screen's single
+    /// `SprintsViewModel`).
+    private func expandedOverlay(
+        _ course: Course,
+        tasksViewModel: TasksViewModel,
+        commitmentsViewModel: PersonalCommitmentsViewModel
+    ) -> some View {
+        ZStack {
+            // Its own opacity-only transition — kept separate from the
+            // card's `.scale` transition below, same reasoning as
+            // `ProjectsContent.expandedOverlay(_:sprintsViewModel:)`.
+            Rectangle()
+                .fill(scrimColor)
+                .ignoresSafeArea()
+                .onTapGesture { expandedCourseID = nil }
+                .transition(.opacity)
+            VStack(spacing: 14) {
+                CourseCard(
+                    course: course,
+                    isOverdue: Self.isOverdue(course),
+                    isExpanded: true,
+                    tasks: tasksViewModel.tasks,
+                    commitments: commitmentsViewModel.commitments
+                )
+                .background(bubbleShadow)
+                .overlay(alignment: .topTrailing) {
+                    Button {
+                        expandedCourseID = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 22))
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(10)
+                }
+                NavigationLink {
+                    CourseDetailView(
+                        course: course,
+                        viewModel: viewModel,
+                        tasksViewModel: tasksViewModel,
+                        commitmentsViewModel: commitmentsViewModel
+                    )
+                } label: {
+                    Label("Manage Course", systemImage: "slider.horizontal.3")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                #if os(macOS)
+                .buttonStyle(.plain)
+                #endif
+                .foregroundStyle(theme.accent(colorScheme))
+            }
+            .frame(maxWidth: 360)
+            // Distinct identity per Course so switching which card is
+            // expanded is a genuine remove-then-insert, and so `.task(id:)`
+            // below re-fires for the newly expanded Course rather than
+            // treating a swap as an in-place update of the same view.
+            .id(course.id)
+            .task(id: course.id) {
+                async let tasksLoad: Void = tasksViewModel.load()
+                async let commitmentsLoad: Void = commitmentsViewModel.load()
+                _ = await (tasksLoad, commitmentsLoad)
+            }
+            .transition(.opacity.combined(with: .scale(scale: 0.92)))
+        }
+        .zIndex(1)
+    }
+
+    private var scrimColor: Color {
+        Color.black.opacity(colorScheme == .dark ? 0.6 : 0.28)
+    }
+
+    /// A drop shadow behind the expanded card — kept off the shared
+    /// `GlassBubble` itself (which the collapsed grid cells also use) since
+    /// only the enlarged overlay instance needs the heavier "lifted toward
+    /// the viewer" shadow.
+    private var bubbleShadow: some View {
+        RoundedRectangle(cornerRadius: GlassBubbleStyle.gridCell.cornerRadius, style: .continuous)
+            .fill(Color.clear)
+            .shadow(color: .black.opacity(colorScheme == .dark ? 0.55 : 0.16), radius: 26, x: 0, y: 14)
     }
 
     // MARK: - Status strip
@@ -132,18 +293,13 @@ private struct CourseContent: View {
                 .foregroundStyle(.secondary)
             Spacer()
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 10)
+        .padding(.bottom, 12)
         .overlay(
             Rectangle()
                 .fill(theme.panelLine(colorScheme))
                 .frame(height: 1),
             alignment: .bottom
         )
-        .listRowInsets(EdgeInsets())
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
     }
 
     private var overallStatus: PanelStatus {
@@ -169,7 +325,7 @@ private struct CourseContent: View {
     private var emptyState: some View {
         VStack(spacing: 8) {
             Text("No Courses")
-                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .font(.headline)
             Text("Tap + to create your first Course.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -187,7 +343,12 @@ private struct CourseContent: View {
 
 /// Shared create/edit form: the same sheet serves "New Course" and "Edit
 /// Course" — a name field, Term (month/year) fields, and a Deadline toggle
-/// (mirrors `ProjectFormSheet`).
+/// (mirrors `ProjectFormSheet`). Left in the shared chassis look rather than
+/// a bespoke glass re-theme — a `Form`'s native controls don't read as
+/// "liquid glass" however they're dressed, so there's nothing this screen's
+/// own device would add here (mirrors `AccountFormSheet`'s identical
+/// reasoning); only its backdrop moves to `GlassScreenBackground()` via
+/// `glassScreenBackground()`, per issue #72.
 struct CourseFormSheet: View {
     let title: String
     let onSave: (CourseFormValues) async -> Void
@@ -253,7 +414,7 @@ struct CourseFormSheet: View {
                 }
                 .panelRows()
             }
-            .panelScreenBackground()
+            .glassScreenBackground()
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -280,18 +441,20 @@ struct CourseFormSheet: View {
 }
 
 /// A Course's detail screen (ticket #20): the Course's name/Term/due date
-/// read-only at the top (editing moved here from the list row, via the
-/// toolbar's "Edit" button — same `CourseFormSheet`/`onSave` wiring as
-/// before), a "Tasks" section listing the Course's Tasks with
-/// add/edit/complete/delete — the Course-scoped counterpart to
-/// `ProjectDetailView`'s "Sprints" section, backed by the same
-/// `TasksViewModel`/`TaskFormSheet` the top-level Tasks screen uses (just
-/// scoped to this Course via `CoursesViewModel.makeTasksViewModel(for:)`)
-/// rather than a separate, duplicated row/form implementation — plus a
-/// "Meetings" section (ticket #56) listing the Course's linked Personal
-/// Commitments the same way, backed by `PersonalCommitmentsViewModel`/
-/// `PersonalCommitmentFormSheet` scoped via
-/// `CoursesViewModel.makeCommitmentsViewModel(for:)`.
+/// read-only at the top (editing reached via the toolbar's "Edit" button —
+/// same `CourseFormSheet`/`onSave` wiring as before), a "Tasks" section
+/// listing the Course's Tasks with add/edit/complete/delete — the
+/// Course-scoped counterpart to `ProjectDetailView`'s "Sprints" section,
+/// backed by the same `TasksViewModel`/`TaskFormSheet` the top-level Tasks
+/// screen uses (just scoped to this Course via
+/// `CoursesViewModel.makeTasksViewModel(for:)`) rather than a separate,
+/// duplicated row/form implementation — plus a "Meetings" section (ticket
+/// #56) listing the Course's linked Personal Commitments the same way,
+/// backed by `PersonalCommitmentsViewModel`/`PersonalCommitmentFormSheet`
+/// scoped via `CoursesViewModel.makeCommitmentsViewModel(for:)`. Reached
+/// from `CourseView`'s expanded-card overlay via its "Manage Course" link
+/// (issue #72) rather than a direct card tap, since a tap on the collapsed
+/// grid card now expands it instead.
 struct CourseDetailView: View {
     let course: Course
     @ObservedObject var viewModel: CoursesViewModel
@@ -317,7 +480,7 @@ struct CourseDetailView: View {
         List {
             Section {
                 Text(currentCourse.name)
-                    .font(.title3)
+                    .font(courseTitleFont(20))
                 Text(CourseView.termLabel(month: currentCourse.termMonth, year: currentCourse.termYear))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -419,7 +582,7 @@ struct CourseDetailView: View {
             }
             .panelRows()
         }
-        .panelScreenBackground()
+        .glassScreenBackground()
         .navigationTitle(currentCourse.name)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -553,129 +716,161 @@ struct CourseDetailView: View {
     }
 }
 
-// MARK: - Chalkboard theme
-
-extension ScreenTheme {
-    /// `CourseView`'s own vibe: a lecture hall / chalkboard — cool ledger
-    /// paper in Light Mode (greyer than Commitments' warm cream or
-    /// Clients' ivory, so the three don't read as the same material), the
-    /// chalkboard itself in Dark Mode — deep slate green with chalk-white
-    /// ink — and a brass accent standing in for a chalk-holder or a
-    /// lecture hall's brass fittings. Signal colors left as
-    /// `ScreenTheme.default`'s.
-    fileprivate static let chalkboard = ScreenTheme(
-        panelVoid: { $0 == .dark ? Color(hex: 0x1E2B23) : Color(hex: 0xF0EDE1) },
-        panelSurface: { $0 == .dark ? Color(hex: 0x283A31) : Color(hex: 0xFAF8EE) },
-        panelLine: { $0 == .dark ? Color(hex: 0x3B4F42) : Color(hex: 0xD6D0B8) },
-        accent: { $0 == .dark ? Color(hex: 0xD9B36A) : Color(hex: 0x8A6A22) },
-        signalGreen: ScreenTheme.default.signalGreen,
-        signalAmber: ScreenTheme.default.signalAmber,
-        signalRed: ScreenTheme.default.signalRed
-    )
-}
-
-// MARK: - Roster row
-
-/// This screen's own row chrome — no bordered card per row (every other
-/// list-backed screen's `panelRows()`), just a dashed chalk-line under
-/// each row, since the signature device here (`TermBadge`) already carries
-/// the visual weight a card border would otherwise add. A local modifier
-/// rather than a chassis-wide alternative to `panelRows()`, since only
-/// this screen wants it — the roster look is this screen's own choice,
-/// not a device other screens should default to.
-extension View {
-    fileprivate func rosterRows() -> some View {
-        modifier(RosterRowModifier())
+/// The tap feedback every collapsed `CourseCard` button uses — a brief
+/// press-down scale dip, the same device `ProjectCard`'s/`ClientCard`'s own
+/// press style uses, scoped separately per screen rather than shared,
+/// matching that type's own precedent.
+private struct CourseCardPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 
-private struct RosterRowModifier: ViewModifier {
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.screenTheme) private var theme
+// MARK: - Course card
 
-    func body(content: Content) -> some View {
-        content
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
-            .overlay(alignment: .bottom) {
-                DashedLine()
-                    .stroke(theme.panelLine(colorScheme), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                    .frame(height: 1)
-            }
-    }
-}
-
-/// A single horizontal dashed rule — one continuous subpath (see
-/// `View.screenTheme(_:)`'s sibling caution about multi-subpath `Shape`s
-/// in `PCCChassis.swift`; this shape only ever has the one line, but kept
-/// as a single `moveTo`/`addLine` pair on principle) rather than a plain
-/// `Rectangle`, since `Rectangle` has no dash style to give it a chalk
-/// texture.
-private struct DashedLine: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
-        return path
-    }
-}
-
-// MARK: - Course row
-
-/// This screen's signature: a chalk-ring term badge — a dashed circle
-/// standing in for a lecture-hall room plate — leading each row, with the
-/// Course's name set in a rounded display face for a hand-chalk feel
-/// without depending on an unreliable custom "Chalkboard" font (per
-/// `PCCChassis.swift`'s own caution about `Font.custom` risking a silent
-/// fallback). The due date, when present, gets a chalk-underline that
-/// turns from brass to red once overdue.
-private struct CourseRow: View {
+/// One Course's card: the shared `GlassBubble` surface (`.gridCell` size)
+/// with this screen's own content on it — the glass `TermBadge` well, the
+/// Course's name set in a serif (`courseTitleFont`, this screen's one
+/// typographic signature), its Term caption, and a due-date readout. Used
+/// two ways: `isExpanded: false` as the plain collapsed grid cell, and
+/// `isExpanded: true` as the single centered card
+/// `CourseContent.expandedOverlay(_:tasksViewModel:commitmentsViewModel:)`
+/// paints above a dimmed scrim, additionally passed that Course's `tasks`
+/// and `commitments` to reveal (mirrors `ProjectCard`'s/`ClientCard`'s own
+/// two-ways-used shape).
+private struct CourseCard: View {
     let course: Course
     let isOverdue: Bool
+    let isExpanded: Bool
+    var tasks: [PCCTask] = []
+    var commitments: [PersonalCommitment] = []
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.screenTheme) private var theme
 
+    private static let baseHeight: CGFloat = 150
+    private static let style: GlassBubbleStyle = .gridCell
+
     var body: some View {
-        HStack(spacing: 14) {
-            TermBadge(month: course.termMonth, year: course.termYear)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(course.name)
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color.primary)
-                Text(CourseView.termLabel(month: course.termMonth, year: course.termYear))
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                if let dueDate = course.dueDate {
-                    dueBadge(dueDate)
-                        .padding(.top, 3)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                TermBadge(month: course.termMonth, year: course.termYear)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(course.name)
+                        .font(courseTitleFont(15))
+                        .lineLimit(2)
+                    Text(CourseView.termLabel(month: course.termMonth, year: course.termYear))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
                 }
             }
-            Spacer(minLength: 0)
+            if let dueDate = course.dueDate {
+                Text(dueDate, style: .date)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(isOverdue ? theme.signalRed(colorScheme) : .secondary)
+                    .padding(.top, 10)
+            }
+            if isExpanded {
+                rosterSection
+                    .padding(.top, 14)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
-        .padding(.vertical, 10)
+        .padding(18)
+        .frame(maxWidth: .infinity, minHeight: Self.baseHeight, alignment: .topLeading)
+        .glassBubble(Self.style)
     }
 
-    private func dueBadge(_ dueDate: Date) -> some View {
-        Text("DUE \(Self.dueDateFormatter.string(from: dueDate).uppercased())")
-            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-            .foregroundStyle(isOverdue ? theme.signalRed(colorScheme) : theme.accent(colorScheme))
-            .padding(.bottom, 1)
-            .overlay(
-                Rectangle()
-                    .fill(isOverdue ? theme.signalRed(colorScheme) : theme.panelLine(colorScheme))
-                    .frame(height: 2),
-                alignment: .bottom
-            )
+    // MARK: Roster (expanded reveal)
+
+    /// The expanded card's own content: the Course's Tasks and Meetings,
+    /// compact — the roster the collapsed cell's Term badge only hints at.
+    /// Mirrors `ProjectCard.sprintsSection`/`ClientCard.recentWork`, just
+    /// two grouped lists instead of one, since a Course's detail screen has
+    /// two sections to reflect here rather than one.
+    private var rosterSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Rectangle()
+                .fill(theme.panelLine(colorScheme))
+                .frame(height: 1)
+                .opacity(0.7)
+            rosterGroup(title: tasks.count == 1 ? "1 TASK" : "\(tasks.count) TASKS", isEmpty: tasks.isEmpty, emptyText: "No Tasks yet") {
+                ForEach(tasks) { task in
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(task.title)
+                            .font(.system(size: 11))
+                            .strikethrough(task.isComplete)
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        if let dueDate = task.dueDate {
+                            Text(Self.dateFormatter.string(from: dueDate))
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            rosterGroup(
+                title: commitments.count == 1 ? "1 MEETING" : "\(commitments.count) MEETINGS",
+                isEmpty: commitments.isEmpty,
+                emptyText: "No Meetings yet"
+            ) {
+                ForEach(commitments) { commitment in
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(commitment.title)
+                            .font(.system(size: 11))
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        Text(Self.timeFormatter.string(from: commitment.startDate))
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
     }
 
-    private static let dueDateFormatter: DateFormatter = {
+    @ViewBuilder
+    private func rosterGroup<Rows: View>(
+        title: String, isEmpty: Bool, emptyText: String, @ViewBuilder rows: () -> Rows
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .tracking(1.0)
+                .foregroundStyle(.secondary)
+            if isEmpty {
+                Text(emptyText)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            } else {
+                rows()
+            }
+        }
+    }
+
+    private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMM d"
         return formatter
     }()
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return formatter
+    }()
 }
 
+/// This screen's signature device, surviving the move off chalkboard: a
+/// term-code well — cut from the same glass as the card behind it
+/// (`GlassBubble.tint(for:)`/`.rimColor`, the same device `AccountsView`'s
+/// own round type-icon well and `ClientCard`'s monogram seal use) rather
+/// than the earlier dashed chalk-ring, so the Term badge stays a real
+/// device without depending on chalkboard texture.
 private struct TermBadge: View {
     let month: Int
     let year: Int
@@ -685,18 +880,22 @@ private struct TermBadge: View {
 
     var body: some View {
         Circle()
-            .strokeBorder(theme.accent(colorScheme), style: StrokeStyle(lineWidth: 1.5, dash: [3, 2]))
-            .frame(width: 46, height: 46)
+            .fill(.ultraThinMaterial)
+            .overlay(Circle().fill(GlassBubble.tint(for: colorScheme)))
+            .overlay(
+                Circle().strokeBorder(GlassBubble.rimColor(theme, colorScheme), lineWidth: GlassBubble.rimWidth)
+            )
             .overlay(
                 Text(code)
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                     .foregroundStyle(theme.accent(colorScheme))
             )
+            .frame(width: 42, height: 42)
     }
 
     /// e.g. "FA26" — a lecture-hall room-plate-style short code (season +
-    /// 2-digit year) standing in for the full Term caption already shown
-    /// below it, so the badge reads at a glance instead of repeating text.
+    /// 2-digit year) standing in for the full Term caption shown beside it,
+    /// so the badge reads at a glance instead of repeating text.
     private var code: String {
         "\(seasonCode)\(String(format: "%02d", year % 100))"
     }

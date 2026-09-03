@@ -357,7 +357,7 @@ private struct ClientCard: View {
             HStack(spacing: 10) {
                 seal
                 Text(client.name)
-                    .font(.system(size: 15, weight: .semibold, design: .serif))
+                    .font(.system(size: 15, weight: .semibold))
                     .lineLimit(2)
             }
             Text(projectCount == 1 ? "PROJECT" : "PROJECTS")
@@ -394,7 +394,7 @@ private struct ClientCard: View {
             )
             .overlay(
                 Text(monogram)
-                    .font(.system(size: 13, weight: .semibold, design: .serif))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(theme.accent(colorScheme))
             )
             .frame(width: 32, height: 32)
