@@ -146,12 +146,13 @@ private struct OverviewContent: View {
     }
 
     /// This screen's shared chart/figure container — the glass counterpart
-    /// to the console chassis's `PanelCard`, matching
+    /// to the now-deleted console chassis's `PanelCard` widget, matching
     /// `FinancesReportingContent.glassPanel(content:)`. A fixed `minHeight`
     /// (rather than `FinancesReportingContent`'s content-sized panels) keeps
     /// Work and Productivity the same height when the wide layout sits them
-    /// side by side, the same floor `PanelCard.defaultMinHeight` gave every
-    /// widget on the old console chassis.
+    /// side by side — the same 220pt floor `PanelCard` gave every widget on
+    /// the old console chassis, kept here as a literal now that the widget
+    /// itself is gone.
     private func glassPanel<Content: View>(minHeight: CGFloat = 220, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             content()
