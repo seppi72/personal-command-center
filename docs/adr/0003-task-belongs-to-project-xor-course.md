@@ -7,3 +7,5 @@ We chose exclusivity: a Task references at most one of `projectID`/`courseID`, e
 This decision predated the ticket that implements it: `PCCTask` only had `projectID` through ticket #17; `courseID` and the cross-clearing logic (`TaskController.assignProject`/`assignCourse`) landed in ticket #20, once Sprint (#18) and Course (#19) CRUD both existed. Recording the boundary here ahead of time is what kept #20 from having to make this call itself.
 
 The trade-off: if a future need ever wants a Task tagged with both (e.g. a school project that's also tracked as freelance Client work), this boundary has to be revisited and the exclusivity relaxed — a real but currently hypothetical cost against a concrete, present ambiguity avoided.
+
+**Amended by ADR-0011.** A Project may now itself belong to a Course, so a Task can reach a Course either directly or through its Project. The exclusivity above is unchanged — a Task still references at most one container — but "belongs to a Project or a Course" now means "belongs to a Project, or directly to a Course."

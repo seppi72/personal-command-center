@@ -5,11 +5,14 @@ A single-user system that aggregates, organizes, prioritizes, and surfaces the o
 ## Language
 
 **Task**:
-The atomic unit of work. May belong to a Project or a Course, not both — the two are alternate containers of the same kind, not orthogonal tags — and may carry a Deadline.
+The atomic unit of work — something the owner *completes*, as distinct from a Personal Commitment, which is something the owner *attends*. Belongs to a Project or directly to a Course, not both — the two are alternate containers of the same kind, not orthogonal tags (ADR-0003) — and may carry a Deadline. Since a Project may itself belong to a Course (ADR-0011), a Task can reach a Course either directly or through its Project; it still has exactly one container.
 _Avoid_: To-do, item, action.
 
+**Kind**:
+An optional label on a Task naming what sort of work it is — homework, study, reading, and the like. Purely for filtering and display; it carries no behaviour and doesn't affect which container a Task belongs to. An exam or a quiz is deliberately *not* a Kind, because those are attended at a fixed time rather than completed — they're Personal Commitments.
+
 **Project**:
-A container of related Tasks with its own lifecycle, distinct from any single Task. May optionally belong to a Client, and may optionally be broken into Sprints.
+A container of related Tasks with its own lifecycle, distinct from any single Task. May optionally belong to a Client or to a Course — not both, and not necessarily either (ADR-0011): a Project is billable work for a Client or coursework for a Course. May optionally be broken into Sprints regardless of which parent it has.
 
 **Sprint**:
 A time-boxed iteration within one Project that Tasks can be grouped into. A Project's use of Sprints is optional, but a Sprint itself is scoped to the Project it was created in for its lifetime — it doesn't move to a different Project.
@@ -21,7 +24,7 @@ A grouping of Projects (e.g. an employer or a freelance client) — the owner ma
 A due-date concept attachable to a Task, Project, Course, or other dated obligation.
 
 **Personal Commitment**:
-A recurring or scheduled personal obligation (e.g. a standing calendar block), distinct from a Task — it is scheduled/time-bound rather than completed. May optionally attach to a Course (e.g. a recurring class meeting time) — a single optional link, not the four-way container exclusivity Time Entry has (ADR-0004); a Course can't be deleted while a Personal Commitment still references it, the same referential guard Time Entry's own containers and Finances' Accounts already have (`docs/adr/0009-manual-entry-not-lms-integration-for-school.md`).
+A recurring or scheduled personal obligation (e.g. a standing calendar block), distinct from a Task — it is scheduled/time-bound rather than completed. School exams and quizzes are Personal Commitments for this reason: they are attended at a fixed time, not ticked off. May optionally attach to a Course (e.g. a recurring class meeting time) — a single optional link, not the four-way container exclusivity Time Entry has (ADR-0004); a Course can't be deleted while a Personal Commitment still references it, the same referential guard Time Entry's own containers and Finances' Accounts already have (`docs/adr/0009-manual-entry-not-lms-integration-for-school.md`).
 
 **Automation Log**:
 An audit-trail record of an action the system took on its own (e.g. a data pull, an auto-generated entity), kept so the automation can be trusted and debugged rather than re-checked by hand.
@@ -34,10 +37,10 @@ A record spanning a start and end time, captured primarily by starting/stopping 
 _Avoid_: Timesheet entry, log entry.
 
 **Work Hours**:
-The aggregate view over Time Entries — totals grouped by day, or by one of Time Entry's four containers (Task, Project, Client, Course), over a chosen range. A Project/Client/Course total folds in not just Time Entries logged directly against that container but, transitively, everything logged beneath it: a Project's total includes its Tasks' entries, a Client's total includes its Projects' totals (direct and Task-level), a Course's total includes its Tasks' entries (ADR-0005). A Task total is direct entries only — a Task has nothing below it to fold in. A running live timer (no `endDate` yet) doesn't contribute to any Work Hours total until it's stopped.
+The aggregate view over Time Entries — totals grouped by day, or by one of Time Entry's four containers (Task, Project, Client, Course), over a chosen range. A Project/Client/Course total folds in not just Time Entries logged directly against that container but, transitively, everything logged beneath it: a Project's total includes its Tasks' entries, a Client's total includes its Projects' totals (direct and Task-level), a Course's total includes both its own Tasks' entries and its Projects' totals (ADR-0005, extended by ADR-0011). A Task total is direct entries only — a Task has nothing below it to fold in. A running live timer (no `endDate` yet) doesn't contribute to any Work Hours total until it's stopped.
 
 **Course**:
-A container of related Tasks/Deadlines for a single school class (e.g. "CS 301"), analogous to how a Project contains personal Tasks — down to optionally carrying its own Deadline the same way a Project can. Created directly by the owner each term, not auto-detected; its Tasks, Deadlines, Time Entries, and Personal Commitments are entered the same way any other Task, Deadline, Time Entry, or Personal Commitment is — there's no accessible school data source to auto-populate them from, a deliberate decision, not a placeholder for a future sync (`docs/adr/0009-manual-entry-not-lms-integration-for-school.md`).
+A container of related Tasks/Deadlines for a single school class (e.g. "CS 301"), analogous to how a Project contains personal Tasks — and, like a Client, it may also contain Projects of its own for coursework that has the Project shape, such as a semester group assignment (ADR-0011) — down to optionally carrying its own Deadline the same way a Project can. Created directly by the owner each term, not auto-detected; its Tasks, Deadlines, Time Entries, and Personal Commitments are entered the same way any other Task, Deadline, Time Entry, or Personal Commitment is — there's no accessible school data source to auto-populate them from, a deliberate decision, not a placeholder for a future sync (`docs/adr/0009-manual-entry-not-lms-integration-for-school.md`).
 
 **Term**:
 The month and year identifying which academic term a Course belongs to (e.g. "September 2026").
