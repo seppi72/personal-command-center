@@ -442,8 +442,8 @@ public final class WorkViewModel: ObservableObject {
     /// it — the one shape every method above shares, instead of a copy of
     /// the error handling and the rebuild per method.
     ///
-    /// Takes a `noun` as well as a `verb`, unlike every other view model's
-    /// `run(verb:)` (`CoursesViewModel.run`, say), which can hard-code its
+    /// Takes a `noun` as well as a `verb`, unlike the single-domain view
+    /// models' `run(verb:)` (`AccountsViewModel.run`, say), which can hard-code its
     /// one noun: this one screen mutates five different kinds of thing, so
     /// "Couldn't create Sprint" has to name which.
     private func run(noun: String, verb: String, _ operation: () async throws -> Void) async {

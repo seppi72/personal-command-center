@@ -20,8 +20,11 @@ public final class PersonalCommitmentsViewModel: ObservableObject {
 
     /// When set, this screen is scoped to one Course (`GET
     /// /v1/personal-commitments?courseID=`) rather than listing every
-    /// Commitment — `CourseDetailView`'s "Meetings" section (ticket #56),
-    /// the same scoping shape `TasksViewModel.scopedCourseID` already has.
+    /// Commitment — the same scoping shape `TasksViewModel.scopedCourseID`
+    /// has. Introduced for the Courses screen's "Meetings" section (ticket
+    /// #56) and unpassed since issue #90 folded that screen into
+    /// `SchoolViewModel`, which filters the Commitments it already loaded
+    /// rather than re-fetching one Course's at a time.
     private let scopedCourseID: UUID?
 
     public init(client: PersonalCommitmentsAPIClient, coursesClient: CoursesAPIClient, scopedCourseID: UUID? = nil) {
