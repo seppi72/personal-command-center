@@ -77,6 +77,9 @@ public final class TasksViewModel: ObservableObject {
             if let dueDate = values.dueDate {
                 created = try await tasksClient.setTaskDeadline(id: created.id, dueDate: dueDate)
             }
+            if let kind = values.kind {
+                created = try await tasksClient.setTaskKind(id: created.id, kind: kind)
+            }
             if matchesScope(created) {
                 tasks.append(created)
             }
@@ -97,6 +100,9 @@ public final class TasksViewModel: ObservableObject {
             }
             if values.dueDate != task.dueDate {
                 updated = try await tasksClient.setTaskDeadline(id: task.id, dueDate: values.dueDate)
+            }
+            if values.kind != task.kind {
+                updated = try await tasksClient.setTaskKind(id: task.id, kind: values.kind)
             }
             replace(updated)
         }

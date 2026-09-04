@@ -20,6 +20,8 @@ extension AppTestSuite {
                 let result = try await test(app)
                 try await TimeEntry.query(on: app.db).delete()
                 try await Project.query(on: app.db).delete()
+                try await Course.query(on: app.db).delete()
+                try await PCCClient.query(on: app.db).delete()
                 return result
             }
         }
@@ -208,6 +210,136 @@ extension AppTestSuite {
 
                 let stored = try await Project.find(id, on: app.db)
                 #expect(stored != nil)
+            }
+        }
+
+        @Test("assigns a Project to a Course, clearing any Client it had (ADR-0011)")
+        func assigningCourseClearsClient() async throws {
+            try await withProjectsApp { app in
+                let client = PCCClient(name: "Acme")
+                try await client.save(on: app.db)
+                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026)
+                try await course.save(on: app.db)
+                let project = Project(name: "Group assignment", clientID: try client.requireID())
+                try await project.save(on: app.db)
+                let id = try project.requireID()
+                let courseID = try course.requireID()
+
+                try await app.testing().test(
+                    .PUT, "/v1/projects/\(id)/course",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(SetProjectCourseRequest(courseID: courseID))
+                    },
+                    afterResponse: { res async throws in
+                        #expect(res.status == .ok)
+                        let body = try res.content.decode(ProjectResponse.self)
+                        #expect(body.courseID == courseID)
+                        #expect(body.clientID == nil)
+                    }
+                )
+
+                let stored = try await Project.find(id, on: app.db)
+                #expect(stored?.$course.id == courseID)
+                #expect(stored?.$client.id == nil)
+            }
+        }
+
+        @Test("assigns a Project to a Client, clearing any Course it had (ADR-0011)")
+        func assigningClientClearsCourse() async throws {
+            try await withProjectsApp { app in
+                let client = PCCClient(name: "Acme")
+                try await client.save(on: app.db)
+                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026)
+                try await course.save(on: app.db)
+                let project = Project(name: "Group assignment", courseID: try course.requireID())
+                try await project.save(on: app.db)
+                let id = try project.requireID()
+                let clientID = try client.requireID()
+
+                try await app.testing().test(
+                    .PUT, "/v1/projects/\(id)/client",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(SetProjectClientRequest(clientID: clientID))
+                    },
+                    afterResponse: { res async throws in
+                        #expect(res.status == .ok)
+                        let body = try res.content.decode(ProjectResponse.self)
+                        #expect(body.clientID == clientID)
+                        #expect(body.courseID == nil)
+                    }
+                )
+
+                let stored = try await Project.find(id, on: app.db)
+                #expect(stored?.$client.id == clientID)
+                #expect(stored?.$course.id == nil)
+            }
+        }
+
+        @Test("clearing a Project's Course leaves it parent-less rather than restoring a Client")
+        func clearingCourseLeavesProjectParentless() async throws {
+            try await withProjectsApp { app in
+                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026)
+                try await course.save(on: app.db)
+                let project = Project(name: "Group assignment", courseID: try course.requireID())
+                try await project.save(on: app.db)
+                let id = try project.requireID()
+
+                try await app.testing().test(
+                    .PUT, "/v1/projects/\(id)/course",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(SetProjectCourseRequest(courseID: nil))
+                    },
+                    afterResponse: { res async throws in
+                        #expect(res.status == .ok)
+                        let body = try res.content.decode(ProjectResponse.self)
+                        #expect(body.courseID == nil)
+                        #expect(body.clientID == nil)
+                    }
+                )
+            }
+        }
+
+        @Test("rejects assigning a Project to a Course that doesn't exist")
+        func assigningMissingCourseFails() async throws {
+            try await withProjectsApp { app in
+                let project = Project(name: "Group assignment")
+                try await project.save(on: app.db)
+                let id = try project.requireID()
+
+                try await app.testing().test(
+                    .PUT, "/v1/projects/\(id)/course",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(SetProjectCourseRequest(courseID: UUID()))
+                    },
+                    afterResponse: { res async in
+                        #expect(res.status == .badRequest)
+                    }
+                )
+            }
+        }
+
+        @Test("lists Projects scoped to one Course")
+        func listsProjectsScopedToACourse() async throws {
+            try await withProjectsApp { app in
+                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026)
+                try await course.save(on: app.db)
+                let courseID = try course.requireID()
+                try await Project(name: "Coursework", courseID: courseID).save(on: app.db)
+                try await Project(name: "Unrelated").save(on: app.db)
+
+                try await app.testing().test(
+                    .GET, "/v1/projects?courseID=\(courseID)",
+                    headers: authHeaders(),
+                    afterResponse: { res async throws in
+                        let body = try res.content.decode([ProjectResponse].self)
+                        #expect(body.count == 1)
+                        #expect(body.first?.name == "Coursework")
+                    }
+                )
             }
         }
     }

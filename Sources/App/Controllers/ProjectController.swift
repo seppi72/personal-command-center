@@ -6,12 +6,14 @@ struct ProjectResponse: Content {
     let name: String
     let dueDate: Date?
     let clientID: UUID?
+    let courseID: UUID?
 
     init(_ project: Project) throws {
         self.id = try project.requireID()
         self.name = project.name
         self.dueDate = project.dueDate
         self.clientID = project.$client.id
+        self.courseID = project.$course.id
     }
 }
 
@@ -33,6 +35,12 @@ struct SetProjectClientRequest: Content {
     let clientID: UUID?
 }
 
+/// `courseID: nil` (or the key omitted entirely) both mean "make this
+/// Project Course-less" — same shape as `SetProjectClientRequest`.
+struct SetProjectCourseRequest: Content {
+    let courseID: UUID?
+}
+
 struct ProjectController: RouteCollection {
     func boot(routes: any RoutesBuilder) throws {
         let projects = routes.grouped("projects")
@@ -43,16 +51,22 @@ struct ProjectController: RouteCollection {
             project.delete(use: delete)
             project.put("deadline", use: setDeadline)
             project.put("client", use: setClient)
+            project.put("course", use: setCourse)
         }
     }
 
-    /// Lists every Project, or Projects scoped to one Client when
-    /// `?clientID=` is given — same shape as `TaskController.index`'s
-    /// optional `?projectID=` filter.
+    /// Lists every Project, or Projects scoped to one Client and/or one
+    /// Course when `?clientID=`/`?courseID=` are given — same shape as
+    /// `TaskController.index`'s optional filters. Passing both together is
+    /// simply an empty result rather than a special case, since ADR-0011
+    /// means no Project ever matches both at once.
     func index(req: Request) async throws -> [ProjectResponse] {
         var query = Project.query(on: req.db)
         if let clientID = req.query[UUID.self, at: "clientID"] {
             query = query.filter(\.$client.$id == clientID)
+        }
+        if let courseID = req.query[UUID.self, at: "courseID"] {
+            query = query.filter(\.$course.$id == courseID)
         }
         return try await query.all().map(ProjectResponse.init)
     }
@@ -115,18 +129,54 @@ struct ProjectController: RouteCollection {
 
     /// Assign, move, or remove (`clientID: null`) a Project's Client — all
     /// three ACs are the same write (set-or-clear the foreign key), mirroring
-    /// `TaskController.assignProject`.
+    /// `TaskController.assignProject`. Setting a non-nil `clientID` also
+    /// clears the Project's Course (ADR-0011); removing the Client
+    /// (`clientID: null`) preserves whatever Course the Project already has
+    /// — which, by that same exclusivity, is only ever non-nil when
+    /// `clientID` was already nil to begin with.
     func setClient(req: Request) async throws -> ProjectResponse {
         guard let project = try await findProject(req: req) else {
             throw Abort(.notFound)
         }
         let payload = try req.content.decode(SetProjectClientRequest.self)
+        let parent: ProjectParent
         if let clientID = payload.clientID {
             guard try await PCCClient.find(clientID, on: req.db) != nil else {
                 throw Abort(.badRequest, reason: "no such Client")
             }
+            parent = .client(clientID)
+        } else if let courseID = project.$course.id {
+            parent = .course(courseID)
+        } else {
+            parent = .none
         }
-        project.$client.id = payload.clientID
+        project.setParent(parent)
+        try await project.save(on: req.db)
+        return try ProjectResponse(project)
+    }
+
+    /// Assign, move, or remove (`courseID: null`) a Project's Course —
+    /// mirrors `setClient`. Setting a non-nil `courseID` also clears the
+    /// Project's Client (ADR-0011); removing the Course preserves whatever
+    /// Client the Project already has, the same way `setClient` preserves a
+    /// Course when clearing.
+    func setCourse(req: Request) async throws -> ProjectResponse {
+        guard let project = try await findProject(req: req) else {
+            throw Abort(.notFound)
+        }
+        let payload = try req.content.decode(SetProjectCourseRequest.self)
+        let parent: ProjectParent
+        if let courseID = payload.courseID {
+            guard try await Course.find(courseID, on: req.db) != nil else {
+                throw Abort(.badRequest, reason: "no such Course")
+            }
+            parent = .course(courseID)
+        } else if let clientID = project.$client.id {
+            parent = .client(clientID)
+        } else {
+            parent = .none
+        }
+        project.setParent(parent)
         try await project.save(on: req.db)
         return try ProjectResponse(project)
     }

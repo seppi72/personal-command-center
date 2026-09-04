@@ -11,6 +11,7 @@ struct TaskResponse: Content {
     let sprintID: UUID?
     let courseID: UUID?
     let completedAt: Date?
+    let kind: String?
 
     init(_ task: PCCTask) throws {
         self.id = try task.requireID()
@@ -22,12 +23,21 @@ struct TaskResponse: Content {
         self.sprintID = task.$sprint.id
         self.courseID = task.$course.id
         self.completedAt = task.completedAt
+        self.kind = task.kind
     }
 }
 
 struct SaveTaskRequest: Content {
     let title: String
     let notes: String?
+}
+
+/// `kind: nil` (or the key omitted entirely) both mean "make this Task
+/// Kind-less" — same shape as `AssignTaskProjectRequest`. Kind is a free-text
+/// label (homework, study, reading…) rather than a closed set; see
+/// `AddKindToPCCTask`.
+struct SetTaskKindRequest: Content {
+    let kind: String?
 }
 
 /// `projectID: nil` (or the key omitted entirely — Codable's synthesized
@@ -69,6 +79,7 @@ struct TaskController: RouteCollection {
             task.put("deadline", use: setDeadline)
             task.put("sprint", use: assignSprint)
             task.put("course", use: assignCourse)
+            task.put("kind", use: setKind)
         }
     }
 
@@ -90,6 +101,12 @@ struct TaskController: RouteCollection {
         }
         if let courseID = req.query[UUID.self, at: "courseID"] {
             query = query.filter(\.$course.$id == courseID)
+        }
+        // Kind is a display/filtering label only (ticket #88) — filtering by
+        // it is the whole point of storing it, so it joins the other
+        // independent, combinable filters here.
+        if let kind = req.query[String.self, at: "kind"], let normalized = Self.normalizedKind(kind) {
+            query = query.filter(\.$kind == normalized)
         }
         return try await query.all().map(TaskResponse.init)
     }
@@ -258,6 +275,21 @@ struct TaskController: RouteCollection {
         return try TaskResponse(task)
     }
 
+    /// Set, change, or remove (`kind: null`) a Task's Kind — all three are
+    /// the same write, mirroring `setDeadline`. Kind is its own endpoint
+    /// rather than part of `SaveTaskRequest` for the same reason Project and
+    /// Course are: each of this Task's optional attachments is set on its
+    /// own.
+    func setKind(req: Request) async throws -> TaskResponse {
+        guard let task = try await findTask(req: req) else {
+            throw Abort(.notFound)
+        }
+        let payload = try req.content.decode(SetTaskKindRequest.self)
+        task.kind = Self.normalizedKind(payload.kind)
+        try await task.save(on: req.db)
+        return try TaskResponse(task)
+    }
+
     /// A Task is created/edited "with a title" — reject an empty or
     /// whitespace-only one, mirroring `ProjectController`'s name check.
     private static func validatedTitle(_ title: String) throws -> String {
@@ -272,6 +304,16 @@ struct TaskController: RouteCollection {
     /// to "no notes" rather than persisting a blank string.
     private static func normalizedNotes(_ notes: String?) -> String? {
         guard let trimmed = notes?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+            return nil
+        }
+        return trimmed
+    }
+
+    /// Kind is optional: missing, empty, and whitespace-only all collapse to
+    /// "no Kind" rather than persisting a blank label — same shape as
+    /// `normalizedNotes`.
+    private static func normalizedKind(_ kind: String?) -> String? {
+        guard let trimmed = kind?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
             return nil
         }
         return trimmed

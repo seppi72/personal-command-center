@@ -325,5 +325,29 @@ extension AppTestSuite {
                 )
             }
         }
+
+        @Test("rejects deleting a Course a Project still belongs to (ADR-0011)")
+        func deletingCourseWithReferencingProjectFails() async throws {
+            try await withCoursesApp { app in
+                let course = Course(name: "Referenced", termMonth: 9, termYear: 2026)
+                try await course.save(on: app.db)
+                let id = try course.requireID()
+                let project = Project(name: "Group assignment", courseID: id)
+                try await project.save(on: app.db)
+
+                try await app.testing().test(
+                    .DELETE, "/v1/courses/\(id)",
+                    headers: authHeaders(),
+                    afterResponse: { res async in
+                        #expect(res.status == .badRequest)
+                    }
+                )
+
+                let stored = try await Course.find(id, on: app.db)
+                #expect(stored != nil)
+
+                try await project.delete(on: app.db)
+            }
+        }
     }
 }

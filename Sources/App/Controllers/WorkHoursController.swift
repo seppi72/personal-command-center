@@ -249,11 +249,24 @@ struct WorkHoursController: RouteCollection {
             return totals
         }
         let projectTotal = foldedTotals(direct: projectDirect) { $0.$project.id }
-        let courseTotal = foldedTotals(direct: courseDirect) { $0.$course.id }
+
+        // A Client's total folds in each of its Projects' already-folded
+        // totals, and — since ADR-0011 gave Project a second possible parent
+        // — a Course's does the same for the Projects belonging to it. The
+        // two arms are exclusive by construction (`Project.setParent`), so
+        // no Project's total is ever counted under both.
         var clientTotal = clientDirect
+        var courseTotal = foldedTotals(direct: courseDirect) { $0.$course.id }
         for project in projects {
-            guard let projectID = project.id, let clientID = project.$client.id else { continue }
-            clientTotal[clientID, default: 0] += projectTotal[projectID] ?? 0
+            guard let projectID = project.id else { continue }
+            switch project.parent {
+            case .client(let clientID):
+                clientTotal[clientID, default: 0] += projectTotal[projectID] ?? 0
+            case .course(let courseID):
+                courseTotal[courseID, default: 0] += projectTotal[projectID] ?? 0
+            case .none:
+                continue
+            }
         }
 
         switch groupBy {
