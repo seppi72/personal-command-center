@@ -3,9 +3,9 @@ import Foundation
 /// Holds one Project's Sprints screen state and talks to the backend
 /// through a `SprintsAPIClient`. Scoped to a single `projectID` given at
 /// `init` — a Sprint has no meaning outside a Project, so unlike
-/// `ClientsViewModel` there's no unscoped "all Sprints" list. Kept separate
+/// `WorkViewModel` there's no unscoped "all Sprints" list. Kept separate
 /// from its view so the view stays a thin rendering of this state (mirrors
-/// `ClientsViewModel`'s split).
+/// `WorkViewModel`'s split).
 ///
 /// `ObservableObject` rather than the newer `@Observable` macro, since that
 /// macro needs iOS 17/macOS 14 and this package targets iOS 16/macOS 13.
@@ -68,7 +68,7 @@ public final class SprintsViewModel: ObservableObject {
     /// Runs a mutation against `sprints`, keeping every method's
     /// success/failure handling (clear the error, re-sort by start date; on
     /// failure surface a message) in one shape instead of four copies
-    /// (mirrors `ClientsViewModel.run`).
+    /// (mirrors `WorkViewModel.run`).
     private func run(verb: String, _ operation: () async throws -> Void) async {
         do {
             try await operation()

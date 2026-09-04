@@ -26,7 +26,7 @@ public struct FinanceBucket: Identifiable, Sendable {
 /// several existing `APIClient`s directly (mirrors `TimerViewModel`'s own
 /// "compose several clients" shape) rather than wrapping the equivalent
 /// screen-level view models, so this screen's own filtering/bucketing logic
-/// stays out of the general-purpose `TasksViewModel`/`FinancesReportingViewModel`
+/// stays out of the general-purpose `WorkViewModel`/`FinancesReportingViewModel`
 /// every other screen relies on unfiltered. The Timer itself is a partial
 /// exception: the Productivity card reads and mutates the same shared
 /// `TimerViewModel` instance the Time Entries screen's own hero timer uses

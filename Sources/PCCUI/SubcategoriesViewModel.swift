@@ -3,7 +3,7 @@ import Foundation
 /// Holds one Category's Subcategories screen state and talks to the backend
 /// through a `SubcategoriesAPIClient`. Scoped to a single `categoryID` given
 /// at `init` — a Subcategory has no meaning outside a Category, so unlike
-/// `ClientsViewModel` there's no unscoped "all Subcategories" list. Kept
+/// `CategoriesViewModel` there's no unscoped "all Subcategories" list. Kept
 /// separate from its view so the view stays a thin rendering of this state
 /// (mirrors `SprintsViewModel`'s split).
 ///

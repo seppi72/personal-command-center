@@ -3,10 +3,10 @@ import SwiftUI
 /// Minimal Mac/iOS screen for ticket #19, extended by ticket #20: lists
 /// Courses, and supports creating and deleting one. One shared SwiftUI view
 /// for both platforms — no platform-specific chrome, per the ticket's
-/// "minimal" scope (mirrors `ProjectsView`).
+/// "minimal" scope (mirrors `WorkView`).
 ///
 /// On the shared Liquid Glass system since issue #72 — a grid of
-/// `CourseCard` bubbles (mirrors `ProjectsView`'s/`ClientsView`'s own
+/// `CourseCard` bubbles (mirrors `CategoriesView`'s own
 /// grid+expand shape), replacing the earlier chalkboard costume
 /// (`ScreenTheme.chalkboard`, the dashed-rule `RosterRowModifier`) `git log`
 /// on this file still shows. Tapping a card expands it into a centered
@@ -19,7 +19,7 @@ import SwiftUI
 /// that the chalkboard fill and dashed roster chrome are gone; the Term
 /// badge survives too, redrawn as a glass well rather than a chalk ring.
 ///
-/// `ClientsView`'s `ClientCard` (issue #69) briefly also set the Client
+/// The deleted `ClientsView`'s `ClientCard` (issue #69) briefly also set the Client
 /// name and monogram seal in `design: .serif`, which would have made this
 /// screen's "only screen" claim false — stripped back to the plain system
 /// face there per issue #72's own acceptance criteria, so this screen keeps
@@ -445,7 +445,7 @@ struct CourseFormSheet: View {
 /// same `CourseFormSheet`/`onSave` wiring as before), a "Tasks" section
 /// listing the Course's Tasks with add/edit/complete/delete — the
 /// Course-scoped counterpart to `ProjectDetailView`'s "Sprints" section,
-/// backed by the same `TasksViewModel`/`TaskFormSheet` the top-level Tasks
+/// backed by the same `TasksViewModel`/`TaskFormSheet` the Work
 /// screen uses (just scoped to this Course via
 /// `CoursesViewModel.makeTasksViewModel(for:)`) rather than a separate,
 /// duplicated row/form implementation — plus a "Meetings" section (ticket
@@ -635,6 +635,7 @@ struct CourseDetailView: View {
                 initialNotes: task.notes ?? "",
                 initialProjectID: task.projectID,
                 initialCourseID: task.courseID,
+                initialKind: task.kind,
                 initialDueDate: task.dueDate,
                 projects: tasksViewModel.projects,
                 courses: tasksViewModel.courses

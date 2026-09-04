@@ -6,7 +6,7 @@ import Foundation
 /// `PersonalCommitmentsAPIClient` to build its "Meetings" screen
 /// (`makeCommitmentsViewModel(for:)`, ticket #56). Kept separate from
 /// `CourseView` so the view stays a thin rendering of this state (mirrors
-/// `ProjectsViewModel`'s split).
+/// `WorkViewModel`'s split).
 ///
 /// `ObservableObject` rather than the newer `@Observable` macro, since that
 /// macro needs iOS 17/macOS 14 and this package targets iOS 16/macOS 13.
@@ -36,7 +36,7 @@ public final class CoursesViewModel: ObservableObject {
     /// Builds the `TasksViewModel` for one Course's detail screen, scoped to
     /// that Course's id — `CourseDetailView` needs a `TasksAPIClient`/
     /// `ProjectsAPIClient` and a `courseID`, and this is where all three are
-    /// available together (mirrors `ProjectsViewModel.makeSprintsViewModel`,
+    /// available together (mirrors `WorkViewModel.createSprint`,
     /// one level over).
     public func makeTasksViewModel(for course: Course) -> TasksViewModel {
         TasksViewModel(tasksClient: tasksClient, projectsClient: projectsClient, coursesClient: client, scopedCourseID: course.id)
@@ -60,7 +60,7 @@ public final class CoursesViewModel: ObservableObject {
     /// Creates a Course with its name/Term and, if `values.dueDate` is
     /// given, attaches it in a follow-up call — a Course is always created
     /// undated on the backend (`CourseController.create`), so a Deadline is
-    /// a separate write (mirrors `ProjectsViewModel.createProject`).
+    /// a separate write (mirrors `WorkViewModel.createProject`).
     public func createCourse(_ values: CourseFormValues) async {
         await run(verb: "create") {
             var created = try await client.createCourse(
@@ -105,7 +105,7 @@ public final class CoursesViewModel: ObservableObject {
     /// Runs a mutation against `courses`, keeping every method's
     /// success/failure handling (clear the error, re-sort by name; on
     /// failure surface a message) in one shape instead of four copies
-    /// (mirrors `ProjectsViewModel.run`).
+    /// (mirrors `WorkViewModel.run`).
     private func run(verb: String, _ operation: () async throws -> Void) async {
         do {
             try await operation()

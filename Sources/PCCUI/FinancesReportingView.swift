@@ -7,7 +7,7 @@ import SwiftUI
 /// a single computed figure (text), not a chart, per the ticket's own
 /// settled scope. First use of SwiftUI's native `Charts` framework in
 /// `PCCUI` — no third-party charting dependency, unlike every other screen's
-/// plain-`List` convention (`WorkHoursView`'s own doc comment), since this
+/// plain-`List` convention, since this
 /// ticket's own AC calls for actual trend/history/expense charts rather than
 /// rows of numbers.
 ///
@@ -233,7 +233,7 @@ private struct FinancesReportingContent: View {
     /// `DeltaBadge`, and the shared date range that drives Net Worth
     /// trend, Account Balance history, and expense-per-day. Reloads every
     /// affected section on change rather than needing a separate "Apply"
-    /// step, the same immediate-reload convention `WorkHoursView`'s own
+    /// step, the same immediate-reload convention `WorkView`'s range stepper
     /// `controls` uses. Full-bleed, no section chrome, bottom hairline —
     /// the same treatment other screens' `statusStrip` uses.
     private var readoutCluster: some View {

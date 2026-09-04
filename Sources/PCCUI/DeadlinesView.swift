@@ -3,7 +3,7 @@ import SwiftUI
 /// Minimal Mac/iOS screen for ticket #5: the Deadline-proximity-sorted view
 /// of every Task and Project together, with undated items still shown. One
 /// shared SwiftUI view for both platforms — no platform-specific chrome, per
-/// the ticket's "minimal" scope (mirrors `ProjectsView`/`TasksView`).
+/// the ticket's "minimal" scope (mirrors `WorkView`).
 /// Read-only — set/clear a Deadline from the Tasks or Projects screen.
 ///
 /// On the shared Liquid Glass system since issue #68 — full-width

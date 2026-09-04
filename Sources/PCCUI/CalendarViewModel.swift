@@ -36,7 +36,7 @@ public final class CalendarViewModel: ObservableObject {
     /// combined endpoint of its own (`/v1/personal-commitments` and
     /// `/v1/calendar-events` are separate), so the merge happens here,
     /// client-side. `courses` sources the Commitment form's Course picker
-    /// (ticket #56) — the same reason `TasksViewModel`/`TimeEntriesViewModel`
+    /// (ticket #56) — the same reason `TasksViewModel`/`WorkViewModel`
     /// each load their own copy of it.
     public func load() async {
         isLoading = true

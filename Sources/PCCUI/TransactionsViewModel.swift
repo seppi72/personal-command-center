@@ -5,7 +5,7 @@ import Foundation
 /// Account picker and a `CategoriesAPIClient`/`SubcategoriesAPIClient` pair
 /// to populate the Category/Subcategory pickers (ticket #39) — kept separate
 /// from `TransactionsView` so the view stays a thin rendering of this state
-/// (mirrors `TimeEntriesViewModel`'s split).
+/// (mirrors `WorkViewModel`'s split).
 ///
 /// `ObservableObject` rather than the newer `@Observable` macro, since that
 /// macro needs iOS 17/macOS 14 and this package targets iOS 16/macOS 13.
@@ -102,7 +102,7 @@ public final class TransactionsViewModel: ObservableObject {
     /// Runs a mutation against `transactions`, keeping every method's
     /// success/failure handling (clear the error; on failure surface a
     /// message) in one shape instead of four copies (mirrors
-    /// `TimeEntriesViewModel.run`).
+    /// `WorkViewModel.run`).
     private func run(verb: String, _ operation: () async throws -> Void) async {
         do {
             try await operation()

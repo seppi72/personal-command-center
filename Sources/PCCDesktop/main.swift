@@ -44,23 +44,18 @@ let notificationsClient = URLSessionNotificationsAPIClient(baseURL: baseURL, bea
 // doesn't rebuild — and re-fetch, and lose scroll/sheet state for — the
 // screen you're navigating away from. Top-level code in `main.swift` runs
 // on the main actor, same as these `@MainActor` view models require.
-let projectsViewModel = ProjectsViewModel(
-    client: projectsClient, clientsClient: clientsClient, sprintsClient: sprintsClient, tasksClient: tasksClient)
-let tasksViewModel = TasksViewModel(tasksClient: tasksClient, projectsClient: projectsClient, coursesClient: coursesClient)
+let workViewModel = WorkViewModel(
+    clientsClient: clientsClient, projectsClient: projectsClient, sprintsClient: sprintsClient,
+    tasksClient: tasksClient, timeEntriesClient: timeEntriesClient, coursesClient: coursesClient)
 let deadlinesViewModel = DeadlinesViewModel(client: deadlinesClient)
 let calendarViewModel = CalendarViewModel(
     commitmentsClient: personalCommitmentsClient, mirroredEventsClient: mirroredCalendarEventsClient, coursesClient: coursesClient)
 let personalCommitmentsViewModel = PersonalCommitmentsViewModel(client: personalCommitmentsClient, coursesClient: coursesClient)
-let clientsViewModel = ClientsViewModel(client: clientsClient, projectsClient: projectsClient)
 let coursesViewModel = CoursesViewModel(
     client: coursesClient, tasksClient: tasksClient, projectsClient: projectsClient, commitmentsClient: personalCommitmentsClient)
-let timeEntriesViewModel = TimeEntriesViewModel(
-    timeEntriesClient: timeEntriesClient, tasksClient: tasksClient, projectsClient: projectsClient,
-    clientsClient: clientsClient, coursesClient: coursesClient)
 let timerViewModel = TimerViewModel(
     timeEntriesClient: timeEntriesClient, tasksClient: tasksClient, projectsClient: projectsClient,
     clientsClient: clientsClient, coursesClient: coursesClient)
-let workHoursViewModel = WorkHoursViewModel(client: workHoursClient)
 let accountsViewModel = AccountsViewModel(client: accountsClient)
 let transactionsViewModel = TransactionsViewModel(
     transactionsClient: transactionsClient, accountsClient: accountsClient,
@@ -82,24 +77,21 @@ let overviewViewModel = OverviewViewModel(
 /// more than one section.
 enum Screen: String, CaseIterable, Identifiable {
     case overview
-    case projects, tasks, deadlines, calendar, commitments, clients, courses
-    case timeEntries, workHours, accounts, transactions, categories
-    case financesReporting, notifications, automationLog
+    case work, courses
+    case deadlines, calendar, commitments
+    case accounts, transactions, categories, financesReporting
+    case notifications, automationLog
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .overview: "Overview"
-        case .projects: "Projects"
-        case .tasks: "Tasks"
+        case .work: "Work"
+        case .courses: "School"
         case .deadlines: "Deadlines"
         case .calendar: "Calendar"
         case .commitments: "Commitments"
-        case .clients: "Clients"
-        case .courses: "Courses"
-        case .timeEntries: "Time Entries"
-        case .workHours: "Work Hours"
         case .accounts: "Accounts"
         case .transactions: "Transactions"
         case .categories: "Categories"
@@ -112,15 +104,11 @@ enum Screen: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .overview: "house"
-        case .projects: "folder"
-        case .tasks: "checkmark.circle"
+        case .work: "briefcase"
+        case .courses: "graduationcap"
         case .deadlines: "clock"
         case .calendar: "calendar"
         case .commitments: "person.crop.circle"
-        case .clients: "building.2"
-        case .courses: "graduationcap"
-        case .timeEntries: "stopwatch"
-        case .workHours: "hourglass"
         case .accounts: "dollarsign.circle"
         case .transactions: "creditcard"
         case .categories: "tag"
@@ -131,17 +119,23 @@ enum Screen: String, CaseIterable, Identifiable {
     }
 }
 
-/// Groups the sidebar's 15 screens under a handful of headings so the list
-/// is scannable instead of one flat run — purely a presentation grouping,
-/// with no effect on `Screen`'s own identity or on `detail(for:)`.
+/// Groups the sidebar's screens under a handful of headings so the list is
+/// scannable instead of one flat run — purely a presentation grouping, with
+/// no effect on `Screen`'s own identity or on `detail(for:)`.
+///
+/// The `.dashboards` section has no heading of its own: Work and School are
+/// each one whole domain on one screen (issues #89, #90), so a "Work"
+/// section header above a single row named "Work" would say the same thing
+/// twice. The single-row "Clients" section is gone for the same reason — a
+/// Client is a level of the Work screen's tree now, not a screen.
 enum SidebarSection: CaseIterable {
-    case work, planning, clients, finances, system
+    case dashboards, planning, finances, system
 
-    var title: String {
+    /// `nil` renders the section's rows unheaded.
+    var title: String? {
         switch self {
-        case .work: "Work"
+        case .dashboards: nil
         case .planning: "Planning"
-        case .clients: "Clients"
         case .finances: "Finances"
         case .system: "System"
         }
@@ -149,9 +143,8 @@ enum SidebarSection: CaseIterable {
 
     var screens: [Screen] {
         switch self {
-        case .work: [.projects, .tasks, .timeEntries, .workHours]
-        case .planning: [.deadlines, .calendar, .commitments, .courses]
-        case .clients: [.clients]
+        case .dashboards: [.work, .courses]
+        case .planning: [.deadlines, .calendar, .commitments]
         case .finances: [.accounts, .transactions, .categories, .financesReporting]
         case .system: [.notifications, .automationLog]
         }
@@ -180,10 +173,14 @@ struct DashboardView: View {
                 Label(Screen.overview.title, systemImage: Screen.overview.systemImage)
                     .tag(Screen.overview)
                 ForEach(SidebarSection.allCases, id: \.self) { section in
-                    Section(section.title) {
+                    Section {
                         ForEach(section.screens) { screen in
                             Label(screen.title, systemImage: screen.systemImage)
                                 .tag(screen)
+                        }
+                    } header: {
+                        if let title = section.title {
+                            Text(title)
                         }
                     }
                 }
@@ -213,18 +210,14 @@ struct DashboardView: View {
                 viewModel: overviewViewModel,
                 timerViewModel: timerViewModel,
                 onTapFinances: { selection = .financesReporting },
-                onTapProjects: { selection = .projects },
-                onTapTasks: { selection = .tasks }
+                onTapProjects: { selection = .work },
+                onTapTasks: { selection = .work }
             )
-        case .projects: ProjectsView(viewModel: projectsViewModel)
-        case .tasks: TasksView(viewModel: tasksViewModel)
+        case .work: WorkView(viewModel: workViewModel, timerViewModel: timerViewModel)
         case .deadlines: DeadlinesView(viewModel: deadlinesViewModel)
         case .calendar: CalendarView(viewModel: calendarViewModel)
         case .commitments: PersonalCommitmentsView(viewModel: personalCommitmentsViewModel)
-        case .clients: ClientsView(viewModel: clientsViewModel)
         case .courses: CourseView(viewModel: coursesViewModel)
-        case .timeEntries: TimeEntriesView(viewModel: timeEntriesViewModel, timerViewModel: timerViewModel)
-        case .workHours: WorkHoursView(viewModel: workHoursViewModel)
         case .accounts: AccountsView(viewModel: accountsViewModel)
         case .transactions: TransactionsView(viewModel: transactionsViewModel)
         case .categories: CategoriesView(viewModel: categoriesViewModel)

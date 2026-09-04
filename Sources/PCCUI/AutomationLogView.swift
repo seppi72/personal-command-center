@@ -60,7 +60,7 @@ private struct AutomationLogContent: View {
     /// screen's whole point is liquid glass floating on plain white/black,
     /// which needs each row to draw its own translucent Material-backed
     /// shape (the shared `GlassBubble`) rather than a native list
-    /// container's opaque row fill (mirrors `TasksView`'s own move from
+    /// container's opaque row fill (mirrors `DeadlinesView`'s own move from
     /// `List` to `ScrollView` + custom bubbles for the same reason).
     private var entryScroll: some View {
         ScrollView {

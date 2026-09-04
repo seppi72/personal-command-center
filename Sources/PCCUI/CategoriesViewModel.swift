@@ -2,7 +2,7 @@ import Foundation
 
 /// Holds the Categories screen's state and talks to the backend through a
 /// `CategoriesAPIClient`. Kept separate from `CategoriesView` so the view
-/// stays a thin rendering of this state (mirrors `ClientsViewModel`'s split).
+/// stays a thin rendering of this state (mirrors `WorkViewModel`'s split).
 ///
 /// `ObservableObject` rather than the newer `@Observable` macro, since that
 /// macro needs iOS 17/macOS 14 and this package targets iOS 16/macOS 13.
@@ -13,7 +13,7 @@ public final class CategoriesViewModel: ObservableObject {
     /// Glass" screen shows each Category's own Spent/Received total and
     /// biggest entries directly on its card (`spending`), so this view
     /// model needs Transaction data it previously had no reason to hold
-    /// (mirrors `ClientsViewModel`'s own addition of Project data for the
+    /// (mirrors `WorkViewModel`'s own addition of Project data for the
     /// same kind of card).
     @Published public private(set) var transactions: [Transaction] = []
     @Published public var errorMessage: String?
@@ -35,7 +35,7 @@ public final class CategoriesViewModel: ObservableObject {
     /// Builds the `SubcategoriesViewModel` for one Category's detail screen,
     /// scoped to that Category's id — `CategoryDetailView` needs a
     /// `SubcategoriesAPIClient` and a `categoryID`, and this is where both
-    /// are available together (mirrors `ProjectsViewModel.makeSprintsViewModel`).
+    /// are available together (mirrors `CoursesViewModel.makeTasksViewModel`).
     public func makeSubcategoriesViewModel(for category: PCCCategory) -> SubcategoriesViewModel {
         SubcategoriesViewModel(client: subcategoriesClient, categoryID: category.id)
     }
@@ -104,7 +104,7 @@ public final class CategoriesViewModel: ObservableObject {
     /// Runs a mutation against `categories`, keeping every method's
     /// success/failure handling (clear the error, re-sort by name; on
     /// failure surface a message) in one shape instead of four copies
-    /// (mirrors `ClientsViewModel.run`).
+    /// (mirrors `WorkViewModel.run`).
     private func run(verb: String, _ operation: () async throws -> Void) async {
         do {
             try await operation()

@@ -3,7 +3,7 @@ import SwiftUI
 /// Minimal Mac/iOS screen for ticket #36: lists Accounts, and supports
 /// creating, editing (name/type only), and deleting one. One shared
 /// SwiftUI view for both platforms — no platform-specific chrome, per the
-/// ticket's "minimal" scope (mirrors `ClientsView`).
+/// ticket's "minimal" scope (mirrors `CategoriesView`).
 ///
 /// A status strip above the list (mirrors `OverviewView`'s own) gives the
 /// account count and a `StatusDot` — `.critical` when any asset Account has
@@ -127,7 +127,7 @@ private struct AccountsContent: View {
     /// screen's whole point is liquid glass floating on plain white/black,
     /// which needs each row to draw its own translucent Material-backed
     /// shape (the shared `GlassBubble`) rather than the console
-    /// chassis's opaque `panelRows()` card fill (mirrors `ClientsView`'s
+    /// chassis's opaque `panelRows()` card fill (mirrors `CategoriesView`'s
     /// own move from `List` to `ScrollView` + custom cards for the same
     /// reason).
     private var accountScroll: some View {

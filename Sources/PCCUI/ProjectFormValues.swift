@@ -2,7 +2,7 @@ import Foundation
 
 /// The fields a Project create/edit form produces together — name, the
 /// Deadline to attach/change/clear, and the Course to assign/clear (ticket
-/// #88) — bundled so `ProjectsViewModel` and `ProjectFormSheet` pass one
+/// #88) — bundled so `WorkViewModel` and `ProjectFormSheet` pass one
 /// value instead of loose parameters that always travel as a set (mirrors
 /// `TaskFormValues`).
 ///
