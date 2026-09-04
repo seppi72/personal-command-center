@@ -2,9 +2,9 @@ import Foundation
 
 /// Holds the Deadlines screen's state and talks to the backend through a
 /// `DeadlinesAPIClient` — kept separate from `DeadlinesView` so the view
-/// stays a thin rendering of this state (mirrors `ProjectsViewModel`'s
+/// stays a thin rendering of this state (mirrors `WorkViewModel`'s
 /// split). Read-only: setting/clearing a Deadline happens on the Tasks and
-/// Projects screens, not here — see `TasksViewModel`/`ProjectsViewModel`.
+/// Projects screens, not here — see `WorkViewModel`.
 ///
 /// `ObservableObject` rather than the newer `@Observable` macro, since that
 /// macro needs iOS 17/macOS 14 and this package targets iOS 16/macOS 13.

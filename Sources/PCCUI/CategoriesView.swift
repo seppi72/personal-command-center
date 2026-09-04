@@ -3,7 +3,7 @@ import SwiftUI
 /// Minimal Mac/iOS screen for ticket #39: lists Categories, and supports
 /// creating, editing (renaming), and deleting one. One shared SwiftUI view
 /// for both platforms — no platform-specific chrome, per this codebase's
-/// existing "minimal" scope (mirrors `ProjectsView`). Tapping a card expands
+/// existing "minimal" scope (mirrors `CourseView`). Tapping a card expands
 /// it into a centered overlay showing its top 3 biggest entries
 /// (`CategoriesContent.expandedOverlay(_:)`); reaching `CategoryDetailView`
 /// to rename the Category or manage its Subcategories moved to a "Manage
@@ -236,7 +236,7 @@ private struct CategoriesContent: View {
 
     // MARK: - Status strip
 
-    /// `.idle` — a Category roster, like `ClientsView`'s own, has no
+    /// `.idle` — a Category roster, like the Work screen's tree, has no
     /// urgency signal to flag; kept for layout consistency only.
     private var statusStrip: some View {
         HStack(spacing: 10) {

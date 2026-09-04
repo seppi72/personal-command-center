@@ -93,7 +93,7 @@ private struct OverviewContent: View {
     let onTapTasks: () -> Void
 
     /// The mini Timer's own pending selection, separate from
-    /// `TimeEntriesView`'s own identical `@State` for its hero timer — each
+    /// `WorkView`'s own identical `@State` for its toolbar timer chip — each
     /// screen owns its own in-progress pick before
     /// `timerViewModel.start(container:)` commits it, the same way two
     /// independent forms would.
@@ -654,9 +654,9 @@ private struct OverviewContent: View {
         }
     }
 
-    /// Mirrors `TimeEntriesViewModel.containerLabel(for:)`, against
+    /// Mirrors `WorkViewModel.containerLabel(for:)`, against
     /// `timerViewModel`'s own copies of the same picker lists rather than
-    /// `TimeEntriesViewModel`'s, since this panel only ever observes
+    /// `WorkViewModel`'s, since this panel only ever observes
     /// `timerViewModel`.
     private func timerContainerLabel(for entry: TimeEntry) -> String {
         if let taskID = entry.taskID {
@@ -674,7 +674,7 @@ private struct OverviewContent: View {
         return "Unattached"
     }
 
-    /// Mirrors `TimeEntriesView.formattedElapsed(_:)`.
+    /// Mirrors `WorkView`'s own `formattedElapsed(_:)`.
     private static func formattedElapsed(_ seconds: TimeInterval) -> String {
         let total = max(0, Int(seconds))
         let hours = total / 3600

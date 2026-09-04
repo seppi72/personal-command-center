@@ -4,7 +4,7 @@ import SwiftUI
 /// creating, editing, and deleting one — each logged against exactly one
 /// Account. One shared SwiftUI view for both platforms — no
 /// platform-specific chrome, per this codebase's existing "minimal" scope
-/// (mirrors `AccountsView`/`TimeEntriesView`).
+/// (mirrors `AccountsView`).
 ///
 /// On the shared Liquid Glass system since issue #67 — full-width
 /// `GlassBubble` rows on `GlassScreenBackground()`, one per Transaction,
@@ -141,7 +141,7 @@ private struct TransactionsContent: View {
     /// looked up from the view model's already-loaded picker data — falls
     /// back to a placeholder rather than crashing if the referenced Account
     /// isn't in the loaded list (e.g. deleted between loads), mirroring
-    /// `TimeEntriesViewModel.containerLabel`.
+    /// `WorkViewModel.containerLabel`.
     private func accountName(for transaction: Transaction) -> String {
         viewModel.accounts.first { $0.id == transaction.accountID }?.name ?? "Unknown Account"
     }

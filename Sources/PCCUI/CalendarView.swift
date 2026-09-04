@@ -83,11 +83,11 @@ private struct CalendarContent: View {
     /// whole point is liquid glass floating on plain white/black, which
     /// needs each row to draw its own translucent Material-backed shape
     /// (the shared `GlassBubble`) rather than a native list container's
-    /// opaque row fill (mirrors `TasksView`'s own move from `List` to
+    /// opaque row fill (mirrors `DeadlinesView`'s own move from `List` to
     /// `ScrollView` + custom bubbles for the same reason). Deletion moves
     /// from the old `List`'s swipe gesture onto each editable row's own
     /// context menu — a `ScrollView` has no `List`-style swipe gesture to
-    /// give it for free (mirrors `ClientsView`'s identical grid-to-card
+    /// give it for free (mirrors `CategoriesView`'s identical grid-to-card
     /// tradeoff).
     private var entryScroll: some View {
         ScrollView {

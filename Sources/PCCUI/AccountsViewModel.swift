@@ -2,7 +2,7 @@ import Foundation
 
 /// Holds the Accounts screen's state and talks to the backend through an
 /// `AccountsAPIClient`. Kept separate from `AccountsView` so the view stays
-/// a thin rendering of this state (mirrors `ClientsViewModel`'s split).
+/// a thin rendering of this state (mirrors `WorkViewModel`'s split).
 ///
 /// `ObservableObject` rather than the newer `@Observable` macro, since that
 /// macro needs iOS 17/macOS 14 and this package targets iOS 16/macOS 13.
@@ -59,7 +59,7 @@ public final class AccountsViewModel: ObservableObject {
     /// Runs a mutation against `accounts`, keeping every method's
     /// success/failure handling (clear the error, re-sort by name; on
     /// failure surface a message) in one shape instead of four copies
-    /// (mirrors `ClientsViewModel.run`).
+    /// (mirrors `WorkViewModel.run`).
     private func run(verb: String, _ operation: () async throws -> Void) async {
         do {
             try await operation()

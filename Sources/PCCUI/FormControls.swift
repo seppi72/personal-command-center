@@ -218,7 +218,7 @@ public enum DateRangeOption: String, CaseIterable, Identifiable, Sendable {
 /// One control's worth of date-range state: which preset is active, plus
 /// the two dates `.custom` reads. The single type every range-filtered
 /// screen (`OverviewViewModel`'s Finances card, `FinancesReportingViewModel`,
-/// `WorkHoursViewModel`) now holds instead of each keeping its own bare
+/// `FinancesReportingViewModel`) now holds instead of each keeping its own bare
 /// `start`/`end` pair — one place defines what "This Week" or "Last Month"
 /// actually means, rather than each screen re-deriving (or subtly
 /// disagreeing on) the same calendar math.
@@ -237,7 +237,7 @@ public struct DateRangeSelection: Sendable, Equatable {
     /// The concrete `[start, end]` this selection currently resolves to.
     /// Monday-anchored for `.thisWeek` regardless of the current locale's
     /// `firstWeekday` — the same explicit, locale-independent calculation
-    /// `WorkHoursViewModel` used to compute its own "current week" default
+    /// the deleted `WorkHoursViewModel` used to compute its own "current week" default
     /// with (its own prior doc comment explained why: weekday `1` is Sunday
     /// through `7` Saturday, so days-since-Monday is `weekday - 2`, except
     /// Sunday, which needs `6` rather than the `-1` that formula would give

@@ -6,7 +6,7 @@ import Foundation
 /// more than one (ADR-0004; see
 /// `Sources/App/Models/TimeEntryContainer.swift` for the backend's
 /// counterpart). Bundling them here makes "exactly one of these four" a
-/// type `TimeEntriesViewModel`/`TimeEntryFormSheet` reason about once,
+/// type `WorkViewModel`/`TimeEntryFormSheet` reason about once,
 /// rather than a rule re-derived at each call site that touches all four
 /// fields.
 public enum TimeEntryContainer: Equatable, Sendable {

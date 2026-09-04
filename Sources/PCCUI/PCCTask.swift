@@ -17,6 +17,13 @@ public struct PCCTask: Codable, Identifiable, Equatable, Sendable {
     public var projectID: UUID?
     public var dueDate: Date?
     public var courseID: UUID?
+    /// The Sprint this Task is grouped into, or `nil` when it sits directly
+    /// under its Project. A Sprint is a grouping *within* a Project, not an
+    /// alternate container, so this is orthogonal to `projectID` rather than
+    /// exclusive with it — the backend rejects a Sprint from a different
+    /// Project (`TaskController.assignSprint`). Read by the Work screen's
+    /// tree to decide whether a Project shows a Sprint level at all.
+    public var sprintID: UUID?
     /// When this Task was last marked complete — `nil` while incomplete.
     /// Backs the Overview dashboard's on-time completion rate (whether this
     /// is on/before `dueDate`); only accurate for Tasks completed after this
@@ -35,9 +42,11 @@ public struct PCCTask: Codable, Identifiable, Equatable, Sendable {
         projectID: UUID? = nil,
         dueDate: Date? = nil,
         courseID: UUID? = nil,
+        sprintID: UUID? = nil,
         completedAt: Date? = nil,
         kind: String? = nil
     ) {
+        self.sprintID = sprintID
         self.id = id
         self.title = title
         self.notes = notes

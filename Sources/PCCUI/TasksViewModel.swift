@@ -2,8 +2,8 @@ import Foundation
 
 /// Holds the Tasks screen's state and talks to the backend through a
 /// `TasksAPIClient`, plus a `ProjectsAPIClient`/`CoursesAPIClient` to
-/// populate the Project/Course pickers — kept separate from `TasksView` so
-/// the view stays a thin rendering of this state (mirrors `ProjectsViewModel`'s
+/// populate the Project/Course pickers — kept separate from `CourseDetailView` so
+/// the view stays a thin rendering of this state (mirrors `WorkViewModel`'s
 /// split).
 ///
 /// `ObservableObject` rather than the newer `@Observable` macro, since that
@@ -162,7 +162,7 @@ public final class TasksViewModel: ObservableObject {
 
     /// Whether `task` is overdue: has a due date, isn't complete, and that
     /// due date has passed as of `referenceDate`. Pure and `static` — moved
-    /// off `TasksView` (issue #68) so it's unit-testable at this package's
+    /// off the since-deleted `TasksView` (issue #68) so it's unit-testable at this package's
     /// one pure-logic test seam (`PCCUITests`) without needing a whole
     /// `TasksViewModel` instance wired up with API clients. `referenceDate`
     /// defaults to `Date()` for every real call site; tests pass a fixed

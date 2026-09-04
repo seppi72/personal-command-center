@@ -33,7 +33,7 @@ public final class FinancesReportingViewModel: ObservableObject {
 
     /// The trailing 30 days through now by default — a Net Worth/Balance
     /// trend or expense-per-day chart reads more informatively over a month
-    /// than `WorkHoursViewModel`'s own current-week default, since a
+    /// than the Work screen's own current-week default, since a
     /// handful of days makes a thin chart. No preset in `DateRangeOption`
     /// means exactly 30 days, so this starts on `.custom` with that range
     /// rather than approximating it with `.thisMonth`/`.lastMonth`.
@@ -80,7 +80,7 @@ public final class FinancesReportingViewModel: ObservableObject {
     /// figures `load()` already has. Called on its own whenever
     /// `selectedAccountID`, `projectedBalancePeriod`, or the shared date
     /// range changes, the same "reload on every control change, no separate
-    /// Apply step" shape `WorkHoursView` already uses.
+    /// Apply step" shape `WorkView`'s range stepper already uses.
     public func loadSelectedAccountFigures() async {
         guard let accountID = selectedAccountID else {
             accountBalanceHistory = []

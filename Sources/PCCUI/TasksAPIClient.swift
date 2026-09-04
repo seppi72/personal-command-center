@@ -22,6 +22,10 @@ public protocol TasksAPIClient: Sendable {
     /// Sets, changes, or removes (`kind: nil`) a Task's Kind (ticket #88) —
     /// a display/filtering label only.
     func setTaskKind(id: UUID, kind: String?) async throws -> PCCTask
+    /// Groups, moves, or removes (`sprintID: nil`) a Task from a Sprint
+    /// within its own Project. The backend rejects a Sprint belonging to a
+    /// different Project (`TaskController.assignSprint`).
+    func assignTaskSprint(id: UUID, sprintID: UUID?) async throws -> PCCTask
 }
 
 public enum TasksAPIClientError: Error {
@@ -98,6 +102,12 @@ public struct URLSessionTasksAPIClient: TasksAPIClient {
         return try await send(request)
     }
 
+    public func assignTaskSprint(id: UUID, sprintID: UUID?) async throws -> PCCTask {
+        var request = try makeRequest(path: "v1/tasks/\(id)/sprint", method: "PUT")
+        try attach(AssignTaskSprintPayload(sprintID: sprintID), to: &request)
+        return try await send(request)
+    }
+
     private struct SaveTaskPayload: Encodable {
         let title: String
         let notes: String?
@@ -117,6 +127,10 @@ public struct URLSessionTasksAPIClient: TasksAPIClient {
 
     private struct SetTaskKindPayload: Encodable {
         let kind: String?
+    }
+
+    private struct AssignTaskSprintPayload: Encodable {
+        let sprintID: UUID?
     }
 
     private func makeRequest(

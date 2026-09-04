@@ -62,11 +62,11 @@ private struct NotificationsContent: View {
     /// screen's whole point is liquid glass floating on plain white/black,
     /// which needs each row to draw its own translucent Material-backed
     /// shape (the shared `GlassBubble`) rather than a native list
-    /// container's opaque row fill (mirrors `TasksView`'s own move from
+    /// container's opaque row fill (mirrors `DeadlinesView`'s own move from
     /// `List` to `ScrollView` + custom bubbles for the same reason).
     /// Dismissal moves from the old `List`'s swipe gesture onto each row's
     /// own context menu — a `ScrollView` has no `List`-style swipe gesture
-    /// to give it for free (mirrors `ClientsView`'s identical tradeoff).
+    /// to give it for free (mirrors `CategoriesView`'s identical tradeoff).
     private var notificationScroll: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {

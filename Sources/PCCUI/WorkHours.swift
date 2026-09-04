@@ -3,12 +3,12 @@ import Foundation
 /// The five dimensions Work Hours (`CONTEXT.md`) can be rolled up by —
 /// mirrors the backend's own `WorkHoursGroupBy`
 /// (`Sources/App/Controllers/WorkHoursController.swift`). `CaseIterable` so
-/// `WorkHoursView`'s `Picker` can enumerate all five without listing them a
+/// a caller's `Picker` can enumerate all five without listing them a
 /// second time.
 public enum WorkHoursGroupBy: String, CaseIterable, Sendable {
     case day, project, client, task, course
 
-    /// The label `WorkHoursView`'s `Picker` shows for this case.
+    /// The label a `Picker` shows for this case.
     public var displayName: String {
         switch self {
         case .day: return "Day"
@@ -27,7 +27,7 @@ public enum WorkHoursGroupBy: String, CaseIterable, Sendable {
 /// One client-side type for both shapes rather than five, since a given
 /// response only ever contains rows of the one `groupBy` kind that was
 /// requested — the caller already knows which fields to expect, and
-/// `WorkHoursView` reads whichever of `date`/`name` is non-`nil` to label a
+/// a caller reads whichever of `date`/`name` is non-`nil` to label a
 /// row either way.
 public struct WorkHoursRow: Decodable, Sendable {
     public let date: Date?

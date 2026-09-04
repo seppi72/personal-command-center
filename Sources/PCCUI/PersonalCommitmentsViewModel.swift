@@ -4,7 +4,7 @@ import Foundation
 /// through a `PersonalCommitmentsAPIClient`, plus a `CoursesAPIClient` to
 /// populate the Course picker (ticket #56) — kept separate from
 /// `PersonalCommitmentsView` so the view stays a thin rendering of this
-/// state (mirrors `ProjectsViewModel`'s split).
+/// state (mirrors `WorkViewModel`'s split).
 ///
 /// `ObservableObject` rather than the newer `@Observable` macro, since that
 /// macro needs iOS 17/macOS 14 and this package targets iOS 16/macOS 13.
@@ -73,7 +73,7 @@ public final class PersonalCommitmentsViewModel: ObservableObject {
 
     /// Swaps the freshly-updated Commitment into `commitments`, dropping it
     /// when scoped to a Course it no longer belongs to (mirrors
-    /// `TasksViewModel.replace`).
+    /// `WorkViewModel.replace`).
     private func replace(_ updated: PersonalCommitment) {
         guard let index = commitments.firstIndex(where: { $0.id == updated.id }) else { return }
         if matchesScope(updated) {

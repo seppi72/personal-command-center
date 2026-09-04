@@ -5,7 +5,7 @@ import Foundation
 /// (exactly one, non-optional at the domain level — ADR-0004, though the
 /// form can transiently hold none selected before the owner picks one;
 /// `TimeEntryFormSheet` disables Save until exactly one is set) — bundled so
-/// `TimeEntriesViewModel` and `TimeEntryFormSheet` pass one value instead of
+/// `WorkViewModel` and `TimeEntryFormSheet` pass one value instead of
 /// six loose parameters that always travel as a set (mirrors
 /// `TaskFormValues`).
 public struct TimeEntryFormValues: Equatable, Sendable {
