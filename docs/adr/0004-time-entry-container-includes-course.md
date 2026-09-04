@@ -5,3 +5,5 @@
 We chose to add Course as a fourth peer in the same exclusivity set: a Time Entry references exactly one of {Task, Project, Client, Course}, required (never none) and mutually exclusive — the same `*Container` shape `TaskContainer` already established for Project/Course, just extended to four cases. The alternative — leaving Course out and treating Work Hours as scoped to paid/professional work only — was considered and rejected because nothing in the domain draws that line; the owner may want hours logged against school work too (e.g. a graded or paid TA role).
 
 The trade-off: extending the container to four cases is more branching than the two-case `TaskContainer`, and if a future need ever wants a Time Entry attached to more than one target at once (e.g. Project work billed to a Client independently of the Project's own Client), this boundary has to be revisited.
+
+**Amended by ADR-0011.** The four containers are still mutually exclusive on a Time Entry, but Project and Course are no longer strictly unrelated peers: a Project may belong to a Course, so an entry attached to a Project can roll up into a Course (see ADR-0005 as amended).
