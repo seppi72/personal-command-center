@@ -19,6 +19,9 @@ public protocol TasksAPIClient: Sendable {
     func setTaskDeadline(id: UUID, dueDate: Date?) async throws -> PCCTask
     /// Assigns, moves, or removes (`courseID: nil`) a Task's Course.
     func assignTaskCourse(id: UUID, courseID: UUID?) async throws -> PCCTask
+    /// Sets, changes, or removes (`kind: nil`) a Task's Kind (ticket #88) —
+    /// a display/filtering label only.
+    func setTaskKind(id: UUID, kind: String?) async throws -> PCCTask
 }
 
 public enum TasksAPIClientError: Error {
@@ -89,6 +92,12 @@ public struct URLSessionTasksAPIClient: TasksAPIClient {
         return try await send(request)
     }
 
+    public func setTaskKind(id: UUID, kind: String?) async throws -> PCCTask {
+        var request = try makeRequest(path: "v1/tasks/\(id)/kind", method: "PUT")
+        try attach(SetTaskKindPayload(kind: kind), to: &request)
+        return try await send(request)
+    }
+
     private struct SaveTaskPayload: Encodable {
         let title: String
         let notes: String?
@@ -104,6 +113,10 @@ public struct URLSessionTasksAPIClient: TasksAPIClient {
 
     private struct AssignTaskCoursePayload: Encodable {
         let courseID: UUID?
+    }
+
+    private struct SetTaskKindPayload: Encodable {
+        let kind: String?
     }
 
     private func makeRequest(

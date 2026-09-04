@@ -22,6 +22,10 @@ public struct PCCTask: Codable, Identifiable, Equatable, Sendable {
     /// is on/before `dueDate`); only accurate for Tasks completed after this
     /// field was introduced, since nothing backfills it retroactively.
     public var completedAt: Date?
+    /// The Kind of work this Task is — homework, study, reading and the like
+    /// (ticket #88) — or `nil` when unlabelled. Display and filtering only;
+    /// it has no bearing on which container the Task belongs to.
+    public var kind: String?
 
     public init(
         id: UUID,
@@ -31,7 +35,8 @@ public struct PCCTask: Codable, Identifiable, Equatable, Sendable {
         projectID: UUID? = nil,
         dueDate: Date? = nil,
         courseID: UUID? = nil,
-        completedAt: Date? = nil
+        completedAt: Date? = nil,
+        kind: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -41,5 +46,6 @@ public struct PCCTask: Codable, Identifiable, Equatable, Sendable {
         self.dueDate = dueDate
         self.courseID = courseID
         self.completedAt = completedAt
+        self.kind = kind
     }
 }

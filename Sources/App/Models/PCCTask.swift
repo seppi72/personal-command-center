@@ -61,6 +61,15 @@ final class PCCTask: Model, @unchecked Sendable {
     @OptionalParent(key: "course_id")
     var course: Course?
 
+    /// The Kind (`CONTEXT.md`) of work this Task is — homework, study,
+    /// reading and the like — or `nil` for an unlabelled Task. Display and
+    /// filtering only: it carries no behaviour and has no bearing on which
+    /// container the Task belongs to. An exam or a quiz is deliberately not
+    /// a Kind; those are Personal Commitments, since they're attended at a
+    /// fixed time rather than completed.
+    @OptionalField(key: "kind")
+    var kind: String?
+
     init() {}
 
     init(
@@ -71,7 +80,8 @@ final class PCCTask: Model, @unchecked Sendable {
         projectID: UUID? = nil,
         dueDate: Date? = nil,
         sprintID: UUID? = nil,
-        courseID: UUID? = nil
+        courseID: UUID? = nil,
+        kind: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -81,6 +91,7 @@ final class PCCTask: Model, @unchecked Sendable {
         self.dueDate = dueDate
         self.$sprint.id = sprintID
         self.$course.id = courseID
+        self.kind = kind
     }
 
     /// `project`/`course` read together as one `TaskContainer` — see its

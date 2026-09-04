@@ -47,8 +47,10 @@ extension AppTestSuite {
             return task
         }
 
-        private func makeProject(_ app: Application, name: String = "Project", clientID: UUID? = nil) async throws -> Project {
-            let project = Project(name: name, clientID: clientID)
+        private func makeProject(
+            _ app: Application, name: String = "Project", clientID: UUID? = nil, courseID: UUID? = nil
+        ) async throws -> Project {
+            let project = Project(name: name, clientID: clientID, courseID: courseID)
             try await project.save(on: app.db)
             return project
         }
@@ -398,6 +400,72 @@ extension AppTestSuite {
                     afterResponse: { res async throws in
                         let rows = try res.content.decode([TaskRow].self)
                         #expect(rows.isEmpty)
+                    }
+                )
+            }
+        }
+
+        @Test("groupBy=course folds in its Projects' totals (ADR-0011)")
+        func courseRowsFoldOwnedProjectTotals() async throws {
+            try await withWorkHoursApp { app in
+                let start = Date(timeIntervalSince1970: 1_800_000_000)
+                let end = start.addingTimeInterval(86400)
+                let course = try await makeCourse(app, name: "CS 301")
+                let courseID = try course.requireID()
+                let project = try await makeProject(app, name: "Group assignment", courseID: courseID)
+                let projectID = try project.requireID()
+                let task = try await makeTask(app, title: "Slides", projectID: projectID)
+
+                // One entry per level of the fold: direct-to-Course, direct
+                // to the Course's Project, and against a Task inside it.
+                try await makeEntry(
+                    app, start: start, end: start.addingTimeInterval(900),
+                    container: .course(courseID)
+                )
+                try await makeEntry(
+                    app, start: start.addingTimeInterval(3600), end: start.addingTimeInterval(5400),
+                    container: .project(projectID)
+                )
+                try await makeEntry(
+                    app, start: start.addingTimeInterval(7200), end: start.addingTimeInterval(7200 + 600),
+                    container: .task(try task.requireID())
+                )
+
+                try await app.testing().test(
+                    .GET, path(groupBy: "course", start: start, end: end),
+                    headers: authHeaders(),
+                    afterResponse: { res async throws in
+                        let rows = try res.content.decode([CourseRow].self)
+                        #expect(rows.count == 1)
+                        #expect(rows[0].courseID == courseID)
+                        #expect(rows[0].totalSeconds == 900 + 1800 + 600)
+                    }
+                )
+            }
+        }
+
+        @Test("a Course-owned Project's hours don't leak into any Client total")
+        func courseOwnedProjectDoesNotCountTowardAClient() async throws {
+            try await withWorkHoursApp { app in
+                let start = Date(timeIntervalSince1970: 1_800_000_000)
+                let end = start.addingTimeInterval(86400)
+                let client = try await makeClient(app, name: "Acme")
+                let course = try await makeCourse(app, name: "CS 301")
+                let project = try await makeProject(
+                    app, name: "Group assignment", courseID: try course.requireID()
+                )
+
+                try await makeEntry(
+                    app, start: start, end: start.addingTimeInterval(900),
+                    container: .project(try project.requireID())
+                )
+
+                try await app.testing().test(
+                    .GET, path(groupBy: "client", start: start, end: end),
+                    headers: authHeaders(),
+                    afterResponse: { res async throws in
+                        let rows = try res.content.decode([ClientRow].self)
+                        #expect(!rows.contains { $0.clientID == (try? client.requireID()) })
                     }
                 )
             }

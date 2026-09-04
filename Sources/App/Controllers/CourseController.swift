@@ -113,6 +113,7 @@ struct CourseController: RouteCollection {
         let courseID = try course.requireID()
         try await Self.verifyNoReferencingTimeEntries(courseID: courseID, req: req)
         try await Self.verifyNoReferencingPersonalCommitments(courseID: courseID, req: req)
+        try await Self.verifyNoReferencingProjects(courseID: courseID, req: req)
         try await course.delete(on: req.db)
         return .noContent
     }
@@ -131,6 +132,16 @@ struct CourseController: RouteCollection {
     private static func verifyNoReferencingPersonalCommitments(courseID: UUID, req: Request) async throws {
         guard try await PersonalCommitment.query(on: req.db).filter(\.$course.$id == courseID).first() == nil else {
             throw Abort(.badRequest, reason: "cannot delete a Course with Personal Commitments attached")
+        }
+    }
+
+    /// Ticket #88: a Course can't be deleted while a Project still belongs
+    /// to it (ADR-0011) — the owner must reassign or delete those Projects
+    /// first, rather than the delete orphaning a Project that only made
+    /// sense as coursework. Same shape as the two guards above.
+    private static func verifyNoReferencingProjects(courseID: UUID, req: Request) async throws {
+        guard try await Project.query(on: req.db).filter(\.$course.$id == courseID).first() == nil else {
+            throw Abort(.badRequest, reason: "cannot delete a Course with Projects attached")
         }
     }
 

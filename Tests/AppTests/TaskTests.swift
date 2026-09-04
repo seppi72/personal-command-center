@@ -520,5 +520,95 @@ extension AppTestSuite {
                 )
             }
         }
+
+        @Test("sets, changes, and clears a Task's Kind")
+        func setsChangesAndClearsTaskKind() async throws {
+            try await withTasksApp { app in
+                let task = PCCTask(title: "Read chapter 4")
+                try await task.save(on: app.db)
+                let id = try task.requireID()
+
+                try await app.testing().test(
+                    .PUT, "/v1/tasks/\(id)/kind",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(SetTaskKindRequest(kind: "reading"))
+                    },
+                    afterResponse: { res async throws in
+                        #expect(res.status == .ok)
+                        #expect(try res.content.decode(TaskResponse.self).kind == "reading")
+                    }
+                )
+
+                try await app.testing().test(
+                    .PUT, "/v1/tasks/\(id)/kind",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(SetTaskKindRequest(kind: "  homework  "))
+                    },
+                    afterResponse: { res async throws in
+                        #expect(try res.content.decode(TaskResponse.self).kind == "homework")
+                    }
+                )
+
+                try await app.testing().test(
+                    .PUT, "/v1/tasks/\(id)/kind",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(SetTaskKindRequest(kind: nil))
+                    },
+                    afterResponse: { res async throws in
+                        #expect(try res.content.decode(TaskResponse.self).kind == nil)
+                    }
+                )
+
+                let stored = try await PCCTask.find(id, on: app.db)
+                #expect(stored?.kind == nil)
+            }
+        }
+
+        @Test("a Task's Kind doesn't touch its container")
+        func settingKindLeavesContainerAlone() async throws {
+            try await withTasksApp { app in
+                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026)
+                try await course.save(on: app.db)
+                let courseID = try course.requireID()
+                let task = PCCTask(title: "Problem set", courseID: courseID)
+                try await task.save(on: app.db)
+                let id = try task.requireID()
+
+                try await app.testing().test(
+                    .PUT, "/v1/tasks/\(id)/kind",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(SetTaskKindRequest(kind: "homework"))
+                    },
+                    afterResponse: { res async throws in
+                        let body = try res.content.decode(TaskResponse.self)
+                        #expect(body.kind == "homework")
+                        #expect(body.courseID == courseID)
+                    }
+                )
+            }
+        }
+
+        @Test("lists Tasks filtered by Kind")
+        func listsTasksFilteredByKind() async throws {
+            try await withTasksApp { app in
+                try await PCCTask(title: "Read chapter 4", kind: "reading").save(on: app.db)
+                try await PCCTask(title: "Problem set", kind: "homework").save(on: app.db)
+                try await PCCTask(title: "Unlabelled").save(on: app.db)
+
+                try await app.testing().test(
+                    .GET, "/v1/tasks?kind=reading",
+                    headers: authHeaders(),
+                    afterResponse: { res async throws in
+                        let body = try res.content.decode([TaskResponse].self)
+                        #expect(body.count == 1)
+                        #expect(body.first?.title == "Read chapter 4")
+                    }
+                )
+            }
+        }
     }
 }

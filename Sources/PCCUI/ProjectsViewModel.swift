@@ -84,6 +84,9 @@ public final class ProjectsViewModel: ObservableObject {
             if let dueDate = values.dueDate {
                 created = try await client.setProjectDeadline(id: created.id, dueDate: dueDate)
             }
+            if let courseID = values.courseID {
+                created = try await client.setProjectCourse(id: created.id, courseID: courseID)
+            }
             projects.append(created)
         }
     }
@@ -96,6 +99,9 @@ public final class ProjectsViewModel: ObservableObject {
             var updated = try await client.updateProject(id: project.id, name: values.name)
             if values.dueDate != project.dueDate {
                 updated = try await client.setProjectDeadline(id: project.id, dueDate: values.dueDate)
+            }
+            if values.courseID != project.courseID {
+                updated = try await client.setProjectCourse(id: project.id, courseID: values.courseID)
             }
             if let index = projects.firstIndex(where: { $0.id == updated.id }) {
                 projects[index] = updated

@@ -12,6 +12,9 @@ public protocol ProjectsAPIClient: Sendable {
     func deleteProject(id: UUID) async throws
     /// Attaches, changes, or removes (`dueDate: nil`) a Project's Deadline.
     func setProjectDeadline(id: UUID, dueDate: Date?) async throws -> Project
+    /// Assigns, moves, or removes (`courseID: nil`) a Project's Course.
+    /// Assigning one clears any Client the Project had (ADR-0011).
+    func setProjectCourse(id: UUID, courseID: UUID?) async throws -> Project
 }
 
 public enum ProjectsAPIClientError: Error {
@@ -59,12 +62,22 @@ public struct URLSessionProjectsAPIClient: ProjectsAPIClient {
         return try await send(request)
     }
 
+    public func setProjectCourse(id: UUID, courseID: UUID?) async throws -> Project {
+        var request = try makeRequest(path: "v1/projects/\(id)/course", method: "PUT")
+        try attach(SetProjectCoursePayload(courseID: courseID), to: &request)
+        return try await send(request)
+    }
+
     private struct SaveProjectPayload: Encodable {
         let name: String
     }
 
     private struct SetProjectDeadlinePayload: Encodable {
         let dueDate: Date?
+    }
+
+    private struct SetProjectCoursePayload: Encodable {
+        let courseID: UUID?
     }
 
     private func makeRequest(
