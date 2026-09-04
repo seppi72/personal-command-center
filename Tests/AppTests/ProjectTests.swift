@@ -342,5 +342,74 @@ extension AppTestSuite {
                 )
             }
         }
+
+        @Test("no sequence of writes can leave a Project holding both parents (ADR-0011)")
+        func aProjectNeverHoldsBothParents() async throws {
+            try await withProjectsApp { app in
+                let client = PCCClient(name: "Acme")
+                try await client.save(on: app.db)
+                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026)
+                try await course.save(on: app.db)
+                let project = Project(name: "Group assignment")
+                try await project.save(on: app.db)
+                let id = try project.requireID()
+                let clientID = try client.requireID()
+                let courseID = try course.requireID()
+
+                // Assign one parent, then the other, then back — the
+                // closest the API comes to "save a Project with both", since
+                // neither parent is settable in the same request.
+                for _ in 0..<2 {
+                    try await app.testing().test(
+                        .PUT, "/v1/projects/\(id)/client",
+                        headers: authHeaders(),
+                        beforeRequest: { req async throws in
+                            try req.content.encode(SetProjectClientRequest(clientID: clientID))
+                        },
+                        afterResponse: { res async throws in
+                            let body = try res.content.decode(ProjectResponse.self)
+                            #expect(body.clientID != nil)
+                            #expect(body.courseID == nil)
+                        }
+                    )
+                    try await app.testing().test(
+                        .PUT, "/v1/projects/\(id)/course",
+                        headers: authHeaders(),
+                        beforeRequest: { req async throws in
+                            try req.content.encode(SetProjectCourseRequest(courseID: courseID))
+                        },
+                        afterResponse: { res async throws in
+                            let body = try res.content.decode(ProjectResponse.self)
+                            #expect(body.courseID != nil)
+                            #expect(body.clientID == nil)
+                        }
+                    )
+                }
+
+                let stored = try await Project.find(id, on: app.db)
+                #expect(stored?.$client.id == nil)
+                #expect(stored?.$course.id == courseID)
+            }
+        }
+
+        @Test("setParent never leaves a Project with both a Client and a Course")
+        func setParentKeepsParentsExclusive() throws {
+            let clientID = UUID()
+            let courseID = UUID()
+            let project = Project(name: "Group assignment", clientID: clientID)
+
+            project.setParent(.course(courseID))
+            #expect(project.$client.id == nil)
+            #expect(project.parent == .course(courseID))
+
+            project.setParent(.client(clientID))
+            #expect(project.$course.id == nil)
+            #expect(project.parent == .client(clientID))
+
+            project.setParent(.none)
+            #expect(project.$client.id == nil)
+            #expect(project.$course.id == nil)
+            #expect(project.parent == .none)
+        }
     }
 }

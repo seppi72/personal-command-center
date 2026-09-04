@@ -43,8 +43,22 @@ final class Project: Model, @unchecked Sendable {
         self.id = id
         self.name = name
         self.dueDate = dueDate
-        self.$client.id = clientID
-        self.$course.id = courseID
+        // Routed through `setParent` rather than assigning both foreign keys
+        // directly, so a both-parents Project can't be constructed in the
+        // first place — ADR-0011 asks for the exclusivity to be enforced
+        // rather than conventional, and the two controller endpoints aren't
+        // the only way a Project gets made (migrations, tests, future
+        // services). `preconditionFailure` rather than a thrown error: this
+        // is a programming mistake at a call site, not owner input, which
+        // reaches the model only after `ProjectController` has already
+        // resolved it to one parent.
+        switch (clientID, courseID) {
+        case (let clientID?, nil): setParent(.client(clientID))
+        case (nil, let courseID?): setParent(.course(courseID))
+        case (nil, nil): setParent(.none)
+        case (.some, .some):
+            preconditionFailure("a Project belongs to a Client or a Course, never both (ADR-0011)")
+        }
     }
 
     /// `client`/`course` read together as one `ProjectParent` — see its doc
