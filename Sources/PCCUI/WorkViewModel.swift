@@ -238,6 +238,37 @@ public final class WorkViewModel: ObservableObject {
         }
     }
 
+    /// Every Task inside the current scope's subtree, regardless of range —
+    /// the dashboard's Task counts answer "how much work is open," which a
+    /// date window has no bearing on, unlike the hour totals beside them.
+    public var scopedTasks: [PCCTask] {
+        var ids: Set<UUID> = []
+        for node in WorkTree.flattened(scopedRoots) {
+            if case .task(let id) = node.kind { ids.insert(id) }
+        }
+        return tasks.filter { ids.contains($0.id) }
+    }
+
+    /// How many Projects the current scope covers — the whole tree's work
+    /// Projects when nothing is selected.
+    public var scopedProjectCount: Int {
+        WorkTree.flattened(scopedRoots).reduce(into: 0) { count, node in
+            if case .project = node.kind { count += 1 }
+        }
+    }
+
+    public var openTaskCount: Int {
+        scopedTasks.filter { !$0.isComplete }.count
+    }
+
+    /// Completed Tasks over all Tasks in scope — what the completion ring
+    /// fills to. `total` of 0 means there is nothing to be a fraction of;
+    /// the ring renders empty rather than dividing by zero.
+    public var taskCompletion: (complete: Int, total: Int) {
+        let scoped = scopedTasks
+        return (scoped.filter(\.isComplete).count, scoped.count)
+    }
+
     // MARK: - Lookups
 
     public func client(id: UUID) -> PCCClient? { clients.first { $0.id == id } }
