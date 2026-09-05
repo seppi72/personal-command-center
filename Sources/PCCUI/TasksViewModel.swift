@@ -2,9 +2,16 @@ import Foundation
 
 /// Holds the Tasks screen's state and talks to the backend through a
 /// `TasksAPIClient`, plus a `ProjectsAPIClient`/`CoursesAPIClient` to
-/// populate the Project/Course pickers — kept separate from `CourseDetailView` so
-/// the view stays a thin rendering of this state (mirrors `WorkViewModel`'s
+/// populate the Project/Course pickers — kept separate from its view so the
+/// view stays a thin rendering of this state (mirrors `WorkViewModel`'s
 /// split).
+///
+/// Currently unconsumed: its own screen was merged away by issue #89 and its
+/// last remaining caller, the Courses screen's `makeTasksViewModel(for:)`
+/// factory, by issue #90. Kept rather than deleted because it's `public` API
+/// of this package and the real Xcode app targets the README describes have
+/// yet to be written against it; `TasksViewModelTests` still covers its
+/// `isOverdue` rule.
 ///
 /// `ObservableObject` rather than the newer `@Observable` macro, since that
 /// macro needs iOS 17/macOS 14 and this package targets iOS 16/macOS 13.

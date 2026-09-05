@@ -1,7 +1,7 @@
 import Foundation
 
 /// The fields a Course create/edit form produces together — name, Term, and
-/// the Deadline to attach/change/clear — bundled so `CoursesViewModel` and
+/// the Deadline to attach/change/clear — bundled so `SchoolViewModel` and
 /// `CourseFormSheet` pass one value instead of loose parameters that always
 /// travel as a set (mirrors `ProjectFormValues`).
 public struct CourseFormValues: Equatable, Sendable {

@@ -35,7 +35,11 @@ public final class CategoriesViewModel: ObservableObject {
     /// Builds the `SubcategoriesViewModel` for one Category's detail screen,
     /// scoped to that Category's id — `CategoryDetailView` needs a
     /// `SubcategoriesAPIClient` and a `categoryID`, and this is where both
-    /// are available together (mirrors `CoursesViewModel.makeTasksViewModel`).
+    /// are available together. The last of the scoped-view-model factories
+    /// this package had: the Courses screen's pair went with it when issue
+    /// #90 folded that screen into `SchoolViewModel`, whose drill-down reads
+    /// the lists it already loaded instead of standing up a view model per
+    /// Course.
     public func makeSubcategoriesViewModel(for category: PCCCategory) -> SubcategoriesViewModel {
         SubcategoriesViewModel(client: subcategoriesClient, categoryID: category.id)
     }

@@ -3,7 +3,7 @@ import SwiftUI
 /// Minimal Mac/iOS screen for ticket #39: lists Categories, and supports
 /// creating, editing (renaming), and deleting one. One shared SwiftUI view
 /// for both platforms — no platform-specific chrome, per this codebase's
-/// existing "minimal" scope (mirrors `CourseView`). Tapping a card expands
+/// existing "minimal" scope. Tapping a card expands
 /// it into a centered overlay showing its top 3 biggest entries
 /// (`CategoriesContent.expandedOverlay(_:)`); reaching `CategoryDetailView`
 /// to rename the Category or manage its Subcategories moved to a "Manage

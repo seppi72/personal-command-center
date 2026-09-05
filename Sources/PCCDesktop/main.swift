@@ -51,8 +51,9 @@ let deadlinesViewModel = DeadlinesViewModel(client: deadlinesClient)
 let calendarViewModel = CalendarViewModel(
     commitmentsClient: personalCommitmentsClient, mirroredEventsClient: mirroredCalendarEventsClient, coursesClient: coursesClient)
 let personalCommitmentsViewModel = PersonalCommitmentsViewModel(client: personalCommitmentsClient, coursesClient: coursesClient)
-let coursesViewModel = CoursesViewModel(
-    client: coursesClient, tasksClient: tasksClient, projectsClient: projectsClient, commitmentsClient: personalCommitmentsClient)
+let schoolViewModel = SchoolViewModel(
+    coursesClient: coursesClient, projectsClient: projectsClient, tasksClient: tasksClient,
+    timeEntriesClient: timeEntriesClient, commitmentsClient: personalCommitmentsClient)
 let timerViewModel = TimerViewModel(
     timeEntriesClient: timeEntriesClient, tasksClient: tasksClient, projectsClient: projectsClient,
     clientsClient: clientsClient, coursesClient: coursesClient)
@@ -77,7 +78,7 @@ let overviewViewModel = OverviewViewModel(
 /// more than one section.
 enum Screen: String, CaseIterable, Identifiable {
     case overview
-    case work, courses
+    case work, school
     case deadlines, calendar, commitments
     case accounts, transactions, categories, financesReporting
     case notifications, automationLog
@@ -88,7 +89,7 @@ enum Screen: String, CaseIterable, Identifiable {
         switch self {
         case .overview: "Overview"
         case .work: "Work"
-        case .courses: "School"
+        case .school: "School"
         case .deadlines: "Deadlines"
         case .calendar: "Calendar"
         case .commitments: "Commitments"
@@ -105,7 +106,7 @@ enum Screen: String, CaseIterable, Identifiable {
         switch self {
         case .overview: "house"
         case .work: "briefcase"
-        case .courses: "graduationcap"
+        case .school: "graduationcap"
         case .deadlines: "clock"
         case .calendar: "calendar"
         case .commitments: "person.crop.circle"
@@ -143,7 +144,7 @@ enum SidebarSection: CaseIterable {
 
     var screens: [Screen] {
         switch self {
-        case .dashboards: [.work, .courses]
+        case .dashboards: [.work, .school]
         case .planning: [.deadlines, .calendar, .commitments]
         case .finances: [.accounts, .transactions, .categories, .financesReporting]
         case .system: [.notifications, .automationLog]
@@ -217,7 +218,7 @@ struct DashboardView: View {
         case .deadlines: DeadlinesView(viewModel: deadlinesViewModel)
         case .calendar: CalendarView(viewModel: calendarViewModel)
         case .commitments: PersonalCommitmentsView(viewModel: personalCommitmentsViewModel)
-        case .courses: CourseView(viewModel: coursesViewModel)
+        case .school: SchoolView(viewModel: schoolViewModel)
         case .accounts: AccountsView(viewModel: accountsViewModel)
         case .transactions: TransactionsView(viewModel: transactionsViewModel)
         case .categories: CategoriesView(viewModel: categoriesViewModel)
