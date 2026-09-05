@@ -70,7 +70,7 @@ let automationLogViewModel = AutomationLogViewModel(client: automationLogsClient
 let overviewViewModel = OverviewViewModel(
     tasksClient: tasksClient, projectsClient: projectsClient, accountsClient: accountsClient,
     transactionsClient: transactionsClient, financesReportingClient: financesReportingClient,
-    workHoursClient: workHoursClient)
+    workHoursClient: workHoursClient, timeEntriesClient: timeEntriesClient)
 
 /// One case per sidebar row. `CaseIterable` order is display order within
 /// whichever `SidebarSection` the screen belongs to (see below) — it no
@@ -203,6 +203,25 @@ struct DashboardView: View {
         .preferredColorScheme(isDarkMode ? .dark : .light)
     }
 
+    /// Navigates to the Work screen with its tree scoped to `nodeID`, or to
+    /// the whole tree ("All Work") when that's `nil` (issue #91).
+    ///
+    /// Both of Overview's work deep links pass `nil`. Neither names a single
+    /// node to land on — the Work card's header means "show me my work", and
+    /// the Today/Overdue lists' "+N more" spans several Projects at once — so
+    /// preselecting any one row would narrow the destination to something the
+    /// owner didn't ask for. Clearing the selection is what makes the
+    /// destination match the tap: the stats panels open on the whole tree,
+    /// which is the view the Overview card was summarising.
+    ///
+    /// Written as one function taking the node rather than two call sites
+    /// setting `selectedNodeID` inline, so a future deep link that *does*
+    /// name a node (a specific Project, say) has one place to pass it.
+    private func showWork(selecting nodeID: String?) {
+        workViewModel.selectedNodeID = nodeID
+        selection = .work
+    }
+
     @ViewBuilder
     private func detail(for screen: Screen) -> some View {
         switch screen {
@@ -211,8 +230,8 @@ struct DashboardView: View {
                 viewModel: overviewViewModel,
                 timerViewModel: timerViewModel,
                 onTapFinances: { selection = .financesReporting },
-                onTapProjects: { selection = .work },
-                onTapTasks: { selection = .work }
+                onTapProjects: { showWork(selecting: nil) },
+                onTapTasks: { showWork(selecting: nil) }
             )
         case .work: WorkView(viewModel: workViewModel, timerViewModel: timerViewModel)
         case .deadlines: DeadlinesView(viewModel: deadlinesViewModel)

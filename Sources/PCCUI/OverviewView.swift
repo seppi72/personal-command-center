@@ -688,6 +688,14 @@ private struct OverviewContent: View {
 
     @ViewBuilder
     private var workHoursContent: some View {
+        // Still the bar chart's own sum, deliberately left on the backend
+        // rollup it always came from: the breakdown below is computed
+        // client-side from Time Entries, and re-sourcing this figure there
+        // too would buy nothing — the two agree by construction, since
+        // `groupBy: .day` counts exactly the completed in-range entries
+        // `LoggedHours.split` divides (`WorkHoursController.completedEntries`)
+        // — while making the headline disagree with the chart it labels
+        // whenever the two fetches land either side of a new entry.
         let totalHours = viewModel.workHoursThisWeek.reduce(0) { $0 + $1.totalSeconds } / 3600
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -720,6 +728,63 @@ private struct OverviewContent: View {
                 .chartYAxis(.hidden)
                 .frame(height: 90)
             }
+            crossDomainHoursContent
+        }
+    }
+
+    /// What the figure above is actually made of: the Work dashboard's share
+    /// and the School dashboard's share of the same week (issue #91).
+    ///
+    /// The total itself is not new — `groupBy: .day` always summed every
+    /// completed entry regardless of container — but nothing on screen said
+    /// so, and since the screen merge there is no single dashboard the owner
+    /// can check it against: Work filters Course-owned work out of its tree,
+    /// School ignores everything else. This is the only place the two are
+    /// added back together.
+    ///
+    /// The two shares always reconcile to the figure above them, with no
+    /// remainder row needed: a Time Entry always has exactly one container
+    /// (`CONTEXT.md`, ADR-0004), so every logged second belongs to one
+    /// dashboard or the other.
+    ///
+    /// Headed with the glossary's own term for this aggregate — Work Hours
+    /// covers all logged time, coursework included — while the rows are
+    /// named for the two screens the owner would go to next.
+    @ViewBuilder
+    private var crossDomainHoursContent: some View {
+        let hours = viewModel.loggedHours
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Work Hours")
+                .pccPanelLabel()
+                .foregroundStyle(.secondary)
+            hoursShareRow("Work", seconds: hours.workSeconds, total: hours.totalSeconds)
+            hoursShareRow("School", seconds: hours.schoolSeconds, total: hours.totalSeconds)
+        }
+    }
+
+    /// One share: its name, a proportion bar, and its own stamp. The bar is
+    /// drawn against the week's total rather than against the largest share,
+    /// so Work and School read as two parts of one whole instead of as two
+    /// independent figures.
+    private func hoursShareRow(_ label: String, seconds: Double, total: Double) -> some View {
+        HStack(spacing: 10) {
+            Text(label)
+                .font(.system(size: 12))
+                .frame(width: 74, alignment: .leading)
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(theme.panelLine(colorScheme))
+                    Capsule()
+                        .fill(Color.secondary)
+                        .frame(width: total > 0 ? max(2, proxy.size.width * seconds / total) : 0)
+                }
+            }
+            .frame(height: 6)
+            Text(PCCDuration.stamp(seconds))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 62, alignment: .trailing)
         }
     }
 
