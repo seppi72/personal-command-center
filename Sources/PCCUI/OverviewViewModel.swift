@@ -53,6 +53,18 @@ public final class OverviewViewModel: ObservableObject {
     /// bar chart.
     @Published public private(set) var workHoursThisWeek: [WorkHoursRow] = []
 
+    /// Every Time Entry, loaded unfiltered — the endpoint takes only
+    /// container filters, not a date range, so the window is applied by
+    /// `LoggedHours.split` instead (`loadedHoursRange`). Loaded unfiltered
+    /// for the same reason `tasks` above is: one fetch feeding a figure this
+    /// screen derives several ways.
+    @Published public private(set) var timeEntries: [TimeEntry] = []
+    /// The half-open window `workHoursThisWeek`/`timeEntries` were loaded
+    /// for, kept so `loggedHours` splits over precisely the range that was
+    /// fetched rather than recomputing "this week" against a `Date()` that
+    /// has since moved on (past midnight, say).
+    private var loadedHoursRange: (start: Date, end: Date)?
+
     @Published public private(set) var currentNetWorth: Double = 0
     /// The Finances card's chart data for whichever range is currently
     /// selected — see `loadFinancesCard()`.
@@ -75,6 +87,7 @@ public final class OverviewViewModel: ObservableObject {
     private let transactionsClient: TransactionsAPIClient
     private let financesReportingClient: FinancesReportingAPIClient
     private let workHoursClient: WorkHoursAPIClient
+    private let timeEntriesClient: TimeEntriesAPIClient
 
     public init(
         tasksClient: TasksAPIClient,
@@ -82,7 +95,8 @@ public final class OverviewViewModel: ObservableObject {
         accountsClient: AccountsAPIClient,
         transactionsClient: TransactionsAPIClient,
         financesReportingClient: FinancesReportingAPIClient,
-        workHoursClient: WorkHoursAPIClient
+        workHoursClient: WorkHoursAPIClient,
+        timeEntriesClient: TimeEntriesAPIClient
     ) {
         self.tasksClient = tasksClient
         self.projectsClient = projectsClient
@@ -90,6 +104,28 @@ public final class OverviewViewModel: ObservableObject {
         self.transactionsClient = transactionsClient
         self.financesReportingClient = financesReportingClient
         self.workHoursClient = workHoursClient
+        self.timeEntriesClient = timeEntriesClient
+    }
+
+    /// How this week's logged hours divide between the Work and School
+    /// dashboards (issue #91).
+    ///
+    /// Overview is the only screen that can report this: Work filters
+    /// Course-owned work out of its tree and School ignores everything else,
+    /// so neither shows a true total of the owner's time. Computed through
+    /// `LoggedHours.split`, which decides "is this coursework?" with the same
+    /// function the School screen totals with, so the parts can't drift from
+    /// the screens they describe.
+    ///
+    /// Zeroed until `load()` has run, rather than optional — the readout
+    /// renders zeroed rather than absent, so the card doesn't reflow once
+    /// data arrives.
+    public var loggedHours: LoggedHoursSplit {
+        guard let loadedHoursRange else {
+            return LoggedHoursSplit(workSeconds: 0, schoolSeconds: 0)
+        }
+        return LoggedHours.split(
+            timeEntries: timeEntries, tasks: tasks, projects: projects, range: loadedHoursRange)
     }
 
     /// Each Project paired with the fraction (0–1) of its own Tasks that are
@@ -173,11 +209,21 @@ public final class OverviewViewModel: ObservableObject {
             async let loadedAccounts = accountsClient.listAccounts()
             async let loadedNetWorth = financesReportingClient.fetchCurrentNetWorth()
             async let loadedWorkHours = workHoursClient.fetchWorkHours(groupBy: .day, start: startOfWeek, end: now)
+            // Unfiltered, like the Tasks/Projects fetches above: the
+            // cross-domain split has to see Client-side and Course-side
+            // entries alike, so narrowing by container here would defeat the
+            // point of the figure. The endpoint takes no date bound, so the
+            // week window is applied in `loggedHours` instead — the same
+            // shape `WorkViewModel` already loads Time Entries with.
+            async let loadedEntries = timeEntriesClient.listTimeEntries(
+                taskID: nil, projectID: nil, clientID: nil, courseID: nil)
             tasks = try await loadedTasks
             projects = try await loadedProjects
             accounts = try await loadedAccounts
             currentNetWorth = try await loadedNetWorth
             workHoursThisWeek = try await loadedWorkHours
+            timeEntries = try await loadedEntries
+            loadedHoursRange = (start: startOfWeek, end: now)
         }
         await loadFinancesCard()
     }
