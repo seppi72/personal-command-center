@@ -321,6 +321,13 @@ public final class WorkViewModel: ObservableObject {
         }
     }
 
+    /// Logged against planned for the current range and scope (issue #107).
+    /// Reads `totalSeconds` rather than re-summing entries, so the workload
+    /// line can't disagree with the hero tile above it.
+    public var workload: WorkWorkload {
+        WorkBoard.workload(days: range.days(), loggedSeconds: totalSeconds)
+    }
+
     /// The caption under a tree row's name, or `nil` for rows that don't
     /// carry one (`WorkBoard.rowContext`).
     public func rowContext(for node: WorkNode) -> WorkRowContext? {
