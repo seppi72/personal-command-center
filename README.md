@@ -217,11 +217,11 @@ A live timer is a `TimeEntry` row that hasn't been stopped yet — `endDate == n
 
 Work Hours (`CONTEXT.md`) is the aggregate view over Time Entries — totals grouped by day, or by one of Time Entry's four containers, over `[start, end)`. `GET /v1/work-hours` is one read-only endpoint serving all five `groupBy` values, since they share the same query/validation shape and differ only in how the same underlying Time Entries get bucketed; only completed Time Entries (`endDate != nil`) starting in range are counted — a running live timer contributes nothing until it's stopped. `WorkHoursController.validatedRange` parses `start`/`end` from the query string by hand with `ISO8601DateFormatter` rather than decoding straight into `Date`: Vapor's query-string decoder defaults `Date` to seconds-since-1970, unlike its JSON-body decoder (what every other date in this API relies on defaulting to ISO 8601), so a plain `req.query[Date.self, at:]` here would silently expect a different wire format than everywhere else.
 
-`groupBy=day` is dense — one row per calendar day in range (`Calendar.current.startOfDay`, this process's own local timezone — there's no owner-timezone concept elsewhere in the domain yet), including a day with nothing logged. An entry spanning midnight counts entirely toward its `startDate`'s day rather than being split. The other four `groupBy` values are sparse — a container with a zero total in range doesn't appear as a row at all — and each row carries the entity's id and name (`{projectID, projectName, totalSeconds}` etc.) so `WorkHoursView` doesn't need a second round-trip to label it.
+`groupBy=day` is dense — one row per calendar day in range (`Calendar.current.startOfDay`, this process's own local timezone — there's no owner-timezone concept elsewhere in the domain yet), including a day with nothing logged. An entry spanning midnight counts entirely toward its `startDate`'s day rather than being split. The other four `groupBy` values are sparse — a container with a zero total in range doesn't appear as a row at all — and each row carries the entity's id and name (`{projectID, projectName, totalSeconds}` etc.) so the Work Hours rollup in `WorkView`/`SchoolView` doesn't need a second round-trip to label it.
 
 Project/Client/Course totals fold transitively (`docs/adr/0005-work-hours-rollup-transitive-fold.md`): a Project's total is its own direct-to-Project entries plus every entry logged against any Task belonging to it; a Client's total is its own direct entries plus each of its Projects' already-folded totals; a Course's total is its own direct entries plus every entry logged against any Task belonging to it. A Task's total is direct entries only — nothing folds into a Task. Sprint isn't a sixth `groupBy` dimension: a Sprint's entries already fold into their Project via the owning Task's `project_id`. `WorkHoursController.containerRows` loads every Task/Project/Client/Course regardless of `groupBy` (a personal, single-owner dataset) rather than only the ones a Time Entry happens to reference directly — a Client's fold needs *every* one of its Projects' totals, including a Project with no Time Entries of its own, or an indirectly-folded Client total could come out short.
 
-Since each `groupBy`'s row has genuinely different JSON keys, `WorkHoursRow` (backend) encodes itself by hand rather than relying on `Codable`'s synthesized conformance for one struct — the same "build the response by hand" move `TimeEntryController.getTimer` already makes for its own not-one-fixed-shape response. The PCCUI-side `WorkHoursRow` mirrors this the other way: one `Decodable` struct with optional `date`/`id`/`name` fields, whichever one's non-`nil` telling `WorkHoursView` how to label a row, since a given response only ever contains rows of the one `groupBy` kind that was requested.
+Since each `groupBy`'s row has genuinely different JSON keys, `WorkHoursRow` (backend) encodes itself by hand rather than relying on `Codable`'s synthesized conformance for one struct — the same "build the response by hand" move `TimeEntryController.getTimer` already makes for its own not-one-fixed-shape response. The PCCUI-side `WorkHoursRow` mirrors this the other way: one `Decodable` struct with optional `date`/`id`/`name` fields, whichever one's non-`nil` telling the rollup how to label a row, since a given response only ever contains rows of the one `groupBy` kind that was requested.
 
 ### Accounts (ticket #36)
 
@@ -292,210 +292,158 @@ A pull writes one `AutomationLog` entry (`actionType: "calendar.pull"`) per `Mir
 
 ### PCCHTTPTransport (ticket #54)
 
-Every `URLSessionXAPIClient` below (17 of them, one per domain) composes a private `PCCHTTPTransport` rather than hand-rolling its own request construction, JSON encoding/decoding, query-string building, and status-code validation — the transport plumbing that used to be duplicated across all 17 files (and, before this ticket, only partially shared via a since-deleted `HTTPResponseValidation` that just covered the status check). Each domain client keeps its own public `init(baseURL:bearerToken:session:)` and its own `XAPIClientError` enum — `PCCHTTPTransport`'s `send`/`checkStatus` take `unexpectedResponse`/`serverError` closures so a domain client still throws its own error type rather than a shared one. `Tests/PCCUITests/PCCHTTPTransportTests.swift` covers `PCCHTTPTransport` itself (request/query construction, encoding, status validation, and a couple of full round-trips against a stubbed `URLProtocol`) — the one exception to `PCCUI` otherwise having no automated tests, since this module is pure logic with no view involved (`Package.swift`'s own comment on why the rest of `PCCUI` stays untested).
+Every `URLSessionXAPIClient` below (17 of them, one per domain) composes a private `PCCHTTPTransport` rather than hand-rolling its own request construction, JSON encoding/decoding, query-string building, and status-code validation — the transport plumbing that used to be duplicated across all 17 files (and, before this ticket, only partially shared via a since-deleted `HTTPResponseValidation` that just covered the status check). Each domain client keeps its own public `init(baseURL:bearerToken:session:)` and its own `XAPIClientError` enum — `PCCHTTPTransport`'s `send`/`checkStatus` take `unexpectedResponse`/`serverError` closures so a domain client still throws its own error type rather than a shared one. `Tests/PCCUITests/PCCHTTPTransportTests.swift` covers `PCCHTTPTransport` itself (request/query construction, encoding, status validation, and a couple of full round-trips against a stubbed `URLProtocol`) — one of the pure-logic seams in `Tests/PCCUITests` that `PCCUI` does cover, the views themselves staying untested (`Package.swift`'s own comment on why).
 
-`Sources/PCCUI` is a shared SwiftUI library for the Projects screen
-(`ProjectsView` + `ProjectsViewModel` + `URLSessionProjectsAPIClient`), the
-Tasks screen (`TasksView` + `TasksViewModel` + `URLSessionTasksAPIClient`),
-the read-only Deadlines screen (`DeadlinesView` + `DeadlinesViewModel` +
-`URLSessionDeadlinesAPIClient`), the Personal Commitments screen
-(`PersonalCommitmentsView` + `PersonalCommitmentsViewModel` +
-`URLSessionPersonalCommitmentsAPIClient`), the combined Calendar screen
-(`CalendarView` + `CalendarViewModel` +
-`URLSessionPersonalCommitmentsAPIClient` +
-`URLSessionMirroredCalendarEventsAPIClient`, ticket #7), the Automation
-Log screen (`AutomationLogView` + `AutomationLogViewModel` +
-`URLSessionAutomationLogsAPIClient`, ticket #8), the Clients screen
-(`ClientsView` + `ClientsViewModel` + `URLSessionClientsAPIClient`,
-ticket #17), a Sprints section within the Project detail flow
-(`ProjectDetailView` + `SprintsViewModel` + `URLSessionSprintsAPIClient`,
-ticket #18), the Courses screen (`CourseView` + `CoursesViewModel` +
-`URLSessionCoursesAPIClient`, ticket #19), the Time Entries screen
-(`TimeEntriesView` + `TimeEntriesViewModel` +
-`URLSessionTimeEntriesAPIClient`, ticket #27), the live-timer control
-(`TimerView` + `TimerViewModel`, sharing the same
-`URLSessionTimeEntriesAPIClient`, ticket #28), the Work Hours rollup
-screen (`WorkHoursView` + `WorkHoursViewModel` +
-`URLSessionWorkHoursAPIClient`, ticket #25), the Accounts screen
-(`AccountsView` + `AccountsViewModel` + `URLSessionAccountsAPIClient`,
-ticket #36), the Transactions screen (`TransactionsView` +
-`TransactionsViewModel` + `URLSessionTransactionsAPIClient`, ticket #37),
-the Categories screen with a Subcategories section within the Category
-detail flow (`CategoriesView`/`CategoryDetailView` + `CategoriesViewModel`/
-`SubcategoriesViewModel` + `URLSessionCategoriesAPIClient`/
-`URLSessionSubcategoriesAPIClient`, ticket #39), and the Finances Reporting
-screen (`FinancesReportingView` + `FinancesReportingViewModel` +
-`URLSessionFinancesReportingAPIClient` + `URLSessionAccountsAPIClient`,
-ticket #40), and the Notifications screen (`NotificationsView` +
-`NotificationsViewModel` + `URLSessionNotificationsAPIClient`,
-ticket #46), built as a plain SPM target
-with no Vapor/Fluent dependency.
-It isn't wrapped in an Xcode app target yet — no Xcode is set up in this
-environment. To use it:
+### What `PCCUI` exposes today
+
+`Sources/PCCUI` is a shared SwiftUI library, built as a plain SPM target with
+no Vapor/Fluent dependency. It is not wrapped in an Xcode app target yet — no
+Xcode is set up in this environment — so the entry points below are what a real
+Mac/iOS target would instantiate. Every screen is one `public` `View` plus one
+`public` view model plus one or more `URLSessionXAPIClient`s; nothing else in
+the package is meant to be constructed directly by an app target.
+
+| Screen | View | View model | API clients it needs |
+| --- | --- | --- | --- |
+| Overview | `OverviewView(viewModel:timerViewModel:onTapFinances:onTapProjects:onTapTasks:)` | `OverviewViewModel` + `TimerViewModel` | Tasks, Projects, Accounts, Transactions, Finances Reporting, Work Hours, Time Entries |
+| Work | `WorkView(viewModel:timerViewModel:)` | `WorkViewModel` + `TimerViewModel` | Clients, Projects, Sprints, Tasks, Time Entries, Courses |
+| School | `SchoolView(viewModel:)` | `SchoolViewModel` | Courses, Projects, Tasks, Time Entries, Personal Commitments |
+| Deadlines (read-only) | `DeadlinesView(viewModel:)` | `DeadlinesViewModel` | Deadlines |
+| Calendar | `CalendarView(viewModel:)` | `CalendarViewModel` | Personal Commitments, Mirrored Calendar Events, Courses |
+| Personal Commitments | `PersonalCommitmentsView(viewModel:)` | `PersonalCommitmentsViewModel` | Personal Commitments, Courses |
+| Accounts | `AccountsView(viewModel:)` | `AccountsViewModel` | Accounts |
+| Transactions | `TransactionsView(viewModel:)` | `TransactionsViewModel` | Transactions, Accounts, Categories, Subcategories |
+| Categories | `CategoriesView(viewModel:)` | `CategoriesViewModel` (+ `SubcategoriesViewModel` via `makeSubcategoriesViewModel(for:)`) | Categories, Subcategories |
+| Finances Reporting | `FinancesReportingView(viewModel:)` | `FinancesReportingViewModel` | Finances Reporting, Accounts |
+| Notifications | `NotificationsView(viewModel:)` | `NotificationsViewModel` | Notifications |
+| Automation Log (read-only) | `AutomationLogView(viewModel:)` | `AutomationLogViewModel` | Automation Logs |
+
+`TimerViewModel` is the one view model with no screen of its own: the live
+timer control is rendered inside `WorkView` and `OverviewView`, and both take
+it as a second parameter so one timer's state is shared rather than duplicated
+per screen.
+
+There is no longer a separate Clients, Projects, Tasks, Time Entries or Work
+Hours screen — issue #89 merged all five into `WorkView` — and no separate
+Courses screen — issue #90 replaced it with `SchoolView`. `WorkView` is a
+single Client → Project → Sprint → Task tree with an hours rollup and a Time
+Entries list beside it; `SchoolView` is the Course-side counterpart, with a
+per-Course drill-down covering the Tasks and Meetings the old Course detail
+screen showed. Overview totals both domains' hours (issue #91), the one place
+the two are summed, since `WorkViewModel` filters Course-owned work out of its
+tree and `SchoolViewModel` ignores everything else.
+
+To use it:
 
 1. Create the Mac and/or iOS App targets in Xcode (`File > New > Project`).
 2. Add this repository as a local Swift package dependency and link `PCCUI`.
-3. From each app's entry point, construct a `URLSessionProjectsAPIClient`,
-   `URLSessionTasksAPIClient`, `URLSessionDeadlinesAPIClient`,
-   `URLSessionPersonalCommitmentsAPIClient`,
-   `URLSessionMirroredCalendarEventsAPIClient`,
-   `URLSessionAutomationLogsAPIClient`, `URLSessionClientsAPIClient`,
-   `URLSessionSprintsAPIClient`, `URLSessionCoursesAPIClient`,
-   `URLSessionTimeEntriesAPIClient`, `URLSessionWorkHoursAPIClient`,
-   `URLSessionAccountsAPIClient`, `URLSessionTransactionsAPIClient`,
-   `URLSessionCategoriesAPIClient`, `URLSessionSubcategoriesAPIClient`,
-   `URLSessionFinancesReportingAPIClient`, and
-   `URLSessionNotificationsAPIClient`
-   with the backend's base URL and the
-   device's bearer token. Wrap each in its
-   matching view model to show `ProjectsView(viewModel:)`,
-   `TasksView(viewModel:)` (pass `scopedProjectID` to scope the screen to
-   one Project, or omit it to list every Task), `DeadlinesView(viewModel:)`,
-   `PersonalCommitmentsView(viewModel:)`, `CalendarView(viewModel:)`,
-   `AutomationLogView(viewModel:)`, `ClientsView(viewModel:)`,
-   `CourseView(viewModel:)`, `TimeEntriesView(viewModel:)`,
-   `TimerView(viewModel:)` (the last two share one
-   `URLSessionTimeEntriesAPIClient` between a `TimeEntriesViewModel` and a
-   `TimerViewModel`), `WorkHoursView(viewModel:)`,
-   `AccountsView(viewModel:)`, `TransactionsView(viewModel:)`,
-   `CategoriesView(viewModel:)`, `FinancesReportingView(viewModel:)`
-   (constructed from both `URLSessionFinancesReportingAPIClient` and
-   `URLSessionAccountsAPIClient`, the latter populating its Account picker),
-   and `NotificationsView(viewModel:)`.
-   A Task
-   or Project's Deadline is set/cleared from its own create/edit form in
-   `TasksView`/`ProjectsView` — the Deadlines screen is a read-only sorted
-   view of both. Each Commitment's sync status (pushed to CalDAV, or
-   failed — see "CalDAV setup" above) shows as a badge on its row in both
-   `PersonalCommitmentsView` and `CalendarView`. `ProjectsView` shows each
-   row's Client name (via `ProjectsViewModel.clientName(for:)`) when the
-   Project has one — assigning/moving/removing a Project's Client itself is
-   API-only for now (`PUT /v1/projects/:projectID/client`); ticket #17's
-   Mac/iOS scope is the indicator plus a standalone `ClientsView` for
-   Client CRUD, not a Client picker inside `ProjectFormSheet`.
-   `ProjectsViewModel` now also takes a `sprintsClient: SprintsAPIClient` in
-   its `init`, used by its `makeSprintsViewModel(for:)` factory. Tapping a
-   Project row navigates into `ProjectDetailView` (ticket #18) instead of
-   opening the edit sheet directly — that sheet moved to
-   `ProjectDetailView`'s own toolbar "Edit" button, with the same
-   `ProjectFormSheet` wiring as before. `ProjectDetailView` shows the
-   Project's name/due date read-only above a "Sprints" section: each
-   Sprint's name and date range, with add/edit/delete via `SprintFormSheet`
-   (name field plus start/end `DatePicker`s). A Sprint's own Project isn't
-   editable from that sheet — it's set at creation and never reassigned.
-   Assigning/moving/removing a *Task's* Sprint is API-only for now (`PUT
-   /v1/tasks/:taskID/sprint`), the same "list plus API-only assignment"
-   scope ticket #17 drew around Project-Client assignment. `TasksViewModel`
-   now also takes a `coursesClient: CoursesAPIClient` in its `init`
-   (alongside `projectsClient`) and an optional `scopedCourseID`, mirroring
-   `scopedProjectID` — the Course detail flow's counterpart (ticket #20).
-   `TaskFormSheet`'s single Project picker is now a Project picker *and* a
-   Course picker: picking one clears the other (ADR-0003), matching
-   `TaskController.assignProject`/`assignCourse`'s server-side exclusivity.
-   `CoursesViewModel` now also takes `tasksClient: TasksAPIClient` and
-   `projectsClient: ProjectsAPIClient` in its `init`, used by its
-   `makeTasksViewModel(for:)` factory (ticket #20, mirrors
-   `ProjectsViewModel.makeSprintsViewModel`). Tapping a Course row now
-   navigates into `CourseDetailView` instead of opening the edit sheet
-   directly — the same evolution `ProjectsView` went through in ticket #18 —
-   with editing moved to that screen's own toolbar "Edit" button.
-   `CourseDetailView` shows the Course's name/Term/due date read-only above a
-   "Tasks" section: each Task's completion toggle, title, and due date, with
-   add/edit/complete/delete via the same `TaskFormSheet`/`TasksViewModel`
-   the top-level Tasks screen uses (just scoped to that Course), rather than
-   a separate, duplicated implementation. Below it, a "Meetings" section
-   (ticket #56) lists that Course's linked Personal Commitments — title and
-   start/end time/recurrence, with the same tap-to-edit and swipe-to-delete
-   affordances — via the same `PersonalCommitmentFormSheet`/
-   `PersonalCommitmentsViewModel` the top-level Personal Commitments/Calendar
-   screens use, scoped to that Course through `CoursesViewModel`'s new
-   `makeCommitmentsViewModel(for:)` factory (mirrors `makeTasksViewModel(for:)`;
-   `CoursesViewModel`'s `init` now also takes a
-   `commitmentsClient: PersonalCommitmentsAPIClient`). `DeadlinesView`'s row glyph now has
-   a third case (`"graduationcap"`) for a Course's own Deadline, alongside
-   the existing Task/Project glyphs. `TimeEntriesView` (ticket #27) lists
-   Time Entries with add/edit/delete via `TimeEntryFormSheet`, a container
-   picker with the same "pick one, clears the other three" shape as
-   `TaskFormSheet`'s Project/Course pair; a row with no `endDate` yet (a
-   running timer — ticket #28) shows a "Running" label, and editing one
-   defaults its end-time field to "now" rather than crashing on a nil value.
-   `TimerView` (ticket #28) is a separate, minimal control — the currently
-   running timer (what it's attached to, and since when) with Stop/Cancel
-   buttons, or a container picker and Start button when none is running —
-   backed by its own `TimerViewModel`, constructed from the same
-   `URLSessionTimeEntriesAPIClient` plus the four picker-data clients
-   `TimeEntriesViewModel` already takes.
-4. `CalendarView` merges Personal Commitments and mirrored external Calendar
-   events (populated by the backend's recurring sync job — see "Calendar
-   sync" above) into one chronological list. A mirrored event shows a lock
-   glyph and can't be tapped into — it's read-only through the Command
-   Center (spec #1, user story 22); a Commitment keeps the same tap-to-edit
-   and sync-status badge `PersonalCommitmentsView` has, and `CalendarView`
-   can create/edit/delete Commitments the same way that screen does.
-   `PersonalCommitmentsView` still exists as the Commitment-only screen —
-   `CalendarView` is the "everything on my calendar" view on top of it, not
-   a replacement. `PersonalCommitmentFormSheet` (shared by both screens via
-   `commitmentEditingSheets`) now also has a Course picker offering "None"
-   plus every Course, optional and standalone — unlike `TaskFormSheet`'s
-   Project/Course pair, nothing else on the form is mutually exclusive with
-   it (ticket #56). `PersonalCommitmentsViewModel`'s `init` now also takes a
-   `coursesClient: CoursesAPIClient` to populate that picker, plus an
-   optional `scopedCourseID` mirroring `TasksViewModel`'s; `CalendarViewModel`
-   likewise now takes a `coursesClient` to populate the same picker on the
-   form it shares.
-5. `AutomationLogView` (ticket #8) is read-only, like `DeadlinesView`: recent
-   `AutomationLog` entries, most recent first, with the most recent sync
-   failure (if any) shown as a banner at the top of the screen rather than
-   only visible if it's still recent enough to also appear further down the
-   list — see "Automation Log" above.
-6. `WorkHoursView` (ticket #25) is a plain `List` of `{name, total}` rows —
-   no chart, matching every other screen's minimal convention — above a
-   `Picker` for the five `groupBy` values and two `DatePicker`s for the
-   range, all sharing one `WorkHoursViewModel`. Every control change
-   reloads immediately (no separate "Apply" step, unlike a form with
-   unsaved state to submit); opening the screen defaults to `groupBy = .day`
-   and the current week, Monday through now, and loads right away via
-   `.task`. A row's duration is formatted as plain "1h 30m"/"45m" text —
-   see "Work Hours" above for the backend rollup this screen renders.
-7. `CategoriesView` (ticket #39) lists Categories with add/edit/delete;
-   tapping a row navigates into `CategoryDetailView`, which shows the
-   Category's name read-only above a "Subcategories" section with its own
-   add/edit/delete — the same shape `ProjectDetailView`'s own Sprints section
-   already has, down to `CategoriesViewModel.makeSubcategoriesViewModel(for:)`
-   mirroring `ProjectsViewModel.makeSprintsViewModel(for:)`.
-   `TransactionFormSheet` (ticket #37's screen) now also has a Category
-   picker and, once a Category is picked, a Subcategory picker filtered to
-   that Category's own Subcategories — picking a different Category (or
-   clearing it) clears an incompatible Subcategory selection, mirroring
-   `TransactionController.verifyCategoryAndSubcategory`'s server-side rule.
-   `TransactionsViewModel` now also takes a `categoriesClient:
-   CategoriesAPIClient` and a `subcategoriesClient: SubcategoriesAPIClient`
-   in its `init`, loading every Category's Subcategories up front (Categories
-   are a small, owner-created list) rather than fetching them on demand per
-   keystroke in the form.
-8. `FinancesReportingView` (ticket #40) is a plain `List` of `Section`s — Net
-   Worth (current figure as text, plus a `LineMark` trend chart), Account
-   Balance (an Account `Picker` plus a `LineMark` history chart), expenses
-   per day (a `BarMark` chart), and Projected Balance (a week/month `Picker`
-   plus `averageDailyNet`/`projectedBalance` as text, not a chart, per the
-   ticket's own settled scope) — using SwiftUI's native `Charts` framework,
-   its first use anywhere in `PCCUI`, rather than a third-party charting
-   dependency. One shared `start`/`end` `DatePicker` pair drives the Net
-   Worth trend, Account Balance history, and expense-per-day sections
-   together; the Account picker and period picker each reload only their own
-   two Account-scoped sections (`FinancesReportingViewModel.loadSelectedAccountFigures`)
-   rather than the whole screen. Every control change reloads immediately,
-   the same no-separate-Apply-step convention `WorkHoursView` already has;
-   opening the screen defaults to the trailing 30 days through now, read
-   more informatively as a trend than `WorkHoursViewModel`'s own
-   current-week default.
-9. `NotificationsView` (ticket #46) is a plain `List` of open Notifications,
-   newest first, dismissed via swipe-to-delete (`NotificationsViewModel.dismiss`)
-   — the same per-row destructive-action pattern `PersonalCommitmentsView`
-   already uses, rather than a redundant second tap target for the same
-   action. No create/edit UI, since nothing here is owner-authored; see
-   "Notifications" above for the backend read/dismiss surface this screen
-   renders.
+3. Construct the `URLSessionXAPIClient`s the table above names — each takes
+   `(baseURL:bearerToken:session:)`, the backend's base URL and the device's
+   bearer token — wrap them in their matching view models, and show the views.
+   Clients are shareable across view models: one
+   `URLSessionTimeEntriesAPIClient` can back `WorkViewModel`, `TimerViewModel`
+   and `OverviewViewModel` at once.
+
+Screen behavior worth knowing before wiring one up:
+
+- A Task's or Project's Deadline is set/cleared from its own create/edit form
+  inside `WorkView` (or `SchoolView`, for a Course's); `DeadlinesView` is a
+  read-only sorted view of all three, its row glyph distinguishing Task,
+  Project and Course Deadlines.
+- `TaskFormSheet` has a Project picker *and* a Course picker where picking one
+  clears the other (ADR-0003), matching
+  `TaskController.assignProject`/`assignCourse`'s server-side exclusivity;
+  `TimeEntryFormSheet`'s container picker has the same "pick one, clears the
+  others" shape across its four containers.
+- Assigning a Task's Sprint, and a Project's Client, is API-only (`PUT
+  /v1/tasks/:taskID/sprint`, `PUT /v1/projects/:projectID/client`) — the UI
+  shows the resulting names but has no picker for either.
+- Each Commitment's sync status (pushed to CalDAV, or failed — see "CalDAV
+  setup" above) shows as a badge on its row in both
+  `PersonalCommitmentsView` and `CalendarView`.
+- `CalendarView` merges Personal Commitments and mirrored external Calendar
+  events into one chronological list. A mirrored event shows a lock glyph and
+  can't be tapped into — it's read-only through the Command Center (spec #1,
+  user story 22). `PersonalCommitmentsView` still exists as the
+  Commitment-only screen; `CalendarView` is the "everything on my calendar"
+  view on top of it, not a replacement. Both share
+  `PersonalCommitmentFormSheet` (via `commitmentEditingSheets`), whose Course
+  picker is optional and standalone — unlike `TaskFormSheet`'s Project/Course
+  pair, nothing else on the form is mutually exclusive with it (ticket #56).
+- `AutomationLogView` and `NotificationsView` are read-only lists of
+  backend-authored rows; the former shows the most recent sync failure as a
+  banner at the top rather than only where it falls in the list, the latter
+  dismisses a Notification via swipe-to-delete.
+- Every dashboard/report screen reloads immediately on any control change (no
+  separate "Apply" step, unlike a form with unsaved state to submit).
+  `WorkView`/`SchoolView` default to the current week, `FinancesReportingView`
+  to the trailing 30 days — read more informatively as a trend.
+- `FinancesReportingView` uses SwiftUI's native `Charts` framework, the only
+  use of it anywhere in `PCCUI`, rather than a third-party charting dependency.
+  Its sections — Net Worth (figure plus trend chart), Account Balance (an
+  Account picker plus a history chart), expenses per day, and Projected
+  Balance (a week/month picker, as text rather than a chart) — share one
+  `start`/`end` `DatePicker` pair, while the Account and period pickers reload
+  only their own two sections (`loadSelectedAccountFigures`).
+- `CategoriesView` lists Categories with add/edit/delete; tapping one opens a
+  detail screen with its own Subcategories section, built from
+  `CategoriesViewModel.makeSubcategoriesViewModel(for:)`. `TransactionFormSheet`
+  has a Category picker and a Subcategory picker filtered to that Category —
+  changing or clearing the Category clears an incompatible Subcategory,
+  mirroring `TransactionController.verifyCategoryAndSubcategory`'s server-side
+  rule. `TransactionsViewModel` loads every Category's Subcategories up front
+  (a small, owner-created list) rather than fetching per keystroke.
+
+`PCCUI` has no automated tests beyond the pure-logic seams in
+`Tests/PCCUITests` (`PCCHTTPTransportTests`, `SchoolBoardTests`,
+`DeadlinesViewModelTests`, `WorkTreeTests` and friends) — see `Package.swift`'s
+own comment on why the views themselves stay untested. It has been verified
+with `swift build --target PCCUI` (type-checks and links) and exercised
+through `PCCDesktop` below, but not run in a simulator or on-device.
+
+### How the screens got here
+
+This section is history, not a description of the package as it stands — the
+types it names below were real at the time and several no longer exist. The
+current entry points are the table above.
+
+Screens landed one domain at a time: Projects and Tasks first, then the
+read-only Deadlines screen, Personal Commitments and the merged Calendar
+(ticket #7), the Automation Log (ticket #8), Clients (ticket #17), a Sprints
+section inside a Project detail flow (ticket #18), Courses (ticket #19) with a
+Task↔Course picker and a Course-scoped Tasks section (ticket #20), a Meetings
+section listing a Course's linked Commitments (ticket #56), Time Entries
+(ticket #27) and the live-timer control (ticket #28), the Work Hours rollup
+(ticket #25), Accounts (ticket #36), Transactions (ticket #37), Categories with
+a Subcategories section (ticket #39), Finances Reporting (ticket #40) and
+Notifications (ticket #46).
+
+Two structural passes then replaced most of that surface:
+
+- **Issue #89** merged the Clients, Projects, Tasks, Time Entries and Work
+  Hours screens into one `WorkView`. `ClientsView`, `ProjectsView`,
+  `ProjectDetailView`, `TasksView`, `TimeEntriesView`, `TimerView` and
+  `WorkHoursView`, along with `ClientsViewModel`, `ProjectsViewModel`,
+  `TimeEntriesViewModel` and `WorkHoursViewModel`, were deleted; `WorkViewModel`
+  owns the Client/Project/Sprint/Task/Time Entry CRUD they used to own between
+  them, and `TimerViewModel` survived as an embedded control.
+- **Issue #90** replaced the Courses screen with `SchoolView`. `CourseView`,
+  `CourseDetailView` and `CoursesViewModel` were deleted, along with the
+  `makeTasksViewModel(for:)`/`makeCommitmentsViewModel(for:)` factories that
+  scoped a Tasks/Commitments view model to one Course: `SchoolViewModel` loads
+  the flat lists once and derives each Course's slice locally through
+  `SchoolBoard` instead of re-fetching per Course.
+
+**Issue #98** finished the cleanup those two left behind. `TasksViewModel` and
+its `TasksViewModelTests` were deleted rather than kept as unconsumed `public`
+API: `WorkViewModel` had taken over every one of its CRUD methods, and its
+`isOverdue(_:referenceDate:)` rule had no live caller — `DeadlinesViewModel`
+owns the equivalent rule for the screen that actually renders overdue state.
+`PersonalCommitmentsViewModel.scopedCourseID` went for the same reason: nothing
+had passed it since #90, since `SchoolViewModel` filters the Commitments it
+already loaded. This section, and the current-state one above it, were split
+apart in the same pass — they had grown into each other, leaving the "how to
+consume this package" text advertising twelve types that no longer existed.
 
 The backend's `PCCTask` model and the client's `PCCTask` struct are named
 `PCCTask` in Swift, not `Task` — that would shadow `_Concurrency.Task`
@@ -506,15 +454,6 @@ an unqualified `Category` collides with the Objective-C runtime's own
 Foundation on Darwin). In every case the domain term ("Task", "Category")
 is what appears in the API paths/JSON and the UI text — only the Swift
 symbol differs.
-
-It has been verified with `swift build --target PCCUI` (type-checks and links,
-including the ticket #18 Sprint UI, the ticket #19 Course screen, the
-ticket #20 Task↔Course picker plus `CourseDetailView`'s Tasks section, the
-ticket #27 Time Entries screen, the ticket #28 `TimerView` live-timer
-control, the ticket #25 `WorkHoursView` rollup screen, the ticket #39
-Categories/Subcategories screens plus `TransactionFormSheet`'s new pickers,
-and the ticket #40 `FinancesReportingView` screen, `PCCUI`'s first use of
-SwiftUI's `Charts` framework) but not run in a simulator or on-device.
 
 ### Local dashboard preview (no Xcode)
 

@@ -6,6 +6,12 @@ import Foundation
 /// `PersonalCommitmentsView` so the view stays a thin rendering of this
 /// state (mirrors `WorkViewModel`'s split).
 ///
+/// Lists every Commitment; there is no Course-scoped variant. A per-Course
+/// fetch existed for the Courses screen's "Meetings" section (ticket #56),
+/// but issue #90 folded that screen into `SchoolViewModel`, which filters the
+/// Commitments it already loaded rather than re-fetching one Course's at a
+/// time, and issue #98 removed the unused scoping.
+///
 /// `ObservableObject` rather than the newer `@Observable` macro, since that
 /// macro needs iOS 17/macOS 14 and this package targets iOS 16/macOS 13.
 @MainActor
@@ -18,26 +24,16 @@ public final class PersonalCommitmentsViewModel: ObservableObject {
     private let client: PersonalCommitmentsAPIClient
     private let coursesClient: CoursesAPIClient
 
-    /// When set, this screen is scoped to one Course (`GET
-    /// /v1/personal-commitments?courseID=`) rather than listing every
-    /// Commitment — the same scoping shape `TasksViewModel.scopedCourseID`
-    /// has. Introduced for the Courses screen's "Meetings" section (ticket
-    /// #56) and unpassed since issue #90 folded that screen into
-    /// `SchoolViewModel`, which filters the Commitments it already loaded
-    /// rather than re-fetching one Course's at a time.
-    private let scopedCourseID: UUID?
-
-    public init(client: PersonalCommitmentsAPIClient, coursesClient: CoursesAPIClient, scopedCourseID: UUID? = nil) {
+    public init(client: PersonalCommitmentsAPIClient, coursesClient: CoursesAPIClient) {
         self.client = client
         self.coursesClient = coursesClient
-        self.scopedCourseID = scopedCourseID
     }
 
     public func load() async {
         isLoading = true
         defer { isLoading = false }
         await run(verb: "load") {
-            async let loadedCommitments = client.listPersonalCommitments(courseID: scopedCourseID)
+            async let loadedCommitments = client.listPersonalCommitments(courseID: nil)
             async let loadedCourses = coursesClient.listCourses()
             commitments = try await loadedCommitments
             courses = try await loadedCourses
@@ -46,10 +42,7 @@ public final class PersonalCommitmentsViewModel: ObservableObject {
 
     public func createCommitment(_ values: PersonalCommitmentFormValues) async {
         await run(verb: "create") {
-            let created = try await client.createPersonalCommitment(values)
-            if matchesScope(created) {
-                commitments.append(created)
-            }
+            commitments.append(try await client.createPersonalCommitment(values))
         }
     }
 
@@ -67,23 +60,11 @@ public final class PersonalCommitmentsViewModel: ObservableObject {
         }
     }
 
-    /// Whether `commitment` belongs where this screen is scoped — always
-    /// `true` for the unscoped, top-level Personal Commitments screen.
-    private func matchesScope(_ commitment: PersonalCommitment) -> Bool {
-        guard let scopedCourseID else { return true }
-        return commitment.courseID == scopedCourseID
-    }
-
-    /// Swaps the freshly-updated Commitment into `commitments`, dropping it
-    /// when scoped to a Course it no longer belongs to (mirrors
+    /// Swaps the freshly-updated Commitment into `commitments` (mirrors
     /// `WorkViewModel.replace`).
     private func replace(_ updated: PersonalCommitment) {
         guard let index = commitments.firstIndex(where: { $0.id == updated.id }) else { return }
-        if matchesScope(updated) {
-            commitments[index] = updated
-        } else {
-            commitments.remove(at: index)
-        }
+        commitments[index] = updated
     }
 
     /// Runs a mutation against `commitments`, keeping every method's

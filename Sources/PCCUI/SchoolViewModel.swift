@@ -9,10 +9,9 @@ import Foundation
 /// `SchoolBoard` rather than fetching per Course: this screen totals, orders
 /// and counts the same data several ways at once, and one load plus pure
 /// arithmetic can't disagree with itself the way several scoped fetches
-/// could. It's also why this replaces the deleted `CoursesViewModel`'s
-/// `makeTasksViewModel(for:)`/`makeCommitmentsViewModel(for:)` — the
-/// drill-down reads the lists already here instead of standing up two more
-/// view models per Course.
+/// could. It's also why the deleted `CoursesViewModel`'s per-Course view
+/// model factories have no counterpart here — the drill-down reads the lists
+/// already loaded instead of standing up two more view models per Course.
 ///
 /// Client-side work is deliberately absent, the mirror of `WorkViewModel`
 /// skipping Course-owned Projects: each dashboard owns one domain's hours,

@@ -7,7 +7,12 @@ import Foundation
 /// yet, but the seam is here for one.
 public protocol PersonalCommitmentsAPIClient: Sendable {
     /// Lists every Commitment, or Commitments scoped to one Course when
-    /// `courseID` is given (ticket #56).
+    /// `courseID` is given (ticket #56). Every caller passes `nil` today —
+    /// the screens that need a Course's Commitments (`SchoolViewModel`)
+    /// filter the list they already loaded — but the parameter stays because
+    /// it's this client's whole coverage of `GET
+    /// /v1/personal-commitments?courseID=`, a backend filter that still
+    /// exists, rather than an unused abstraction of our own (issue #98).
     func listPersonalCommitments(courseID: UUID?) async throws -> [PersonalCommitment]
     func createPersonalCommitment(_ values: PersonalCommitmentFormValues) async throws -> PersonalCommitment
     func updatePersonalCommitment(id: UUID, values: PersonalCommitmentFormValues) async throws -> PersonalCommitment
