@@ -2,9 +2,15 @@ import SwiftUI
 
 /// The merged Work screen (issue #89): everything the five separate
 /// Clients/Projects/Tasks/Time Entries/Work Hours screens used to do, on one
-/// surface modelled on the Timing app's Stats screen — a container tree down
-/// the left, a range stepper across the top, and summary statistics plus the
-/// Time Entry list on the right.
+/// surface — laid out as a dashboard rather than the earlier tree-and-stats
+/// split, with the container tree kept as one card among the panels instead
+/// of as a permanent left column.
+///
+/// The dashboard reads top-down as "how much, over what, on what": four
+/// figures across the top, the week's shape and the live timer under them,
+/// then the tree and the two breakdowns, then the Time Entries themselves.
+/// Every panel is scoped by the same tree selection and the same range
+/// stepper, so the whole screen answers one question at a time.
 ///
 /// Course-owned work is deliberately absent: a Project or Task belonging to
 /// a Course belongs to the School dashboard (issue #90), which gets its own
@@ -73,21 +79,31 @@ private struct WorkContent: View {
     /// stable across rebuilds, so expanding a Client survives a reload or a
     /// range step.
     @State private var expanded: Set<String> = []
+    /// The tracker's Client → Project → Sprint → Task cascade. Each level
+    /// narrows the one below it; see `TimeTrackerCard` for why the Sprint
+    /// level filters rather than being startable itself.
+    @State private var picked = TrackerSelection()
 
-    private static let treeWidth: CGFloat = 320
+    /// The right-hand column's width — the tracker, the ring and the donut
+    /// all share it, so the dashboard reads as two columns rather than four
+    /// panels of four widths.
+    private static let sideColumnWidth: CGFloat = 320
 
     var body: some View {
         NavigationStack {
-            HStack(spacing: 0) {
-                treeColumn
-                Rectangle()
-                    .fill(theme.panelLine(colorScheme))
-                    .frame(width: 1)
-                statsColumn
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    header
+                    statStrip
+                    activityRow
+                    breakdownRow
+                    entryList
+                }
+                .padding(PCCChassis.outerMargin)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .background(GlassScreenBackground())
             .navigationTitle("Work")
-            .toolbar { toolbarContent }
             .task {
                 await viewModel.load()
                 await timerViewModel.load()
@@ -101,129 +117,269 @@ private struct WorkContent: View {
         }
     }
 
-    // MARK: - Toolbar
+    // MARK: - Header
 
-    @ToolbarContentBuilder
-    private var toolbarContent: some ToolbarContent {
-        ToolbarItem {
-            runningTimerChip
-        }
-        ToolbarItem {
-            Button {
-                startOrStopTimer()
-            } label: {
-                Label(
-                    timerViewModel.isRunning ? "Stop Timer" : "Start Timer",
-                    systemImage: timerViewModel.isRunning ? "stop.circle" : "play.circle")
-            }
-            .disabled(!timerViewModel.isRunning && timerContainer == nil)
-        }
-        // Discarding a running timer outright, rather than stopping it into
-        // a Time Entry — the one timer control the deleted `TimeEntriesView`
-        // had that Start/Stop doesn't cover. Shown only while one is
-        // running, since there's nothing to cancel otherwise.
-        if timerViewModel.isRunning {
-            ToolbarItem {
-                Button(role: .destructive) {
-                    Task { await timerViewModel.cancel() }
+    /// Title, one line of orientation, the range stepper, and the two
+    /// things this screen is opened to create. The actions live here rather
+    /// than in the window toolbar so the screen's own controls read as part
+    /// of the dashboard, the way its range stepper always has.
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Work")
+                        .font(.system(size: 30, weight: .bold))
+                    Text("Track clients, projects, and where the hours went.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 16)
+                Button {
+                    sheet = .newTask
                 } label: {
-                    Label("Cancel Timer", systemImage: "xmark.circle")
+                    Label("New Task", systemImage: "checkmark.circle")
                 }
-            }
-        }
-        ToolbarItem {
-            Button { sheet = .newTimeEntry } label: {
-                Label("New Time Entry", systemImage: "stopwatch")
-            }
-        }
-        ToolbarItem {
-            Button { sheet = .newTask } label: {
-                Label("New Task", systemImage: "checkmark.circle")
-            }
-        }
-        ToolbarItem {
-            Menu {
-                Button("New Project") { sheet = .newProject }
-                Button("New Client") { sheet = .newClient }
-                if case .project(let id) = viewModel.selectedNode?.kind {
-                    Button("New Sprint") { sheet = .newSprint(projectID: id) }
+                .buttonStyle(.pccControlChip)
+                Menu {
+                    Button("New Project") { sheet = .newProject }
+                    Button("New Client") { sheet = .newClient }
+                    if case .project(let id) = viewModel.selectedNode?.kind {
+                        Button("New Sprint") { sheet = .newSprint(projectID: id) }
+                    }
+                    Divider()
+                    Button("New Time Entry") { sheet = .newTimeEntry }
+                } label: {
+                    Label("Add", systemImage: "plus")
                 }
-            } label: {
-                Label("New Project", systemImage: "folder.badge.plus")
+                .pccBorderlessMenu()
+                .fixedSize()
             }
+            rangeStepper
         }
     }
 
-    /// The live timer, surfaced as a ticking chip rather than folded into
-    /// any row's total: a running entry contributes nothing to Work Hours
-    /// until it's stopped (`CONTEXT.md`), so showing it in the tree would
-    /// contradict every number beside it.
+    /// Today / Week / Month with previous-next arrows. Stepping changes only
+    /// which numbers the panels show — the tree keeps every row either way.
+    private var rangeStepper: some View {
+        HStack(spacing: 10) {
+            Picker("", selection: $viewModel.range.unit) {
+                ForEach(WorkRangeUnit.allCases) { unit in
+                    Text(unit.title).tag(unit)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 240)
+            Button { viewModel.range.step(-1) } label: {
+                Image(systemName: "chevron.left")
+            }
+            .buttonStyle(.pccControlChip)
+            Text(viewModel.range.title())
+                .font(.system(size: 13, weight: .semibold))
+                .frame(minWidth: 130)
+            Button { viewModel.range.step(1) } label: {
+                Image(systemName: "chevron.right")
+            }
+            .buttonStyle(.pccControlChip)
+            Spacer(minLength: 0)
+            scopeChip
+        }
+    }
+
+    /// What every figure on the screen is currently scoped to, and the way
+    /// back out of it. Sits with the range stepper because the two together
+    /// are the whole filter: this much time, this part of the tree.
     @ViewBuilder
-    private var runningTimerChip: some View {
-        if let active = timerViewModel.activeTimer {
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                HStack(spacing: 8) {
-                    StatusDot(.active)
-                    Text(viewModel.containerLabel(for: active))
+    private var scopeChip: some View {
+        if viewModel.selectedNodeID != nil {
+            Button {
+                viewModel.selectedNodeID = nil
+            } label: {
+                HStack(spacing: 6) {
+                    Text(viewModel.scopeTitle)
+                        .lineLimit(1)
+                    Image(systemName: "xmark")
+                        .font(.caption2.weight(.bold))
+                }
+            }
+            .buttonStyle(.pccControlChip)
+        } else {
+            Text("All Work")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - Stat strip
+
+    /// The four figures the screen opens on. Hours logged is the hero —
+    /// filled in the accent rather than left as glass, since it's the one
+    /// number the screen exists to report; the other three are the context
+    /// that makes it mean something.
+    private var statStrip: some View {
+        let completion = viewModel.taskCompletion
+        return HStack(spacing: 14) {
+            heroTile
+            statTile(
+                "Average Per Day", value: PCCDuration.stamp(viewModel.averageSecondsPerDay),
+                caption: viewModel.range.unit.title)
+            statTile(
+                "Projects", value: "\(viewModel.scopedProjectCount)",
+                caption: "in scope")
+            statTile(
+                "Tasks Open", value: "\(viewModel.openTaskCount)",
+                caption: "\(completion.complete) of \(completion.total) done")
+        }
+    }
+
+    private var heroTile: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Hours Logged")
+                .pccPanelLabel()
+                .foregroundStyle(.white.opacity(0.85))
+            Text(PCCDuration.stamp(viewModel.totalSeconds))
+                .font(.pccReadout(30))
+                .foregroundStyle(.white)
+            Text(viewModel.range.title())
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.8))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: GlassBubbleStyle.gridCell.cornerRadius, style: .continuous)
+                .fill(theme.accent(colorScheme))
+        )
+    }
+
+    private func statTile(_ label: String, value: String, caption: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(label)
+                .pccPanelLabel()
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.pccReadout(30))
+            Text(caption)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassBubble(.gridCell)
+    }
+
+    // MARK: - Activity + tracker
+
+    private var activityRow: some View {
+        HStack(alignment: .top, spacing: 14) {
+            dayChartBubble
+            TimeTrackerCard(
+                viewModel: viewModel, timerViewModel: timerViewModel, picked: $picked,
+                onStopped: { await viewModel.load() }
+            )
+            .frame(width: Self.sideColumnWidth)
+        }
+    }
+
+    /// One bar per day in the range, heights relative to the range's own
+    /// busiest day — an absolute scale would flatten a quiet week into
+    /// nothing. The busiest day is the only one drawn at full accent, so the
+    /// chart says which day carried the range without a label per bar.
+    private var dayChartBubble: some View {
+        let totals = viewModel.dailyTotals
+        let peak = totals.map(\.seconds).max() ?? 0
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("By Day")
+                    .pccPanelLabel()
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if peak > 0 {
+                    Text("Busiest \(PCCDuration.compact(peak))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text(PCCDuration.elapsed(context.date.timeIntervalSince(active.startDate)))
-                        .font(.pccReadout(13))
-                        .foregroundStyle(theme.accent(colorScheme))
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .glassBubble(.gridCell)
             }
-        }
-    }
-
-    /// Which container the toolbar's Start Timer would attach to: whatever
-    /// the tree has selected, when that selection is something a Time Entry
-    /// can actually attach to (ADR-0004). A Sprint or the synthetic
-    /// "Unassigned" row isn't one, so the button stays disabled there rather
-    /// than silently timing against the parent.
-    private var timerContainer: TimeEntryContainer? {
-        switch viewModel.selectedNode?.kind {
-        case .task(let id): return .task(id)
-        case .project(let id): return .project(id)
-        case .client(let id): return .client(id)
-        case .sprint, .unassigned, .none: return nil
-        }
-    }
-
-    private func startOrStopTimer() {
-        Task {
-            if timerViewModel.isRunning {
-                await timerViewModel.stop()
-                // The stopped entry only becomes Work Hours once it has an
-                // end date, so the totals need re-reading, not just the tree
-                // rebuilt from what's already loaded.
-                await viewModel.load()
-            } else if let container = timerContainer {
-                await timerViewModel.start(container: container)
+            HStack(alignment: .bottom, spacing: 8) {
+                ForEach(totals, id: \.day) { entry in
+                    dayBar(entry, peak: peak)
+                }
             }
+            .frame(height: 150, alignment: .bottom)
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassBubble()
+    }
+
+    private func dayBar(_ entry: (day: Date, seconds: Double), peak: Double) -> some View {
+        let isPeak = peak > 0 && entry.seconds == peak
+        let height = peak > 0 ? 118 * entry.seconds / peak : 0
+        return VStack(spacing: 8) {
+            Capsule(style: .continuous)
+                .fill(barFill(isPeak: isPeak, hasHours: entry.seconds > 0))
+                .frame(height: max(6, height))
+            Text(Self.dayLabel(entry.day))
+                .font(.system(size: 10))
+                .foregroundStyle(isPeak ? theme.accent(colorScheme) : Color.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func barFill(isPeak: Bool, hasHours: Bool) -> Color {
+        guard hasHours else { return theme.panelLine(colorScheme) }
+        return theme.accent(colorScheme).opacity(isPeak ? 1 : 0.42)
+    }
+
+    // MARK: - Tree + breakdowns
+
+    private var breakdownRow: some View {
+        HStack(alignment: .top, spacing: 14) {
+            treeBubble
+            VStack(spacing: 14) {
+                completionBubble
+                breakdownBubble
+            }
+            .frame(width: Self.sideColumnWidth)
         }
     }
 
-    // MARK: - Tree
-
-    private var treeColumn: some View {
-        VStack(spacing: 0) {
-            if viewModel.tree.isEmpty && !viewModel.isLoading {
+    /// Client → Project → Sprint → Task, each row carrying its own
+    /// transitive total for the range, and selecting one scopes every other
+    /// panel to it. Hand-rolled rows rather than a `List`, so the tree can
+    /// sit in a card on the dashboard instead of owning a column.
+    private var treeBubble: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Clients and Projects")
+                    .pccPanelLabel()
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("New Project") { sheet = .newProject }
+                    .buttonStyle(.plain)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(theme.accent(colorScheme))
+            }
+            if viewModel.tree.isEmpty {
                 emptyTree
             } else {
-                List(selection: $viewModel.selectedNodeID) {
+                VStack(spacing: 2) {
                     ForEach(visibleRows, id: \.node.id) { row in
                         treeRow(row.node, depth: row.depth)
-                            .tag(row.node.id)
                     }
-                    .panelRows()
                 }
-                .scrollContentBackground(.hidden)
             }
         }
-        .frame(width: Self.treeWidth)
+        .padding(.horizontal, 22)
+        .padding(.vertical, 20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassBubble()
     }
 
     /// The tree flattened to the rows currently on screen, each with the
@@ -231,10 +387,7 @@ private struct WorkContent: View {
     ///
     /// Flattened here rather than rendered by a recursive `@ViewBuilder`:
     /// a view function that returns a `ForEach` of itself defines its own
-    /// opaque return type in terms of itself, which doesn't compile. Not
-    /// `OutlineGroup` either, so a row can carry its own total, its own
-    /// context menu and an indent that lines up with the disclosure
-    /// triangle.
+    /// opaque return type in terms of itself, which doesn't compile.
     private var visibleRows: [(node: WorkNode, depth: Int)] {
         func rows(_ nodes: [WorkNode], depth: Int) -> [(node: WorkNode, depth: Int)] {
             nodes.flatMap { node -> [(node: WorkNode, depth: Int)] in
@@ -248,7 +401,8 @@ private struct WorkContent: View {
     }
 
     private func treeRow(_ node: WorkNode, depth: Int) -> some View {
-        HStack(spacing: 6) {
+        let isSelected = viewModel.selectedNodeID == node.id
+        return HStack(spacing: 6) {
             Button {
                 if expanded.contains(node.id) { expanded.remove(node.id) } else { expanded.insert(node.id) }
             } label: {
@@ -265,7 +419,7 @@ private struct WorkContent: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 14)
             Text(node.name)
-                .font(.system(size: 13))
+                .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
                 .lineLimit(1)
             Spacer(minLength: 8)
             // A row with nothing in range still shows a total, muted rather
@@ -276,8 +430,19 @@ private struct WorkContent: View {
                 .foregroundStyle(node.totalSeconds > 0 ? theme.accent(colorScheme) : Color.secondary)
         }
         .padding(.leading, CGFloat(depth) * 14)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(rowHighlight(isSelected))
         .contentShape(Rectangle())
+        .onTapGesture {
+            viewModel.selectedNodeID = isSelected ? nil : node.id
+        }
         .contextMenu { contextMenu(for: node) }
+    }
+
+    private func rowHighlight(_ isSelected: Bool) -> some View {
+        RoundedRectangle(cornerRadius: PCCChassis.controlCornerRadius, style: .continuous)
+            .fill(isSelected ? theme.accent(colorScheme).opacity(0.14) : .clear)
     }
 
     @ViewBuilder
@@ -320,12 +485,11 @@ private struct WorkContent: View {
         }
     }
 
-    /// The whole-screen empty state: one call to action, since with no
-    /// Projects there is nothing to select, total, or log time against
-    /// either.
+    /// The empty state: one call to action, since with no Projects there is
+    /// nothing to select, total, or log time against either.
     private var emptyTree: some View {
         VStack(spacing: 10) {
-            Text("No Work Yet")
+            Text("No work yet")
                 .font(.headline)
             Text("Create a Project to start tracking work.")
                 .font(.subheadline)
@@ -334,126 +498,59 @@ private struct WorkContent: View {
             Button("New Project") { sheet = .newProject }
                 .buttonStyle(.borderedProminent)
         }
-        .padding(PCCChassis.outerMargin)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    // MARK: - Stats
-
-    private var statsColumn: some View {
-        VStack(spacing: 0) {
-            rangeStepper
-                .padding(.horizontal, PCCChassis.outerMargin)
-                .padding(.top, PCCChassis.outerMargin)
-                .padding(.bottom, 14)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    summaryBubble
-                    dayChartBubble
-                    breakdownBubble
-                    entryList
-                }
-                .padding(.horizontal, PCCChassis.outerMargin)
-                .padding(.bottom, PCCChassis.outerMargin)
-            }
-        }
+        .padding(.vertical, 28)
         .frame(maxWidth: .infinity)
     }
 
-    /// Today / Week / Month with previous-next arrows. Stepping changes only
-    /// which numbers the panels show — the tree keeps every row either way.
-    private var rangeStepper: some View {
-        HStack(spacing: 10) {
-            Picker("", selection: $viewModel.range.unit) {
-                ForEach(WorkRangeUnit.allCases) { unit in
-                    Text(unit.title).tag(unit)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 240)
-            Button { viewModel.range.step(-1) } label: {
-                Image(systemName: "chevron.left")
-            }
-            .buttonStyle(.pccControlChip)
-            Text(viewModel.range.title())
-                .font(.system(size: 13, weight: .semibold))
-                .frame(minWidth: 130)
-            Button { viewModel.range.step(1) } label: {
-                Image(systemName: "chevron.right")
-            }
-            .buttonStyle(.pccControlChip)
-            Spacer()
-        }
-    }
-
-    /// Total and average-per-day for the current scope. Renders zeroed
-    /// rather than hidden when there's nothing logged, so the layout doesn't
-    /// jump once data arrives.
-    private var summaryBubble: some View {
-        HStack(alignment: .top, spacing: 32) {
-            statFigure("Total", seconds: viewModel.totalSeconds)
-            statFigure("Average Per Day", seconds: viewModel.averageSecondsPerDay)
-            Spacer(minLength: 0)
-            VStack(alignment: .trailing, spacing: 4) {
-                Text(viewModel.scopeTitle)
-                    .font(.system(size: 15, weight: .semibold))
-                    .lineLimit(1)
-                if viewModel.selectedNodeID != nil {
-                    Button("Clear Selection") { viewModel.selectedNodeID = nil }
-                        .buttonStyle(.plain)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassBubble()
-    }
-
-    private func statFigure(_ label: String, seconds: Double) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label)
-                .pccPanelLabel()
-                .foregroundStyle(.secondary)
-            Text(PCCDuration.stamp(seconds))
-                .font(.pccReadout(24))
-                .foregroundStyle(theme.accent(colorScheme))
-        }
-    }
-
-    /// One bar per day in the range, heights relative to the range's own
-    /// busiest day — an absolute scale would flatten a quiet week into
-    /// nothing.
-    private var dayChartBubble: some View {
-        let totals = viewModel.dailyTotals
-        let peak = totals.map(\.seconds).max() ?? 0
+    /// Tasks done over Tasks in scope, as a ring. Counts Tasks rather than
+    /// hours on purpose: the hours are already three panels on this screen,
+    /// and "how far through the work am I" is the question none of them
+    /// answer.
+    private var completionBubble: some View {
+        let completion = viewModel.taskCompletion
+        let fraction = completion.total > 0 ? Double(completion.complete) / Double(completion.total) : 0
         return VStack(alignment: .leading, spacing: 12) {
-            Text("By Day")
+            Text("Task Progress")
                 .pccPanelLabel()
                 .foregroundStyle(.secondary)
-            HStack(alignment: .bottom, spacing: 6) {
-                ForEach(totals, id: \.day) { entry in
-                    VStack(spacing: 6) {
-                        RoundedRectangle(cornerRadius: 3, style: .continuous)
-                            .fill(entry.seconds > 0 ? theme.accent(colorScheme) : theme.panelLine(colorScheme))
-                            .frame(height: max(2, peak > 0 ? 90 * entry.seconds / peak : 2))
-                        Text(Self.dayLabel(entry.day))
-                            .font(.system(size: 9))
+            HStack(spacing: 18) {
+                completionRing(fraction)
+                    .frame(width: 96, height: 96)
+                VStack(alignment: .leading, spacing: 6) {
+                    if completion.total == 0 {
+                        Text("No Tasks in scope.")
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                    } else {
+                        Text("\(completion.complete) done")
+                            .font(.system(size: 15, weight: .semibold))
+                        Text("\(completion.total - completion.complete) still open")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                     }
-                    .frame(maxWidth: .infinity)
                 }
+                Spacer(minLength: 0)
             }
-            .frame(height: 112, alignment: .bottom)
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassBubble()
+    }
+
+    private func completionRing(_ fraction: Double) -> some View {
+        ZStack {
+            Circle()
+                .stroke(theme.panelLine(colorScheme), lineWidth: 12)
+            Circle()
+                .trim(from: 0, to: max(0, min(1, fraction)))
+                .stroke(
+                    theme.accent(colorScheme),
+                    style: StrokeStyle(lineWidth: 12, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            Text("\(Int((fraction * 100).rounded()))%")
+                .font(.pccReadout(17))
+        }
     }
 
     /// Time by child container of the selected node, as a donut — the
@@ -470,25 +567,14 @@ private struct WorkContent: View {
                 Text("Nothing logged in this range.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                    .frame(height: 120, alignment: .center)
+                    .frame(height: 96, alignment: .center)
             } else {
-                HStack(spacing: 24) {
+                HStack(spacing: 18) {
                     donut(slices: slices, total: total)
-                        .frame(width: 120, height: 120)
+                        .frame(width: 96, height: 96)
                     VStack(alignment: .leading, spacing: 6) {
-                        ForEach(Array(slices.prefix(6).enumerated()), id: \.offset) { index, slice in
-                            HStack(spacing: 8) {
-                                Circle()
-                                    .fill(Self.sliceColor(index, theme: theme, colorScheme: colorScheme))
-                                    .frame(width: 8, height: 8)
-                                Text(slice.name)
-                                    .font(.system(size: 12))
-                                    .lineLimit(1)
-                                Spacer(minLength: 8)
-                                Text(PCCDuration.compact(slice.seconds))
-                                    .font(.system(size: 12, design: .monospaced))
-                                    .foregroundStyle(.secondary)
-                            }
+                        ForEach(Array(slices.prefix(5).enumerated()), id: \.offset) { index, slice in
+                            sliceRow(index: index, slice: slice)
                         }
                     }
                     Spacer(minLength: 0)
@@ -499,6 +585,21 @@ private struct WorkContent: View {
         .padding(.vertical, 20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassBubble()
+    }
+
+    private func sliceRow(index: Int, slice: (name: String, seconds: Double)) -> some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(Self.sliceColor(index, theme: theme, colorScheme: colorScheme))
+                .frame(width: 8, height: 8)
+            Text(slice.name)
+                .font(.system(size: 12))
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Text(PCCDuration.compact(slice.seconds))
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(.secondary)
+        }
     }
 
     private func donut(slices: [(name: String, seconds: Double)], total: Double) -> some View {
@@ -709,14 +810,14 @@ private struct WorkContent: View {
         return nil
     }
 
-    /// A new Time Entry pre-fills the selected container the same way, and
-    /// starts inside the range being looked at rather than at "now" — a
-    /// backfilled entry belongs to the window on screen.
+    /// A new Time Entry pre-fills whatever the tracker's cascade currently
+    /// points at, and starts inside the range being looked at rather than at
+    /// "now" — a backfilled entry belongs to the window on screen.
     private var defaultTimeEntryValues: TimeEntryFormValues {
         let (start, end) = viewModel.range.resolved()
         let base = min(max(Date(), start), end)
         var values = TimeEntryFormValues(startDate: base, endDate: base.addingTimeInterval(3600))
-        switch timerContainer {
+        switch picked.container {
         case .task(let id): values.taskID = id
         case .project(let id): values.projectID = id
         case .client(let id): values.clientID = id
@@ -725,4 +826,321 @@ private struct WorkContent: View {
         }
         return values
     }
+}
+
+extension View {
+    /// `.menuStyle(.borderlessButton)` on macOS, where a `Menu`'s default
+    /// pulldown chrome would fight the custom trigger label under it, and a
+    /// no-op on iOS, where that style doesn't exist. Mirrors the same
+    /// `#if os(macOS)` guard `PCCMenuPicker` already carries.
+    fileprivate func pccBorderlessMenu() -> some View {
+        #if os(macOS)
+        return menuStyle(.borderlessButton)
+        #else
+        return self
+        #endif
+    }
+}
+
+// MARK: - Time tracker
+
+/// The tracker's cascade: which Client, Project, Sprint and Task are picked.
+/// One value rather than four loose `@State` ids, so "picking a Client
+/// clears the Project under it" is a rule of the type instead of four
+/// `onChange` handlers that have to agree.
+private struct TrackerSelection: Equatable {
+    var clientID: UUID?
+    var projectID: UUID?
+    var sprintID: UUID?
+    var taskID: UUID?
+
+    /// What a timer started right now would attach to: the deepest level
+    /// picked that a Time Entry can actually hold (ADR-0004). A Sprint is a
+    /// grouping of Tasks, not a container, so it never appears here — it
+    /// narrows the Task list above and nothing else.
+    var container: TimeEntryContainer? {
+        if let taskID { return .task(taskID) }
+        if let projectID { return .project(projectID) }
+        if let clientID { return .client(clientID) }
+        return nil
+    }
+
+    mutating func setClient(_ id: UUID?) {
+        clientID = id
+        projectID = nil
+        sprintID = nil
+        taskID = nil
+    }
+
+    mutating func setProject(_ id: UUID?) {
+        projectID = id
+        sprintID = nil
+        taskID = nil
+    }
+
+    mutating func setSprint(_ id: UUID?) {
+        sprintID = id
+        taskID = nil
+    }
+}
+
+/// The dashboard's hero control: pick Client → Project → Sprint → Task, then
+/// start the clock against it. Filled in the accent like the hours tile,
+/// since a running timer is the one thing on this screen that is happening
+/// rather than being reported.
+///
+/// The cascade is deliberately loose at every level — stopping at a Client
+/// and starting logs against the Client, which is exactly what ADR-0004's
+/// direct Client attachment is for (a call, admin time, anything not
+/// task-shaped). Only the Sprint level can't be started against, because a
+/// Sprint isn't a Time Entry container at all.
+private struct TimeTrackerCard: View {
+    @ObservedObject var viewModel: WorkViewModel
+    @ObservedObject var timerViewModel: TimerViewModel
+    @Binding var picked: TrackerSelection
+    /// Called after a timer stops, so the screen can re-read its totals —
+    /// a stopped entry only becomes Work Hours once it has an end date.
+    let onStopped: () async -> Void
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenTheme) private var theme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            header
+            readout
+            if timerViewModel.isRunning {
+                runningLabel
+            } else {
+                cascade
+            }
+            controls
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: GlassBubbleStyle.gridCell.cornerRadius, style: .continuous)
+                .fill(theme.accent(colorScheme))
+        )
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Text("Time Tracker")
+                .pccPanelLabel()
+                .foregroundStyle(.white.opacity(0.85))
+            Spacer()
+            Circle()
+                .fill(.white)
+                .frame(width: 7, height: 7)
+                .opacity(timerViewModel.isRunning ? 1 : 0.35)
+        }
+    }
+
+    /// Ticks every second while running, and rests at zero otherwise — a
+    /// dash or an empty space would make the card jump the moment it starts.
+    @ViewBuilder
+    private var readout: some View {
+        if let active = timerViewModel.activeTimer {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Text(PCCDuration.elapsed(context.date.timeIntervalSince(active.startDate)))
+                    .font(.pccReadout(34))
+                    .foregroundStyle(.white)
+                    .monospacedDigit()
+            }
+        } else {
+            Text("00:00")
+                .font(.pccReadout(34))
+                .foregroundStyle(.white.opacity(0.55))
+        }
+    }
+
+    private var runningLabel: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(timerViewModel.activeTimer.map { viewModel.containerLabel(for: $0) } ?? "")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
+                .lineLimit(2)
+            Text("Started \(startedAt)")
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.8))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var startedAt: String {
+        guard let active = timerViewModel.activeTimer else { return "" }
+        return Self.startFormatter.string(from: active.startDate)
+    }
+
+    private var cascade: some View {
+        VStack(spacing: 6) {
+            picker("Client", selection: clientBinding, options: clientOptions)
+            picker("Project", selection: projectBinding, options: projectOptions)
+                .disabled(projectOptions.count <= 1)
+            picker("Sprint", selection: sprintBinding, options: sprintOptions)
+                .disabled(sprintOptions.count <= 1)
+            picker("Task", selection: taskBinding, options: taskOptions)
+                .disabled(taskOptions.count <= 1)
+        }
+    }
+
+    /// The cascade's rows are drawn here rather than with `PCCMenuPicker`'s
+    /// own `.boxed` chrome: this card's ground is the accent fill, not
+    /// glass, so its controls need white-on-accent chips instead of the
+    /// chip background every other screen's picker draws.
+    private func picker(
+        _ label: String, selection: Binding<UUID?>, options: [(value: UUID?, title: String)]
+    ) -> some View {
+        Menu {
+            ForEach(options, id: \.value) { option in
+                Button {
+                    selection.wrappedValue = option.value
+                } label: {
+                    if option.value == selection.wrappedValue {
+                        Label(option.title, systemImage: "checkmark")
+                    } else {
+                        Text(option.title)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(label)
+                    .foregroundStyle(.white.opacity(0.75))
+                Spacer(minLength: 8)
+                Text(options.first { $0.value == selection.wrappedValue }?.title ?? "Any")
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.75))
+            }
+            .font(.system(size: 13, weight: .medium))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: PCCChassis.controlCornerRadius, style: .continuous)
+                    .fill(.white.opacity(0.16))
+            )
+            .contentShape(Rectangle())
+        }
+        .pccBorderlessMenu()
+    }
+
+    private var controls: some View {
+        HStack(spacing: 10) {
+            Button {
+                Task {
+                    if timerViewModel.isRunning {
+                        await timerViewModel.stop()
+                        await onStopped()
+                    } else if let container = picked.container {
+                        await timerViewModel.start(container: container)
+                    }
+                }
+            } label: {
+                Label(
+                    timerViewModel.isRunning ? "Stop" : "Start",
+                    systemImage: timerViewModel.isRunning ? "stop.fill" : "play.fill"
+                )
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(theme.accent(colorScheme))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 9)
+                .background(Capsule().fill(.white))
+            }
+            .buttonStyle(.plain)
+            .disabled(!timerViewModel.isRunning && picked.container == nil)
+            .opacity(!timerViewModel.isRunning && picked.container == nil ? 0.5 : 1)
+
+            // Discarding a running timer outright, rather than stopping it
+            // into a Time Entry. Shown only while one is running, since
+            // there's nothing to cancel otherwise.
+            if timerViewModel.isRunning {
+                Button {
+                    Task { await timerViewModel.cancel() }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(9)
+                        .background(Circle().fill(.white.opacity(0.18)))
+                }
+                .buttonStyle(.plain)
+                .help("Discard this timer without logging it")
+            }
+        }
+    }
+
+    // MARK: - Cascade options
+
+    /// Every level offers an "Any" entry, which is both the empty selection
+    /// and the way back up: picking Any at the Project level puts the timer
+    /// back on the Client itself.
+    private var clientOptions: [(value: UUID?, title: String)] {
+        [(nil, "Any")] + viewModel.clients.map { (Optional($0.id), $0.name) }
+    }
+
+    private var projectOptions: [(value: UUID?, title: String)] {
+        let projects = viewModel.workProjects
+            .filter { picked.clientID == nil ? true : $0.clientID == picked.clientID }
+            .sorted { $0.name < $1.name }
+        return [(nil, "Any")] + projects.map { (Optional($0.id), $0.name) }
+    }
+
+    /// Sprints of the picked Project only — a Sprint is scoped to its
+    /// Project for its lifetime (`CONTEXT.md`), so with no Project picked
+    /// there is nothing to list.
+    private var sprintOptions: [(value: UUID?, title: String)] {
+        guard let projectID = picked.projectID else { return [(nil, "Any")] }
+        let sprints = viewModel.sprints
+            .filter { $0.projectID == projectID }
+            .sorted { $0.startDate < $1.startDate }
+        return [(nil, "Any")] + sprints.map { (Optional($0.id), $0.name) }
+    }
+
+    /// Incomplete Tasks inside the current cascade — a done Task isn't
+    /// something to start a timer on. Narrowed by Sprint when one is
+    /// picked, by Project otherwise, and by Client above that.
+    private var taskOptions: [(value: UUID?, title: String)] {
+        let clientProjectIDs = Set(
+            viewModel.workProjects.filter { $0.clientID == picked.clientID }.map(\.id))
+        let tasks = viewModel.tasks
+            .filter { task in
+                guard task.courseID == nil, !task.isComplete else { return false }
+                if let sprintID = picked.sprintID { return task.sprintID == sprintID }
+                if let projectID = picked.projectID { return task.projectID == projectID }
+                guard picked.clientID != nil else { return true }
+                guard let projectID = task.projectID else { return false }
+                return clientProjectIDs.contains(projectID)
+            }
+            .sorted { $0.title < $1.title }
+        return [(nil, "Any")] + tasks.map { (Optional($0.id), $0.title) }
+    }
+
+    // MARK: - Cascade bindings
+
+    private var clientBinding: Binding<UUID?> {
+        Binding(get: { picked.clientID }, set: { picked.setClient($0) })
+    }
+
+    private var projectBinding: Binding<UUID?> {
+        Binding(get: { picked.projectID }, set: { picked.setProject($0) })
+    }
+
+    private var sprintBinding: Binding<UUID?> {
+        Binding(get: { picked.sprintID }, set: { picked.setSprint($0) })
+    }
+
+    private var taskBinding: Binding<UUID?> {
+        Binding(get: { picked.taskID }, set: { picked.taskID = $0 })
+    }
+
+    private static let startFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
 }
