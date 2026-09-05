@@ -66,6 +66,23 @@ public final class TimerViewModel: ObservableObject {
         }
     }
 
+    /// Starts a timer against `container`, stopping whichever one is already
+    /// running first.
+    ///
+    /// At most one Time Entry runs at a time (`CONTEXT.md`), and the backend
+    /// rejects a second start outright — so a one-click "start this Task"
+    /// control (issue #102) has to express the switch as stop-then-start
+    /// rather than hand the owner an error for doing the obvious thing. The
+    /// stopped timer is logged as a Time Entry exactly as `stop()` logs it;
+    /// nothing is discarded.
+    public func switchTo(container: TimeEntryContainer) async {
+        if isRunning {
+            await stop()
+            guard errorMessage == nil else { return }
+        }
+        await start(container: container)
+    }
+
     public func stop() async {
         await run(verb: "stop") {
             _ = try await timeEntriesClient.stopTimer()
