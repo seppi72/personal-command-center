@@ -331,7 +331,7 @@ struct CategoryFormSheet: View {
 /// the top (editing moved here from the list row, via the toolbar's "Edit"
 /// button — same `CategoryFormSheet`/`onSave` wiring as before), plus a
 /// "Subcategories" section listing the Category's Subcategories with
-/// add/edit/delete — the same shape `ProjectDetailView` already has for
+/// add/edit/delete — the same shape `WorkView` has for a Project's
 /// Sprints. Left unthemed beyond what it inherits from the environment,
 /// same reasoning as `CategoryFormSheet`.
 struct CategoryDetailView: View {

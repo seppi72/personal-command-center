@@ -445,6 +445,16 @@ already loaded. This section, and the current-state one above it, were split
 apart in the same pass — they had grown into each other, leaving the "how to
 consume this package" text advertising twelve types that no longer existed.
 
+**Issue #99** removed the last of that residue. `SprintsViewModel` was deleted
+on the same reasoning: it backed the Sprints section of `ProjectDetailView` and
+was reached through `ProjectsViewModel.makeSprintsViewModel(for:)`, both of
+which went in #89, and `WorkViewModel` now owns every method it had. Unlike
+`TasksViewModel` it carried no pure-logic rule and had no tests, so nothing
+needed moving elsewhere — its `projectID` scoping survives as the `projectID`
+argument `WorkViewModel.createSprint(projectID:_:)` takes per call. The doc
+comments in `SprintFormValues` and `SubcategoriesViewModel` that used it as a
+comparison now point at `WorkViewModel`.
+
 The backend's `PCCTask` model and the client's `PCCTask` struct are named
 `PCCTask` in Swift, not `Task` — that would shadow `_Concurrency.Task`
 throughout their targets. Category (ticket #39) is named `PCCCategory` in

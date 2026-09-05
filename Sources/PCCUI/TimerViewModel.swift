@@ -4,13 +4,13 @@ import Foundation
 /// backend through a `TimeEntriesAPIClient`'s timer endpoints, plus
 /// `TasksAPIClient`/`ProjectsAPIClient`/`ClientsAPIClient`/`CoursesAPIClient`
 /// to populate the container picker used when starting one — kept separate
-/// from `TimeEntriesViewModel`, which owns the full Time Entry list/CRUD,
-/// since the timer is its own small piece of state (one active timer or
-/// none) with its own display, not a row in that list.
+/// from `WorkViewModel`, which owns the full Time Entry list/CRUD, since
+/// the timer is its own small piece of state (one active timer or none)
+/// with its own display, not a row in that list.
 ///
 /// `ObservableObject` rather than the newer `@Observable` macro, since that
 /// macro needs iOS 17/macOS 14 and this package targets iOS 16/macOS 13
-/// (mirrors `TimeEntriesViewModel`'s same reasoning).
+/// (mirrors `WorkViewModel`'s same reasoning).
 @MainActor
 public final class TimerViewModel: ObservableObject {
     @Published public private(set) var activeTimer: TimeEntry?
@@ -83,7 +83,7 @@ public final class TimerViewModel: ObservableObject {
     /// Runs a mutation against `activeTimer`, keeping every method's
     /// success/failure handling (clear the error; on failure surface a
     /// message) in one shape instead of four copies — mirrors
-    /// `TimeEntriesViewModel.run`.
+    /// `WorkViewModel.run`.
     private func run(verb: String, _ operation: () async throws -> Void) async {
         do {
             try await operation()
@@ -99,7 +99,7 @@ public final class TimerViewModel: ObservableObject {
 /// rather than four separately-tracked optional ids each needing its own
 /// "clear the other three" logic (`TimeEntryFormSheet`'s own shape). Lives
 /// alongside `TimerViewModel` rather than in either view that uses it,
-/// since both `TimeEntriesView`'s own hero timer and `OverviewView`'s
+/// since both `WorkView`'s own hero timer and `OverviewView`'s
 /// compact mini Timer share this one copy.
 enum ContainerKind: CaseIterable, Identifiable {
     case task, project, client, course

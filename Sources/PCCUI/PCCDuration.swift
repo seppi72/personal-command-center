@@ -1,7 +1,7 @@
 import Foundation
 
 /// The three duration formats this package renders elapsed time in. Was
-/// `TimeEntriesViewModel.formattedDuration` and
+/// the deleted `TimeEntriesViewModel.formattedDuration` and
 /// `WorkHoursContent.formattedDuration` — two near-identical formatters on
 /// two screens that issue #89 merged into one, so they collapse here rather
 /// than following either deleted screen into the grave.

@@ -5,7 +5,7 @@ import Foundation
 /// both — ADR-0003).
 ///
 /// Named `PCCTask` in Swift only, to avoid shadowing `_Concurrency.Task`
-/// throughout this module (`ProjectsView` already relies on bare
+/// throughout this module (`WorkView` already relies on bare
 /// `Task { ... }`). The domain term "Task" is what shows up in the API and
 /// UI text — see `Sources/App/Models/PCCTask.swift` for the same tradeoff
 /// on the backend.

@@ -5,7 +5,7 @@ import Foundation
 /// at `init` — a Subcategory has no meaning outside a Category, so unlike
 /// `CategoriesViewModel` there's no unscoped "all Subcategories" list. Kept
 /// separate from its view so the view stays a thin rendering of this state
-/// (mirrors `SprintsViewModel`'s split).
+/// (mirrors `WorkViewModel`'s split).
 ///
 /// `ObservableObject` rather than the newer `@Observable` macro, since that
 /// macro needs iOS 17/macOS 14 and this package targets iOS 16/macOS 13.
@@ -56,7 +56,7 @@ public final class SubcategoriesViewModel: ObservableObject {
     /// Runs a mutation against `subcategories`, keeping every method's
     /// success/failure handling (clear the error, re-sort by name; on
     /// failure surface a message) in one shape instead of four copies
-    /// (mirrors `SprintsViewModel.run`).
+    /// (mirrors `WorkViewModel.run`).
     private func run(verb: String, _ operation: () async throws -> Void) async {
         do {
             try await operation()

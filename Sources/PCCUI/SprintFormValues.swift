@@ -1,7 +1,7 @@
 import Foundation
 
 /// The fields a Sprint create/edit form produces together — name and its
-/// date range — bundled so `SprintsViewModel` and `SprintFormSheet` pass one
+/// date range — bundled so `WorkViewModel` and `SprintFormSheet` pass one
 /// value instead of loose parameters that always travel as a set (mirrors
 /// `ProjectFormValues`/`CourseFormValues`).
 public struct SprintFormValues: Equatable, Sendable {
