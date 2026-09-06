@@ -46,7 +46,8 @@ let notificationsClient = URLSessionNotificationsAPIClient(baseURL: baseURL, bea
 // on the main actor, same as these `@MainActor` view models require.
 let workViewModel = WorkViewModel(
     clientsClient: clientsClient, projectsClient: projectsClient, sprintsClient: sprintsClient,
-    tasksClient: tasksClient, timeEntriesClient: timeEntriesClient, coursesClient: coursesClient)
+    tasksClient: tasksClient, timeEntriesClient: timeEntriesClient, coursesClient: coursesClient,
+    deadlinesClient: deadlinesClient)
 let deadlinesViewModel = DeadlinesViewModel(client: deadlinesClient)
 let calendarViewModel = CalendarViewModel(
     commitmentsClient: personalCommitmentsClient, mirroredEventsClient: mirroredCalendarEventsClient, coursesClient: coursesClient)

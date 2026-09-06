@@ -94,6 +94,7 @@ private struct WorkContent: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     header
+                    todayRow
                     statStrip
                     activityRow
                     breakdownRow
@@ -209,6 +210,217 @@ private struct WorkContent: View {
                 .foregroundStyle(.secondary)
         }
     }
+
+    // MARK: - Today
+
+    /// The screen's new opening move (issues #101, #103): what to do next on
+    /// the left, what's about to come due on the right. Sits above the stat
+    /// strip because a command center's first answer should be an action,
+    /// not a total.
+    private var todayRow: some View {
+        HStack(alignment: .top, spacing: 14) {
+            todayCard
+            upcomingCard
+                .frame(width: Self.sideColumnWidth)
+        }
+    }
+
+    /// The priority queue. Neither the range stepper nor the tree selection
+    /// scopes it — "what should I work on right now" is about today whatever
+    /// window the panels below are reporting on (`WorkViewModel.priorityQueue`).
+    private var todayCard: some View {
+        let queue = viewModel.priorityQueue
+        let summary = viewModel.todaySummary
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Today")
+                    .pccPanelLabel()
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("+ Add Task") { sheet = .newTask }
+                    .buttonStyle(.plain)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(theme.accent(colorScheme))
+            }
+            Text(Self.summaryLine(summary))
+                .font(.system(size: 15, weight: .semibold))
+            if queue.isEmpty {
+                Text("Nothing open. Everything on the work side is done.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 18)
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(queue) { row in
+                        queueRow(row)
+                    }
+                }
+                if viewModel.priorityQueueOverflow > 0 {
+                    Text("+ \(viewModel.priorityQueueOverflow) more open")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassBubble()
+    }
+
+    /// "5h 20m logged · 3 tasks remaining · 1 overdue" — the day in one line.
+    /// Clauses that would read as zero are dropped rather than shown, so a
+    /// clean day doesn't advertise "0 overdue".
+    private static func summaryLine(_ summary: WorkTodaySummary) -> String {
+        var parts = ["\(PCCDuration.compact(summary.loggedSeconds)) logged"]
+        parts.append(
+            summary.openTasks == 1 ? "1 task remaining" : "\(summary.openTasks) tasks remaining")
+        if summary.dueTodayTasks > 0 { parts.append("\(summary.dueTodayTasks) due today") }
+        if summary.overdueTasks > 0 { parts.append("\(summary.overdueTasks) overdue") }
+        return parts.joined(separator: "  ·  ")
+    }
+
+    /// One queue row: what it is, whose it is, how far in it already is, and
+    /// the clock. The Start control is the whole point of the card (issue
+    /// #102) — the owner shouldn't have to walk Work → Project → Task →
+    /// Time Entry to begin.
+    private func queueRow(_ row: WorkPriorityTask) -> some View {
+        let urgency = WorkBoard.urgency(for: row.task.dueDate)
+        let isRunning = timerViewModel.activeTimer?.taskID == row.task.id
+        return HStack(spacing: 12) {
+            Button {
+                Task {
+                    await viewModel.setTaskCompletion(row.task, isComplete: true)
+                }
+            } label: {
+                Image(systemName: "circle")
+                    .font(.system(size: 15))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Mark complete")
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(row.task.title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(row.clientName ?? row.projectName ?? "Unassigned")
+                    Text("·")
+                    Text(urgency.label)
+                        .foregroundStyle(urgency.isOverdue ? .red : .secondary)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            if row.loggedTodaySeconds > 0 {
+                Text(PCCDuration.compact(row.loggedTodaySeconds))
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            startButton(taskID: row.task.id, isRunning: isRunning)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: PCCChassis.controlCornerRadius, style: .continuous)
+                .fill(theme.panelLine(colorScheme).opacity(0.35))
+        )
+    }
+
+    /// Start/Stop for one Task. Starting while another timer runs switches to
+    /// this one rather than erroring — see `TimerViewModel.switchTo`.
+    private func startButton(taskID: UUID, isRunning: Bool) -> some View {
+        Button {
+            Task {
+                if isRunning {
+                    await timerViewModel.stop()
+                    await viewModel.load()
+                } else {
+                    await timerViewModel.switchTo(container: .task(taskID))
+                    await viewModel.load()
+                }
+            }
+        } label: {
+            Image(systemName: isRunning ? "stop.fill" : "play.fill")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(theme.accent(colorScheme)))
+        }
+        .buttonStyle(.plain)
+        .help(isRunning ? "Stop this timer" : "Start a timer on this Task")
+    }
+
+    /// What's about to come due, grouped by day with overdue first
+    /// (`WorkBoard.upcoming`). Course Deadlines are absent for the same
+    /// reason Course work is absent from the tree — they belong to the School
+    /// dashboard.
+    private var upcomingCard: some View {
+        let groups = viewModel.upcomingDeadlines
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("Upcoming")
+                .pccPanelLabel()
+                .foregroundStyle(.secondary)
+            if groups.isEmpty {
+                Text("Nothing due this week.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 12)
+            } else {
+                ForEach(groups) { group in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(Self.groupHeading(group))
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(group.isOverdue ? .red : .secondary)
+                        ForEach(group.items) { item in
+                            deadlineRow(item, isOverdue: group.isOverdue)
+                        }
+                    }
+                }
+                Text("\(viewModel.deadlinesNeedingAttention) need attention")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassBubble()
+    }
+
+    private static func groupHeading(_ group: WorkDeadlineGroup) -> String {
+        guard let day = group.day else { return "OVERDUE" }
+        let calendar = Calendar.current
+        if calendar.isDateInToday(day) { return "TODAY" }
+        if calendar.isDateInTomorrow(day) { return "TOMORROW" }
+        return groupHeadingFormatter.string(from: day).uppercased()
+    }
+
+    private func deadlineRow(_ item: DeadlineItem, isOverdue: Bool) -> some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(isOverdue ? Color.red : theme.accent(colorScheme))
+                .frame(width: 6, height: 6)
+            Text(item.title)
+                .font(.system(size: 13))
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Text(WorkBoard.urgency(for: item.dueDate).label)
+                .font(.caption)
+                .foregroundStyle(isOverdue ? .red : .secondary)
+                .lineLimit(1)
+        }
+    }
+
+    private static let groupHeadingFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE MMM d"
+        return formatter
+    }()
 
     // MARK: - Stat strip
 
@@ -360,6 +572,12 @@ private struct WorkContent: View {
                 Text("Clients and Projects")
                     .pccPanelLabel()
                     .foregroundStyle(.secondary)
+                // Says once what the column of durations on the right means,
+                // rather than leaving "8h 0m" to be read as an estimate, a
+                // remaining figure, or an all-time total (issue #105).
+                Text("logged \(viewModel.range.title())")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Spacer()
                 Button("New Project") { sheet = .newProject }
                     .buttonStyle(.plain)
@@ -418,10 +636,24 @@ private struct WorkContent: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(width: 14)
-            Text(node.name)
-                .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(node.name)
+                    .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                    .lineLimit(1)
+                // Context only on Client and Project rows (issue #105): a
+                // caption under every Sprint and Task would bury the
+                // structure this card exists to show.
+                if let caption = viewModel.rowContext(for: node)?.caption {
+                    Text(caption)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
             Spacer(minLength: 8)
+            if case .task(let id) = node.kind, viewModel.task(id: id)?.isComplete == false {
+                startButton(taskID: id, isRunning: timerViewModel.activeTimer?.taskID == id)
+            }
             // A row with nothing in range still shows a total, muted rather
             // than hidden — the range filters the numbers, never tree
             // membership (issue #89).
@@ -472,6 +704,18 @@ private struct WorkContent: View {
             }
         case .task(let id):
             if let task = viewModel.task(id: id) {
+                if !task.isComplete {
+                    Button(timerViewModel.activeTimer?.taskID == id ? "Stop Timer" : "Start Timer") {
+                        Task {
+                            if timerViewModel.activeTimer?.taskID == id {
+                                await timerViewModel.stop()
+                            } else {
+                                await timerViewModel.switchTo(container: .task(id))
+                            }
+                            await viewModel.load()
+                        }
+                    }
+                }
                 Button("Edit Task") { sheet = .editTask(task) }
                 Button(task.isComplete ? "Mark Incomplete" : "Mark Complete") {
                     Task { await viewModel.setTaskCompletion(task, isComplete: !task.isComplete) }
@@ -553,14 +797,22 @@ private struct WorkContent: View {
         }
     }
 
-    /// Time by child container of the selected node, as a donut — the
-    /// "where did this Client's hours actually go" read the tree's own
+    /// Time by child container of the selected node, as horizontal bars —
+    /// the "where did this Client's hours actually go" read the tree's own
     /// column of totals makes you compare row by row.
+    ///
+    /// Bars rather than the donut this panel used to draw (issue #104): with
+    /// a single child a donut renders one full circle, which says only "100%
+    /// of this is this", and even with several, comparing arc lengths is
+    /// harder than comparing lengths on a shared baseline. The number stays
+    /// the source of truth; the bar is only the comparison aid.
     private var breakdownBubble: some View {
         let slices = viewModel.breakdown
-        let total = slices.reduce(0) { $0 + $1.seconds }
+        let shown = Array(slices.prefix(Self.breakdownRowLimit))
+        let remainder = slices.dropFirst(Self.breakdownRowLimit).reduce(0) { $0 + $1.seconds }
+        let peak = slices.first?.seconds ?? 0
         return VStack(alignment: .leading, spacing: 12) {
-            Text("By \(viewModel.selectedNodeID == nil ? "Client" : "Child")")
+            Text("Time By \(viewModel.selectedNodeID == nil ? "Client" : "Child")")
                 .pccPanelLabel()
                 .foregroundStyle(.secondary)
             if slices.isEmpty {
@@ -569,15 +821,15 @@ private struct WorkContent: View {
                     .foregroundStyle(.secondary)
                     .frame(height: 96, alignment: .center)
             } else {
-                HStack(spacing: 18) {
-                    donut(slices: slices, total: total)
-                        .frame(width: 96, height: 96)
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(Array(slices.prefix(5).enumerated()), id: \.offset) { index, slice in
-                            sliceRow(index: index, slice: slice)
-                        }
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(Array(shown.enumerated()), id: \.offset) { _, slice in
+                        breakdownBar(slice, peak: peak)
                     }
-                    Spacer(minLength: 0)
+                    if remainder > 0 {
+                        Text("+ \(PCCDuration.compact(remainder)) across \(slices.count - shown.count) more")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
@@ -587,50 +839,36 @@ private struct WorkContent: View {
         .glassBubble()
     }
 
-    private func sliceRow(index: Int, slice: (name: String, seconds: Double)) -> some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(Self.sliceColor(index, theme: theme, colorScheme: colorScheme))
-                .frame(width: 8, height: 8)
-            Text(slice.name)
-                .font(.system(size: 12))
-                .lineLimit(1)
-            Spacer(minLength: 8)
-            Text(PCCDuration.compact(slice.seconds))
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(.secondary)
-        }
-    }
+    /// How many bars the breakdown draws before it aggregates the tail into
+    /// one remainder line.
+    private static let breakdownRowLimit = 5
 
-    private func donut(slices: [(name: String, seconds: Double)], total: Double) -> some View {
-        Canvas { context, size in
-            guard total > 0 else { return }
-            let rect = CGRect(origin: .zero, size: size).insetBy(dx: 4, dy: 4)
-            var start = Angle.degrees(-90)
-            for (index, slice) in slices.enumerated() {
-                let sweep = Angle.degrees(360 * slice.seconds / total)
-                var path = Path()
-                path.move(to: CGPoint(x: rect.midX, y: rect.midY))
-                path.addArc(
-                    center: CGPoint(x: rect.midX, y: rect.midY), radius: rect.width / 2,
-                    startAngle: start, endAngle: start + sweep, clockwise: false)
-                path.closeSubpath()
-                context.fill(path, with: .color(Self.sliceColor(index, theme: theme, colorScheme: colorScheme)))
-                start += sweep
+    /// One bar: name and exact total on the line above, the bar itself
+    /// scaled against the largest child rather than against the sum — the
+    /// panel is a comparison between children, not a part-of-whole claim.
+    private func breakdownBar(_ slice: (name: String, seconds: Double), peak: Double) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text(slice.name)
+                    .font(.system(size: 12))
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Text(PCCDuration.compact(slice.seconds))
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(.secondary)
             }
-            // Punched out rather than drawn as a stroked ring, so the hole
-            // reads as the bubble's own glass showing through.
-            context.blendMode = .destinationOut
-            context.fill(
-                Path(ellipseIn: rect.insetBy(dx: rect.width / 4, dy: rect.height / 4)), with: .color(.black))
+            GeometryReader { proxy in
+                let fraction = peak > 0 ? slice.seconds / peak : 0
+                ZStack(alignment: .leading) {
+                    Capsule(style: .continuous)
+                        .fill(theme.panelLine(colorScheme))
+                    Capsule(style: .continuous)
+                        .fill(theme.accent(colorScheme))
+                        .frame(width: max(4, proxy.size.width * fraction))
+                }
+            }
+            .frame(height: 8)
         }
-    }
-
-    /// Slice colors: the theme's accent stepped through decreasing opacity
-    /// rather than a rainbow — a breakdown of one quantity is one hue at
-    /// different weights, not six unrelated categories.
-    private static func sliceColor(_ index: Int, theme: ScreenTheme, colorScheme: ColorScheme) -> Color {
-        theme.accent(colorScheme).opacity(max(0.25, 1 - Double(index) * 0.15))
     }
 
     // MARK: - Time Entries

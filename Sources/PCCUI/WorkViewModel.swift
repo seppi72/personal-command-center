@@ -22,6 +22,12 @@ public final class WorkViewModel: ObservableObject {
     @Published public private(set) var tasks: [PCCTask] = []
     @Published public private(set) var timeEntries: [TimeEntry] = []
     @Published public private(set) var courses: [Course] = []
+    /// Every Deadline the backend knows about, already in proximity order —
+    /// what the Upcoming card narrows to the work side and the next week
+    /// (issue #103). Loaded rather than derived from `tasks`/`projects`
+    /// because `/v1/deadlines` is the domain's own sorted view and Projects
+    /// carry Deadlines the tree never surfaces.
+    @Published public private(set) var deadlines: [DeadlineItem] = []
     /// The whole tree, rebuilt whenever the data or `range` changes.
     @Published public private(set) var tree: [WorkNode] = []
     /// Which node the stats and Time Entry list on the right are scoped to —
@@ -40,6 +46,7 @@ public final class WorkViewModel: ObservableObject {
     private let tasksClient: TasksAPIClient
     private let timeEntriesClient: TimeEntriesAPIClient
     private let coursesClient: CoursesAPIClient
+    private let deadlinesClient: DeadlinesAPIClient
 
     public init(
         clientsClient: ClientsAPIClient,
@@ -47,8 +54,10 @@ public final class WorkViewModel: ObservableObject {
         sprintsClient: SprintsAPIClient,
         tasksClient: TasksAPIClient,
         timeEntriesClient: TimeEntriesAPIClient,
-        coursesClient: CoursesAPIClient
+        coursesClient: CoursesAPIClient,
+        deadlinesClient: DeadlinesAPIClient
     ) {
+        self.deadlinesClient = deadlinesClient
         self.clientsClient = clientsClient
         self.projectsClient = projectsClient
         self.sprintsClient = sprintsClient
@@ -69,11 +78,13 @@ public final class WorkViewModel: ObservableObject {
             async let loadedEntries = timeEntriesClient.listTimeEntries(
                 taskID: nil, projectID: nil, clientID: nil, courseID: nil)
             async let loadedCourses = coursesClient.listCourses()
+            async let loadedDeadlines = deadlinesClient.listDeadlines()
             clients = try await loadedClients
             projects = try await loadedProjects
             tasks = try await loadedTasks
             timeEntries = try await loadedEntries
             courses = try await loadedCourses
+            deadlines = try await loadedDeadlines
             sprints = try await loadSprints(for: projects)
         }
         rebuild()
@@ -267,6 +278,53 @@ public final class WorkViewModel: ObservableObject {
     public var taskCompletion: (complete: Int, total: Int) {
         let scoped = scopedTasks
         return (scoped.filter(\.isComplete).count, scoped.count)
+    }
+
+    // MARK: - Today
+
+    /// How many rows the Today card shows before it stops listing and starts
+    /// counting. A queue long enough to scroll stops being a queue.
+    public static let priorityQueueLimit = 5
+
+    /// The Today card's rows, in priority order (`WorkBoard.priorityQueue`),
+    /// capped at `priorityQueueLimit`. Deliberately not scoped by `range` or
+    /// by the tree selection: this card answers "what now", which doesn't
+    /// change because the panels below are reporting on last month.
+    public var priorityQueue: [WorkPriorityTask] {
+        Array(
+            WorkBoard.priorityQueue(
+                tasks: tasks, projects: projects, clients: clients, timeEntries: timeEntries
+            ).prefix(Self.priorityQueueLimit))
+    }
+
+    /// How many open work Tasks the queue above had to leave off.
+    public var priorityQueueOverflow: Int {
+        max(0, todaySummary.openTasks - Self.priorityQueueLimit)
+    }
+
+    public var todaySummary: WorkTodaySummary {
+        WorkBoard.todaySummary(tasks: tasks, projects: projects, timeEntries: timeEntries)
+    }
+
+    /// The Upcoming card's deadline groups — work-side only, overdue first,
+    /// then a group per day over the coming week.
+    public var upcomingDeadlines: [WorkDeadlineGroup] {
+        WorkBoard.upcoming(deadlines: deadlines, tasks: tasks, projects: projects)
+    }
+
+    /// How many of those need attention now — overdue, or landing today.
+    public var deadlinesNeedingAttention: Int {
+        upcomingDeadlines.reduce(0) { count, group in
+            let isToday = group.day.map(Calendar.current.isDateInToday) ?? false
+            guard group.isOverdue || isToday else { return count }
+            return count + group.items.count
+        }
+    }
+
+    /// The caption under a tree row's name, or `nil` for rows that don't
+    /// carry one (`WorkBoard.rowContext`).
+    public func rowContext(for node: WorkNode) -> WorkRowContext? {
+        WorkBoard.rowContext(for: node.kind, projects: projects, tasks: tasks)
     }
 
     // MARK: - Lookups
