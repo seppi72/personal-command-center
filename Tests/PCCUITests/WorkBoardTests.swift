@@ -181,13 +181,21 @@ struct WorkBoardTests {
         let clientContext = WorkBoard.rowContext(
             for: .client(client.id), projects: [one, two], tasks: tasks,
             calendar: calendar, reference: now)
-        #expect(clientContext == WorkRowContext(projectCount: 2, openTaskCount: 2, overdueTaskCount: 1))
+        #expect(
+            clientContext
+                == WorkRowContext(
+                    projectCount: 2, openTaskCount: 2, overdueTaskCount: 1,
+                    completeTaskCount: 1, totalTaskCount: 3))
         #expect(clientContext?.caption == "2 projects  ·  2 open  ·  1 overdue")
 
         let projectContext = WorkBoard.rowContext(
             for: .project(one.id), projects: [one, two], tasks: tasks,
             calendar: calendar, reference: now)
-        #expect(projectContext == WorkRowContext(projectCount: 0, openTaskCount: 2, overdueTaskCount: 1))
+        #expect(
+            projectContext
+                == WorkRowContext(
+                    projectCount: 0, openTaskCount: 2, overdueTaskCount: 1,
+                    completeTaskCount: 0, totalTaskCount: 2))
 
         // Leaf rows carry no caption — the tree still has to read as a tree.
         #expect(
@@ -202,6 +210,82 @@ struct WorkBoardTests {
         let context = WorkBoard.rowContext(
             for: .client(client.id), projects: [], tasks: [], calendar: calendar, reference: now)
         #expect(context?.caption == nil)
+    }
+
+    // MARK: - Progress
+
+    @Test("a Client's progress aggregates every Task across its Projects")
+    func clientProgressAggregates() {
+        let client = PCCClient(id: UUID(), name: "Northside Studio")
+        let one = Project(id: UUID(), name: "Rebuild", clientID: client.id)
+        let two = Project(id: UUID(), name: "Retainer", clientID: client.id)
+        let tasks = [
+            PCCTask(id: UUID(), title: "A", isComplete: true, projectID: one.id),
+            PCCTask(id: UUID(), title: "B", projectID: one.id),
+            PCCTask(id: UUID(), title: "C", isComplete: true, projectID: two.id),
+            PCCTask(id: UUID(), title: "D", isComplete: true, projectID: two.id),
+        ]
+
+        let clientContext = WorkBoard.rowContext(
+            for: .client(client.id), projects: [one, two], tasks: tasks,
+            calendar: calendar, reference: now)
+        #expect(clientContext?.completionFraction == 0.75)
+
+        let projectContext = WorkBoard.rowContext(
+            for: .project(one.id), projects: [one, two], tasks: tasks,
+            calendar: calendar, reference: now)
+        #expect(projectContext?.completionFraction == 0.5)
+    }
+
+    @Test("a row with no Tasks has no progress fraction rather than 0% or 100%")
+    func emptyRowHasNoProgress() {
+        let client = PCCClient(id: UUID(), name: "Quiet")
+        let project = Project(id: UUID(), name: "Empty", clientID: client.id)
+        let context = WorkBoard.rowContext(
+            for: .client(client.id), projects: [project], tasks: [],
+            calendar: calendar, reference: now)
+        #expect(context?.totalTaskCount == 0)
+        #expect(context?.completionFraction == nil)
+    }
+
+    // MARK: - Workload
+
+    @Test("a full week is planned at 40 hours, weekends at nothing")
+    func weeklyPlan() {
+        // The reference week's seven days, Monday through Sunday.
+        let week = (0..<7).map { day($0 - 1, hours: 0) }
+        let workload = WorkBoard.workload(
+            days: week, loggedSeconds: 33 * 3600, calendar: calendar)
+
+        #expect(workload.plannedSeconds == 40 * 3600)
+        #expect(workload.remainingSeconds == 7 * 3600)
+        #expect(workload.isOverPlan == false)
+    }
+
+    @Test("one weekday plans 8 hours and one weekend day plans none")
+    func singleDayPlan() {
+        let tuesday = calendar.startOfDay(for: day(0))
+        #expect(!calendar.isDateInWeekend(tuesday))
+        let weekday = WorkBoard.workload(days: [tuesday], loggedSeconds: 0, calendar: calendar)
+        #expect(weekday.plannedSeconds == 8 * 3600)
+
+        let saturday = calendar.startOfDay(for: day(4))
+        #expect(calendar.isDateInWeekend(saturday))
+        let weekend = WorkBoard.workload(days: [saturday], loggedSeconds: 3600, calendar: calendar)
+        #expect(weekend.plannedSeconds == 0)
+        #expect(weekend.fraction == nil)
+        // Logged past a zero plan is still not "over plan" — there was no
+        // plan to exceed, which is what a Saturday means.
+        #expect(weekend.isOverPlan == false)
+    }
+
+    @Test("past the plan, remaining floors at zero and the overage is flagged")
+    func overPlan() {
+        let tuesday = calendar.startOfDay(for: day(0))
+        let workload = WorkBoard.workload(
+            days: [tuesday], loggedSeconds: 10 * 3600, calendar: calendar)
+        #expect(workload.remainingSeconds == 0)
+        #expect(workload.isOverPlan)
     }
 
     // MARK: - Needs organizing

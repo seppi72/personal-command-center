@@ -259,8 +259,40 @@ public enum WorkBoard {
                 return scopedProjects.count
             }(),
             openTaskCount: open.count,
-            overdueTaskCount: open.filter { ($0.dueDate ?? .distantFuture) < dayStart }.count
+            overdueTaskCount: open.filter { ($0.dueDate ?? .distantFuture) < dayStart }.count,
+            completeTaskCount: scopedTasks.count - open.count,
+            totalTaskCount: scopedTasks.count
         )
+    }
+
+    // MARK: - Workload
+
+    /// What a full working day is planned at — the owner's stated 40-hour
+    /// week, held as 8 hours per weekday (issue #107).
+    ///
+    /// Per *weekday* rather than as a flat weekly figure because the panel
+    /// sits under a range stepper that also offers Today and Month, where a
+    /// flat 40 would simply be wrong. This shape reads correctly at every
+    /// unit: 8h on a Tuesday, none on a Sunday, 40h across a full week, and
+    /// the right multiple across a month.
+    public static let plannedSecondsPerWorkday: Double = 8 * 3600
+
+    /// Logged against planned for a range, given the days that range spans
+    /// (`WorkDateRange.days`) and what was actually logged across them.
+    ///
+    /// Weekend days are planned at zero, so time logged on a Saturday reads
+    /// as work beyond the plan rather than as filling it — which is what a
+    /// 40-hour week means. `remaining` floors at zero: once the plan is met,
+    /// the figure worth showing is the overage, not a negative remainder.
+    public static func workload(
+        days: [Date], loggedSeconds: Double, calendar: Calendar = .current
+    ) -> WorkWorkload {
+        let workdays = days.filter { !calendar.isDateInWeekend($0) }.count
+        let planned = Double(workdays) * plannedSecondsPerWorkday
+        return WorkWorkload(
+            loggedSeconds: loggedSeconds,
+            plannedSeconds: planned,
+            remainingSeconds: max(0, planned - loggedSeconds))
     }
 
     /// The "Needs organizing" counts (issue #109's neighbour): work with no
@@ -392,6 +424,33 @@ public struct WorkDeadlineGroup: Identifiable, Equatable, Sendable {
     }
 }
 
+/// The week's shape against the plan: what was logged, what the range's
+/// weekdays add up to at 8 hours each, and what's left of it.
+public struct WorkWorkload: Equatable, Sendable {
+    public let loggedSeconds: Double
+    public let plannedSeconds: Double
+    /// `planned - logged`, floored at zero.
+    public let remainingSeconds: Double
+
+    public init(loggedSeconds: Double, plannedSeconds: Double, remainingSeconds: Double) {
+        self.loggedSeconds = loggedSeconds
+        self.plannedSeconds = plannedSeconds
+        self.remainingSeconds = remainingSeconds
+    }
+
+    /// How much of the plan is met — `nil` when nothing was planned at all
+    /// (a range of pure weekend), where a fraction would divide by zero.
+    public var fraction: Double? {
+        guard plannedSeconds > 0 else { return nil }
+        return loggedSeconds / plannedSeconds
+    }
+
+    /// Whether the range is already past its plan, which the summary line
+    /// says outright rather than showing "0m remaining" and leaving the
+    /// overage unmentioned.
+    public var isOverPlan: Bool { plannedSeconds > 0 && loggedSeconds > plannedSeconds }
+}
+
 /// The counts a Client or Project tree row shows under its name.
 public struct WorkRowContext: Equatable, Sendable {
     /// Projects under this row — zero for a Project row, which *is* the
@@ -399,11 +458,31 @@ public struct WorkRowContext: Equatable, Sendable {
     public let projectCount: Int
     public let openTaskCount: Int
     public let overdueTaskCount: Int
+    public let completeTaskCount: Int
+    /// Every Task under this row, done or not — the denominator the progress
+    /// bar fills against (issue #112).
+    public let totalTaskCount: Int
 
-    public init(projectCount: Int, openTaskCount: Int, overdueTaskCount: Int) {
+    public init(
+        projectCount: Int, openTaskCount: Int, overdueTaskCount: Int,
+        completeTaskCount: Int = 0, totalTaskCount: Int = 0
+    ) {
         self.projectCount = projectCount
         self.openTaskCount = openTaskCount
         self.overdueTaskCount = overdueTaskCount
+        self.completeTaskCount = completeTaskCount
+        self.totalTaskCount = totalTaskCount
+    }
+
+    /// How far through this row's Tasks the owner is, or `nil` when there
+    /// are no Tasks under it at all — zero of zero is neither 0% nor 100%,
+    /// it's nothing to measure, and the row draws no bar.
+    ///
+    /// Counts Tasks rather than hours because a Project carries no estimate
+    /// in this domain: hours have no budget to be a fraction of.
+    public var completionFraction: Double? {
+        guard totalTaskCount > 0 else { return nil }
+        return Double(completeTaskCount) / Double(totalTaskCount)
     }
 
     /// The row's caption, e.g. "3 projects · 5 open · 1 overdue". `nil` when

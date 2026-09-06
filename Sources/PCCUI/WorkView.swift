@@ -522,11 +522,41 @@ private struct WorkContent: View {
                 }
             }
             .frame(height: 150, alignment: .bottom)
+            workloadLine
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassBubble()
+    }
+
+    /// Logged against plan for the range (issue #107) — the plan being the
+    /// owner's 40-hour week, held as 8 hours per weekday so the figure still
+    /// reads correctly on Today and Month (`WorkBoard.plannedSecondsPerWorkday`).
+    ///
+    /// Past the plan the line says so outright rather than reporting "0m
+    /// remaining" and leaving the overage unmentioned.
+    @ViewBuilder
+    private var workloadLine: some View {
+        let workload = viewModel.workload
+        if workload.plannedSeconds > 0 {
+            HStack(spacing: 6) {
+                Text("\(PCCDuration.compact(workload.loggedSeconds)) logged")
+                    .foregroundStyle(.primary)
+                Text("·")
+                Text("\(PCCDuration.compact(workload.plannedSeconds)) planned")
+                Text("·")
+                if workload.isOverPlan {
+                    Text("\(PCCDuration.compact(workload.loggedSeconds - workload.plannedSeconds)) over")
+                        .foregroundStyle(theme.accent(colorScheme))
+                } else {
+                    Text("\(PCCDuration.compact(workload.remainingSeconds)) remaining")
+                }
+                Spacer(minLength: 0)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
     }
 
     private func dayBar(_ entry: (day: Date, seconds: Double), peak: Double) -> some View {
@@ -636,18 +666,24 @@ private struct WorkContent: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(width: 14)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(node.name)
                     .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
                     .lineLimit(1)
-                // Context only on Client and Project rows (issue #105): a
-                // caption under every Sprint and Task would bury the
-                // structure this card exists to show.
-                if let caption = viewModel.rowContext(for: node)?.caption {
-                    Text(caption)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                // Context and progress only on Client and Project rows
+                // (issues #105, #112): a caption and a bar under every
+                // Sprint and Task would bury the structure this card exists
+                // to show.
+                if let context = viewModel.rowContext(for: node) {
+                    if let fraction = context.completionFraction {
+                        progressBar(fraction)
+                    }
+                    if let caption = context.caption {
+                        Text(caption)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
             }
             Spacer(minLength: 8)
@@ -670,6 +706,28 @@ private struct WorkContent: View {
             viewModel.selectedNodeID = isSelected ? nil : node.id
         }
         .contextMenu { contextMenu(for: node) }
+    }
+
+    /// A Client or Project row's completion bar: Tasks done over Tasks in
+    /// its subtree (issue #112). Thin and quiet on purpose — it rides along
+    /// with the row's caption rather than competing with the row's name.
+    private func progressBar(_ fraction: Double) -> some View {
+        HStack(spacing: 8) {
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule(style: .continuous)
+                        .fill(theme.panelLine(colorScheme))
+                    Capsule(style: .continuous)
+                        .fill(theme.accent(colorScheme))
+                        .frame(width: proxy.size.width * max(0, min(1, fraction)))
+                }
+            }
+            .frame(height: 4)
+            Text("\(Int((fraction * 100).rounded()))%")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: 220)
     }
 
     private func rowHighlight(_ isSelected: Bool) -> some View {
