@@ -272,12 +272,11 @@ public final class WorkViewModel: ObservableObject {
         scopedTasks.filter { !$0.isComplete }.count
     }
 
-    /// Completed Tasks over all Tasks in scope — what the completion ring
-    /// fills to. `total` of 0 means there is nothing to be a fraction of;
-    /// the ring renders empty rather than dividing by zero.
-    public var taskCompletion: (complete: Int, total: Int) {
-        let scoped = scopedTasks
-        return (scoped.filter(\.isComplete).count, scoped.count)
+    /// Completed Tasks over all Tasks in scope, with the today/this-week
+    /// breakdowns and the overdue count the card leads with (issue #106).
+    /// A scope with no Tasks reports `isEmpty` rather than dividing by zero.
+    public var taskProgress: WorkTaskProgress {
+        WorkBoard.taskProgress(tasks: scopedTasks)
     }
 
     // MARK: - Today

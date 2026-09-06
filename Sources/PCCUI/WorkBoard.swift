@@ -259,10 +259,57 @@ public enum WorkBoard {
                 return scopedProjects.count
             }(),
             openTaskCount: open.count,
-            overdueTaskCount: open.filter { ($0.dueDate ?? .distantFuture) < dayStart }.count,
+            overdueTaskCount: open.filter { isOverdue($0, before: dayStart) }.count,
             completeTaskCount: scopedTasks.count - open.count,
             totalTaskCount: scopedTasks.count
         )
+    }
+
+    // MARK: - Task progress
+
+    /// How far through the Tasks in scope the owner is, broken down by the
+    /// windows that make the headline figure actionable (issue #106).
+    ///
+    /// Takes already-scoped Tasks rather than scoping them itself: what
+    /// "in scope" means is the tree selection's business (`WorkViewModel`),
+    /// and every count here is the same question asked of a different date
+    /// window. Deliberately unfiltered by the range stepper for the same
+    /// reason the scope's Task counts are — "how much work is open" doesn't
+    /// change because the hour panels are reporting on last month.
+    public static func taskProgress(
+        tasks: [PCCTask], calendar: Calendar = .current, reference: Date = Date()
+    ) -> WorkTaskProgress {
+        let dayStart = calendar.startOfDay(for: reference)
+        let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
+        let week = calendar.dateInterval(of: .weekOfYear, for: reference)
+
+        func due(_ task: PCCTask, in range: Range<Date>) -> Bool {
+            guard let due = task.dueDate else { return false }
+            return range.contains(due)
+        }
+        let today = tasks.filter { due($0, in: dayStart..<dayEnd) }
+        let thisWeek = week.map { interval in
+            tasks.filter { due($0, in: interval.start..<interval.end) }
+        } ?? []
+
+        return WorkTaskProgress(
+            complete: tasks.filter(\.isComplete).count,
+            total: tasks.count,
+            todayComplete: today.filter(\.isComplete).count,
+            todayTotal: today.count,
+            weekComplete: thisWeek.filter(\.isComplete).count,
+            weekTotal: thisWeek.count,
+            overdue: tasks.filter { isOverdue($0, before: dayStart) }.count
+        )
+    }
+
+    /// Whether a Task is already late: still open, with a due date before
+    /// the current day started. The whole of today is still in play, so a
+    /// Task due later — or earlier — today is not overdue. Shared by the
+    /// progress card and the tree rows so the two can't drift apart.
+    private static func isOverdue(_ task: PCCTask, before dayStart: Date) -> Bool {
+        guard !task.isComplete, let due = task.dueDate else { return false }
+        return due < dayStart
     }
 
     // MARK: - Workload
@@ -449,6 +496,49 @@ public struct WorkWorkload: Equatable, Sendable {
     /// says outright rather than showing "0m remaining" and leaving the
     /// overage unmentioned.
     public var isOverPlan: Bool { plannedSeconds > 0 && loggedSeconds > plannedSeconds }
+}
+
+/// The Task Progress card's figures: done over total in scope, the same
+/// pair narrowed to today and to this week, and what is already late.
+///
+/// Counts rather than a lone percentage (issue #106) — a percentage without
+/// its denominator says nothing about how much work "60%" actually leaves.
+public struct WorkTaskProgress: Equatable, Sendable {
+    public let complete: Int
+    public let total: Int
+    /// Tasks due on the reference day, done and in total.
+    public let todayComplete: Int
+    public let todayTotal: Int
+    /// Tasks due anywhere in the reference day's calendar week.
+    public let weekComplete: Int
+    public let weekTotal: Int
+    /// Incomplete Tasks whose due date is already past — the whole of the
+    /// current day is still in play, so today's Tasks are never overdue.
+    public let overdue: Int
+
+    public init(
+        complete: Int, total: Int, todayComplete: Int, todayTotal: Int,
+        weekComplete: Int, weekTotal: Int, overdue: Int
+    ) {
+        self.complete = complete
+        self.total = total
+        self.todayComplete = todayComplete
+        self.todayTotal = todayTotal
+        self.weekComplete = weekComplete
+        self.weekTotal = weekTotal
+        self.overdue = overdue
+    }
+
+    /// Nothing to report on — the card shows its empty state rather than a
+    /// row of zeroes.
+    public var isEmpty: Bool { total == 0 }
+
+    /// How much of the scope is done, or `nil` when there is nothing to be
+    /// a fraction of, so the bar renders empty rather than dividing by zero.
+    public var fraction: Double? {
+        guard total > 0 else { return nil }
+        return Double(complete) / Double(total)
+    }
 }
 
 /// The counts a Client or Project tree row shows under its name.

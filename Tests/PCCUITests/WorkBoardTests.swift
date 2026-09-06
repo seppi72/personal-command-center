@@ -308,4 +308,72 @@ struct WorkBoardTests {
         #expect(counts.projects == 1)
         #expect(counts.tasks == 1)
     }
+
+    // MARK: - Task progress
+
+    @Test("progress leads with done over total across every Task in scope")
+    func progressTotals() {
+        let tasks = [
+            PCCTask(id: UUID(), title: "One", isComplete: true),
+            PCCTask(id: UUID(), title: "Two", isComplete: true),
+            PCCTask(id: UUID(), title: "Three"),
+        ]
+
+        let progress = WorkBoard.taskProgress(tasks: tasks, calendar: calendar, reference: now)
+
+        #expect(progress.complete == 2)
+        #expect(progress.total == 3)
+        #expect(progress.fraction == 2.0 / 3.0)
+    }
+
+    @Test("today and this week count only Tasks due inside those windows")
+    func progressWindows() {
+        let tasks = [
+            // Today: one done, one open.
+            PCCTask(id: UUID(), title: "Today done", isComplete: true, dueDate: day(0, hours: 9)),
+            PCCTask(id: UUID(), title: "Today open", dueDate: day(0, hours: 20)),
+            // Elsewhere in the same week (Sun 12th - Sat 18th).
+            PCCTask(id: UUID(), title: "Week done", isComplete: true, dueDate: day(-2)),
+            PCCTask(id: UUID(), title: "Week open", dueDate: day(4)),
+            // Outside the week on either side.
+            PCCTask(id: UUID(), title: "Last week", dueDate: day(-3)),
+            PCCTask(id: UUID(), title: "Next week", dueDate: day(5)),
+            // Undated Tasks belong to neither window.
+            PCCTask(id: UUID(), title: "Someday"),
+        ]
+
+        let progress = WorkBoard.taskProgress(tasks: tasks, calendar: calendar, reference: now)
+
+        #expect(progress.todayComplete == 1)
+        #expect(progress.todayTotal == 2)
+        #expect(progress.weekComplete == 2)
+        #expect(progress.weekTotal == 4)
+    }
+
+    @Test("overdue means incomplete with a due date before today")
+    func progressOverdue() {
+        let tasks = [
+            PCCTask(id: UUID(), title: "Late", dueDate: day(-2)),
+            // Done, so no longer overdue however late its due date was.
+            PCCTask(id: UUID(), title: "Late but done", isComplete: true, dueDate: day(-4)),
+            // Earlier today is not overdue: the whole day is still in play.
+            PCCTask(id: UUID(), title: "Earlier today", dueDate: day(0, hours: 1)),
+            PCCTask(id: UUID(), title: "Undated"),
+        ]
+
+        let progress = WorkBoard.taskProgress(tasks: tasks, calendar: calendar, reference: now)
+
+        #expect(progress.overdue == 1)
+    }
+
+    @Test("an empty scope reports zeroes and no fraction rather than dividing by zero")
+    func progressEmptyScope() {
+        let progress = WorkBoard.taskProgress(tasks: [], calendar: calendar, reference: now)
+
+        #expect(progress.total == 0)
+        #expect(progress.complete == 0)
+        #expect(progress.overdue == 0)
+        #expect(progress.fraction == nil)
+        #expect(progress.isEmpty)
+    }
 }

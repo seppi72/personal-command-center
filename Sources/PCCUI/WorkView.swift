@@ -429,7 +429,7 @@ private struct WorkContent: View {
     /// number the screen exists to report; the other three are the context
     /// that makes it mean something.
     private var statStrip: some View {
-        let completion = viewModel.taskCompletion
+        let progress = viewModel.taskProgress
         return HStack(spacing: 14) {
             heroTile
             statTile(
@@ -440,7 +440,7 @@ private struct WorkContent: View {
                 caption: "in scope")
             statTile(
                 "Tasks Open", value: "\(viewModel.openTaskCount)",
-                caption: "\(completion.complete) of \(completion.total) done")
+                caption: "\(progress.complete) of \(progress.total) done")
         }
     }
 
@@ -713,21 +713,29 @@ private struct WorkContent: View {
     /// with the row's caption rather than competing with the row's name.
     private func progressBar(_ fraction: Double) -> some View {
         HStack(spacing: 8) {
-            GeometryReader { proxy in
-                ZStack(alignment: .leading) {
-                    Capsule(style: .continuous)
-                        .fill(theme.panelLine(colorScheme))
-                    Capsule(style: .continuous)
-                        .fill(theme.accent(colorScheme))
-                        .frame(width: proxy.size.width * max(0, min(1, fraction)))
-                }
-            }
-            .frame(height: 4)
+            capsuleTrack(fraction, height: 4)
             Text("\(Int((fraction * 100).rounded()))%")
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: 220)
+    }
+
+    /// The one filled-capsule bar this screen draws, at whatever height the
+    /// caller needs — the tree row's thin one and the Task Progress card's
+    /// headline are the same bar, so they can't drift apart in colour or in
+    /// how they clamp an out-of-range fraction.
+    private func capsuleTrack(_ fraction: Double, height: CGFloat) -> some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule(style: .continuous)
+                    .fill(theme.panelLine(colorScheme))
+                Capsule(style: .continuous)
+                    .fill(theme.accent(colorScheme))
+                    .frame(width: proxy.size.width * max(0, min(1, fraction)))
+            }
+        }
+        .frame(height: height)
     }
 
     private func rowHighlight(_ isSelected: Bool) -> some View {
@@ -804,34 +812,44 @@ private struct WorkContent: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// Tasks done over Tasks in scope, as a ring. Counts Tasks rather than
-    /// hours on purpose: the hours are already three panels on this screen,
-    /// and "how far through the work am I" is the question none of them
-    /// answer.
+    /// Tasks done over Tasks in scope. Counts Tasks rather than hours on
+    /// purpose: the hours are already three panels on this screen, and "how
+    /// far through the work am I" is the question none of them answer.
+    ///
+    /// Leads with `done / total` over a linear bar rather than the
+    /// percentage ring it used to draw (issue #106): a percentage hides its
+    /// own denominator, and a ring spends 96 points square on two numbers.
+    /// The rows beneath narrow the same pair to today and this week, and
+    /// give overdue a figure of its own.
     private var completionBubble: some View {
-        let completion = viewModel.taskCompletion
-        let fraction = completion.total > 0 ? Double(completion.complete) / Double(completion.total) : 0
+        let progress = viewModel.taskProgress
         return VStack(alignment: .leading, spacing: 12) {
             Text("Task Progress")
                 .pccPanelLabel()
                 .foregroundStyle(.secondary)
-            HStack(spacing: 18) {
-                completionRing(fraction)
-                    .frame(width: 96, height: 96)
-                VStack(alignment: .leading, spacing: 6) {
-                    if completion.total == 0 {
-                        Text("No Tasks in scope.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("\(completion.complete) done")
-                            .font(.system(size: 15, weight: .semibold))
-                        Text("\(completion.total - completion.complete) still open")
-                            .font(.subheadline)
+            if progress.isEmpty {
+                Text("No Tasks in scope.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("\(progress.complete) / \(progress.total)")
+                            .font(.pccReadout(26))
+                        Text("completed")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    // Taller than a tree row's bar and unlabelled: the counts
+                    // it fills toward are directly above it.
+                    capsuleTrack(progress.fraction ?? 0, height: 8)
+                    VStack(spacing: 6) {
+                        completionRow("Today", "\(progress.todayComplete) / \(progress.todayTotal)")
+                        completionRow("This week", "\(progress.weekComplete) / \(progress.weekTotal)")
+                        completionRow(
+                            "Overdue", "\(progress.overdue)", isAlarming: progress.overdue > 0)
+                    }
                 }
-                Spacer(minLength: 0)
             }
         }
         .padding(.horizontal, 22)
@@ -840,18 +858,17 @@ private struct WorkContent: View {
         .glassBubble()
     }
 
-    private func completionRing(_ fraction: Double) -> some View {
-        ZStack {
-            Circle()
-                .stroke(theme.panelLine(colorScheme), lineWidth: 12)
-            Circle()
-                .trim(from: 0, to: max(0, min(1, fraction)))
-                .stroke(
-                    theme.accent(colorScheme),
-                    style: StrokeStyle(lineWidth: 12, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-            Text("\(Int((fraction * 100).rounded()))%")
-                .font(.pccReadout(17))
+    private func completionRow(_ label: String, _ value: String, isAlarming: Bool = false)
+        -> some View
+    {
+        HStack {
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            Text(value)
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundStyle(isAlarming ? theme.signalRed(colorScheme) : .primary)
         }
     }
 
