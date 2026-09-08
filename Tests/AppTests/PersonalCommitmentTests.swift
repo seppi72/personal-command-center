@@ -99,8 +99,7 @@ extension AppTestSuite {
         @Test("creates a Commitment with a Course link and round-trips it")
         func createsACommitmentWithACourse() async throws {
             try await withCommitmentsApp { app, _ in
-                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026)
-                try await course.save(on: app.db)
+                let course = try await makeCourse(name: "CS 301", on: app.db)
                 let courseID = try course.requireID()
                 let start = Date(timeIntervalSince1970: 1_800_000_000)
 
@@ -256,8 +255,7 @@ extension AppTestSuite {
         @Test("attaches a Course to a Commitment on edit, then clears it back to none")
         func editsACommitmentsCourse() async throws {
             try await withCommitmentsApp { app, _ in
-                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026)
-                try await course.save(on: app.db)
+                let course = try await makeCourse(name: "CS 301", on: app.db)
                 let courseID = try course.requireID()
 
                 let commitment = PersonalCommitment(
@@ -401,8 +399,7 @@ extension AppTestSuite {
         @Test("deletes a Commitment with a Course link the same as one without")
         func deletesACommitmentWithACourse() async throws {
             try await withCommitmentsApp { app, _ in
-                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026)
-                try await course.save(on: app.db)
+                let course = try await makeCourse(name: "CS 301", on: app.db)
                 let courseID = try course.requireID()
 
                 let commitment = PersonalCommitment(
@@ -519,8 +516,7 @@ extension AppTestSuite {
         @Test("filters Personal Commitments by ?courseID=")
         func filtersCommitmentsByCourse() async throws {
             try await withCommitmentsApp { app, _ in
-                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026)
-                try await course.save(on: app.db)
+                let course = try await makeCourse(name: "CS 301", on: app.db)
                 let courseID = try course.requireID()
 
                 try await PersonalCommitment(

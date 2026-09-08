@@ -38,6 +38,7 @@ let categoriesClient = URLSessionCategoriesAPIClient(baseURL: baseURL, bearerTok
 let subcategoriesClient = URLSessionSubcategoriesAPIClient(baseURL: baseURL, bearerToken: bearerToken)
 let financesReportingClient = URLSessionFinancesReportingAPIClient(baseURL: baseURL, bearerToken: bearerToken)
 let notificationsClient = URLSessionNotificationsAPIClient(baseURL: baseURL, bearerToken: bearerToken)
+let termsClient = URLSessionTermsAPIClient(baseURL: baseURL, bearerToken: bearerToken)
 
 // One instance per screen's view model, constructed once here (rather than
 // inline in `DashboardView.body`) so switching the sidebar selection
@@ -53,8 +54,9 @@ let calendarViewModel = CalendarViewModel(
     commitmentsClient: personalCommitmentsClient, mirroredEventsClient: mirroredCalendarEventsClient, coursesClient: coursesClient)
 let personalCommitmentsViewModel = PersonalCommitmentsViewModel(client: personalCommitmentsClient, coursesClient: coursesClient)
 let schoolViewModel = SchoolViewModel(
-    coursesClient: coursesClient, projectsClient: projectsClient, tasksClient: tasksClient,
-    timeEntriesClient: timeEntriesClient, commitmentsClient: personalCommitmentsClient)
+    coursesClient: coursesClient, termsClient: termsClient, projectsClient: projectsClient,
+    tasksClient: tasksClient, timeEntriesClient: timeEntriesClient,
+    commitmentsClient: personalCommitmentsClient)
 let timerViewModel = TimerViewModel(
     timeEntriesClient: timeEntriesClient, tasksClient: tasksClient, projectsClient: projectsClient,
     clientsClient: clientsClient, coursesClient: coursesClient)

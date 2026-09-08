@@ -4,15 +4,20 @@ import Vapor
 struct CourseResponse: Content {
     let id: UUID
     let name: String
-    let termMonth: Int
-    let termYear: Int
+    let termID: UUID
+    /// The whole Term, not just its id — every screen that lists Courses
+    /// also labels, badges or groups them by Term, and a nested Term saves
+    /// each of those a second round trip plus a client-side join that could
+    /// disagree with this response. Requires the caller to have eager-loaded
+    /// `$term` (`Self.query(on:)`).
+    let term: TermResponse
     let dueDate: Date?
 
     init(_ course: Course) throws {
         self.id = try course.requireID()
         self.name = course.name
-        self.termMonth = course.termMonth
-        self.termYear = course.termYear
+        self.termID = course.$term.id
+        self.term = try TermResponse(course.term)
         self.dueDate = course.dueDate
     }
 }
@@ -21,8 +26,7 @@ struct CourseResponse: Content {
 /// set together, unlike its Deadline (its own endpoint, below).
 struct SaveCourseRequest: Content {
     let name: String
-    let termMonth: Int
-    let termYear: Int
+    let termID: UUID
 }
 
 /// `dueDate: nil` (or the key omitted entirely) clears the Course's
@@ -47,17 +51,18 @@ struct CourseController: RouteCollection {
     /// anything, unlike `ProjectController.index`'s optional `?clientID=`
     /// scoping.
     func index(req: Request) async throws -> [CourseResponse] {
-        try await Course.query(on: req.db).all().map(CourseResponse.init)
+        try await Self.query(on: req.db).all().map(CourseResponse.init)
     }
 
     func create(req: Request) async throws -> CourseResponse {
         let payload = try req.content.decode(SaveCourseRequest.self)
+        let term = try await Self.requireTerm(id: payload.termID, req: req)
         let course = Course(
             name: try Self.validatedName(payload.name),
-            termMonth: try Self.validatedTermMonth(payload.termMonth),
-            termYear: try Self.validatedTermYear(payload.termYear)
+            termID: try term.requireID()
         )
         try await course.save(on: req.db)
+        course.$term.value = term
         return try CourseResponse(course)
     }
 
@@ -66,11 +71,29 @@ struct CourseController: RouteCollection {
             throw Abort(.notFound)
         }
         let payload = try req.content.decode(SaveCourseRequest.self)
+        let term = try await Self.requireTerm(id: payload.termID, req: req)
         course.name = try Self.validatedName(payload.name)
-        course.termMonth = try Self.validatedTermMonth(payload.termMonth)
-        course.termYear = try Self.validatedTermYear(payload.termYear)
+        course.$term.id = try term.requireID()
         try await course.save(on: req.db)
+        course.$term.value = term
         return try CourseResponse(course)
+    }
+
+    /// Every Course read eager-loads its Term, since `CourseResponse` nests
+    /// the whole Term rather than just its id — one query with a join beats
+    /// a Term lookup per Course.
+    private static func query(on db: any Database) -> QueryBuilder<Course> {
+        Course.query(on: db).with(\.$term)
+    }
+
+    /// A Course belongs to exactly one Term, required — a `termID` naming no
+    /// Term is a bad request, not a Course quietly saved without one
+    /// (`docs/adr/0012-term-is-an-entity.md`).
+    private static func requireTerm(id: UUID, req: Request) async throws -> Term {
+        guard let term = try await Term.find(id, on: req.db) else {
+            throw Abort(.badRequest, reason: "no Term with that id")
+        }
+        return term
     }
 
     /// A Course is created/edited "with a name" — reject an empty or
@@ -81,25 +104,6 @@ struct CourseController: RouteCollection {
             throw Abort(.badRequest, reason: "name must not be empty")
         }
         return trimmed
-    }
-
-    /// A Term's month is a calendar month, 1 (January) through 12 (December)
-    /// — reject anything outside that range rather than persisting a Course
-    /// with a nonsensical Term.
-    private static func validatedTermMonth(_ termMonth: Int) throws -> Int {
-        guard (1...12).contains(termMonth) else {
-            throw Abort(.badRequest, reason: "termMonth must be between 1 and 12")
-        }
-        return termMonth
-    }
-
-    /// A Term's year is a real calendar year — reject a non-positive one
-    /// rather than persisting a Course with a nonsensical Term.
-    private static func validatedTermYear(_ termYear: Int) throws -> Int {
-        guard termYear > 0 else {
-            throw Abort(.badRequest, reason: "termYear must be a positive integer")
-        }
-        return termYear
     }
 
     /// Deleting a Course doesn't delete its Tasks — `AddCourseToPCCTask`'s
@@ -161,6 +165,6 @@ struct CourseController: RouteCollection {
         guard let id = req.parameters.get("courseID", as: UUID.self) else {
             throw Abort(.badRequest)
         }
-        return try await Course.find(id, on: req.db)
+        return try await Self.query(on: req.db).filter(\.$id == id).first()
     }
 }

@@ -12,10 +12,12 @@ import Vapor
 /// placeholder for a future sync
 /// (`docs/adr/0009-manual-entry-not-lms-integration-for-school.md`).
 ///
-/// Term (the month and year a Course belongs to, e.g. "September 2026") is
-/// modeled as two required integers, `termMonth`/`termYear`, rather than a
-/// `Date` — there's no real day-of-month in a Term, and fabricating one (e.g.
-/// the 1st) would misrepresent the domain.
+/// A Course belongs to exactly one `Term` — required, never none. Term used
+/// to live here as two plain integers, `termMonth`/`termYear`, on the
+/// reasoning that a Term was just a month-and-year label with no attributes
+/// of its own; it now carries the school's published start and end dates, so
+/// it is an entity and this is a reference to it
+/// (`docs/adr/0012-term-is-an-entity.md`).
 ///
 /// Collides with nothing in Vapor/the stdlib, unlike `PCCClient`/`PCCTask` —
 /// named plainly `Course`.
@@ -28,22 +30,18 @@ final class Course: Model, @unchecked Sendable {
     @Field(key: "name")
     var name: String
 
-    @Field(key: "term_month")
-    var termMonth: Int
-
-    @Field(key: "term_year")
-    var termYear: Int
+    @Parent(key: "term_id")
+    var term: Term
 
     @OptionalField(key: "due_date")
     var dueDate: Date?
 
     init() {}
 
-    init(id: UUID? = nil, name: String, termMonth: Int, termYear: Int, dueDate: Date? = nil) {
+    init(id: UUID? = nil, name: String, termID: Term.IDValue, dueDate: Date? = nil) {
         self.id = id
         self.name = name
-        self.termMonth = termMonth
-        self.termYear = termYear
+        self.$term.id = termID
         self.dueDate = dueDate
     }
 }

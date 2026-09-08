@@ -41,6 +41,7 @@ private func courseTitleFont(_ size: CGFloat, weight: Font.Weight = .semibold) -
 private enum SchoolSheet: Identifiable {
     case newCourse
     case editCourse(Course)
+    case terms
     case newProject(courseID: UUID)
     case editProject(Project)
     case newTask(courseID: UUID?, projectID: UUID?)
@@ -51,6 +52,7 @@ private enum SchoolSheet: Identifiable {
     var id: String {
         switch self {
         case .newCourse: return "newCourse"
+        case .terms: return "terms"
         case .editCourse(let course): return "editCourse:\(course.id)"
         case .newProject(let courseID): return "newProject:\(courseID)"
         case .editProject(let project): return "editProject:\(project.id)"
@@ -118,6 +120,10 @@ private struct SchoolContent: View {
             }
         }
         ToolbarItem {
+            Button { sheet = .terms } label: {
+                Label("Terms", systemImage: "calendar")
+            }
+            .buttonStyle(.pccControlChip)
             Button { sheet = .newCourse } label: {
                 Label("New Course", systemImage: "graduationcap")
             }
@@ -185,7 +191,7 @@ private struct SchoolContent: View {
             if let term = viewModel.currentTerm {
                 Button("This Term") { viewModel.selectCurrentTerm() }
                     .buttonStyle(.pccControlChip)
-                    .help("Jump to \(term.label)")
+                    .help("Jump to \(term.displayName)")
             }
             Spacer()
         }
@@ -213,7 +219,7 @@ private struct SchoolContent: View {
                 status: tiles.deadlinesInRange > 0 ? .attention : .nominal)
             tile(
                 "Active Courses", value: "\(tiles.activeCourses)",
-                caption: viewModel.currentTerm?.label ?? "No Term",
+                caption: viewModel.currentTerm?.displayName ?? "No Term",
                 status: .nominal)
         }
     }
@@ -292,13 +298,13 @@ private struct SchoolContent: View {
         let open = viewModel.tasks(for: course).filter { !$0.isComplete }.count
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 12) {
-                TermBadge(month: course.termMonth, year: course.termYear)
+                TermBadge(term: course.term)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(course.name)
                         .font(courseTitleFont(15))
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
-                    Text(SchoolTerm(course).label)
+                    Text(course.term.displayName)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
@@ -345,11 +351,11 @@ private struct SchoolContent: View {
                         .font(.system(size: 12, weight: .semibold))
                 }
                 .buttonStyle(.pccControlChip)
-                TermBadge(month: course.termMonth, year: course.termYear)
+                TermBadge(term: course.term)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(course.name)
                         .font(courseTitleFont(20))
-                    Text(SchoolTerm(course).label)
+                    Text(course.term.displayName)
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
@@ -700,8 +706,18 @@ private struct SchoolContent: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            Button("New Course") { sheet = .newCourse }
-                .buttonStyle(.borderedProminent)
+            if viewModel.terms.isEmpty {
+                // A Course belongs to exactly one Term, so with no Terms
+                // there is nothing to create a Course against yet — the call
+                // to action is the Term, not a Course form that would open
+                // with an empty picker
+                // (`docs/adr/0012-term-is-an-entity.md`).
+                Button("Add a Term") { sheet = .terms }
+                    .buttonStyle(.borderedProminent)
+            } else {
+                Button("New Course") { sheet = .newCourse }
+                    .buttonStyle(.borderedProminent)
+            }
         }
         .padding(PCCChassis.outerMargin)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -715,20 +731,22 @@ private struct SchoolContent: View {
         case .newCourse:
             CourseFormSheet(
                 title: "New Course", initialName: "",
-                initialTermMonth: Calendar.current.component(.month, from: Date()),
-                initialTermYear: Calendar.current.component(.year, from: Date()),
-                initialDueDate: nil
+                initialTermID: SchoolBoard.currentTerm(in: viewModel.courses)?.id
+                    ?? viewModel.terms.last?.id,
+                initialDueDate: nil, terms: viewModel.terms
             ) { values in
                 await viewModel.createCourse(values)
             }
         case .editCourse(let course):
             CourseFormSheet(
                 title: "Edit Course", initialName: course.name,
-                initialTermMonth: course.termMonth, initialTermYear: course.termYear,
-                initialDueDate: course.dueDate
+                initialTermID: course.termID,
+                initialDueDate: course.dueDate, terms: viewModel.terms
             ) { values in
                 await viewModel.updateCourse(course, with: values)
             }
+        case .terms:
+            TermsSheet(viewModel: viewModel)
         case .newProject(let courseID):
             ProjectFormSheet(title: "New Project", initialName: "", initialDueDate: nil) { values in
                 await viewModel.createProject(courseID: courseID, values)
@@ -828,20 +846,27 @@ private struct CourseCardPressStyle: ButtonStyle {
 }
 
 /// Shared create/edit form: the same sheet serves "New Course" and "Edit
-/// Course" — a name field, Term (month/year) fields, and a Deadline toggle
-/// (mirrors `ProjectFormSheet`). Folded in from the deleted `CourseView`
-/// unchanged. Left in the shared chassis look rather than a bespoke glass
-/// re-theme — a `Form`'s native controls don't read as "liquid glass" however
-/// they're dressed, so there's nothing this screen's own device would add here
-/// (mirrors `AccountFormSheet`'s identical reasoning); only its backdrop moves
-/// to `GlassScreenBackground()` via `glassScreenBackground()`, per issue #72.
+/// Course" — a name field, a Term picker, and a Deadline toggle (mirrors
+/// `ProjectFormSheet`). Folded in from the deleted `CourseView`. Left in the
+/// shared chassis look rather than a bespoke glass re-theme — a `Form`'s
+/// native controls don't read as "liquid glass" however they're dressed, so
+/// there's nothing this screen's own device would add here (mirrors
+/// `AccountFormSheet`'s identical reasoning); only its backdrop moves to
+/// `GlassScreenBackground()` via `glassScreenBackground()`, per issue #72.
+///
+/// The Term is picked from the Terms that already exist rather than typed as
+/// a month and year: a Course points at a Term entity now
+/// (`docs/adr/0012-term-is-an-entity.md`), and free entry would spawn a
+/// second row for a semester that already has one. With no Terms yet, Save
+/// is disabled and the sheet says where to make one, rather than silently
+/// saving a Course with no Term.
 struct CourseFormSheet: View {
     let title: String
+    let terms: [Term]
     let onSave: (CourseFormValues) async -> Void
 
     @State private var name: String
-    @State private var termMonth: Int
-    @State private var termYear: Int
+    @State private var termID: UUID?
     @State private var hasDeadline: Bool
     @State private var dueDate: Date
     @Environment(\.dismiss) private var dismiss
@@ -849,16 +874,16 @@ struct CourseFormSheet: View {
     init(
         title: String,
         initialName: String,
-        initialTermMonth: Int,
-        initialTermYear: Int,
+        initialTermID: UUID?,
         initialDueDate: Date?,
+        terms: [Term],
         onSave: @escaping (CourseFormValues) async -> Void
     ) {
         self.title = title
+        self.terms = terms
         self.onSave = onSave
         self._name = State(initialValue: initialName)
-        self._termMonth = State(initialValue: initialTermMonth)
-        self._termYear = State(initialValue: initialTermYear)
+        self._termID = State(initialValue: initialTermID ?? terms.last?.id)
         self._hasDeadline = State(initialValue: initialDueDate != nil)
         self._dueDate = State(initialValue: initialDueDate ?? Date())
     }
@@ -874,8 +899,6 @@ struct CourseFormSheet: View {
         hasDeadline ? dueDate : nil
     }
 
-    private static let monthSymbols = Calendar.current.monthSymbols
-
     var body: some View {
         NavigationStack {
             Form {
@@ -885,11 +908,16 @@ struct CourseFormSheet: View {
                 }
                 .panelRows()
                 Section("Term") {
-                    PCCMenuPicker(
-                        "Month", selection: $termMonth,
-                        options: (1...12).map { ($0, Self.monthSymbols[$0 - 1]) }
-                    )
-                    Stepper("Year: \(termYear)", value: $termYear, in: 1900...3000)
+                    if terms.isEmpty {
+                        Text("No Terms yet — add one from the Terms button on the School screen.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        PCCMenuPicker(
+                            "Term", selection: $termID,
+                            options: terms.map { (Optional($0.id), $0.displayName) }
+                        )
+                    }
                 }
                 .panelRows()
                 Section("Deadline") {
@@ -908,15 +936,204 @@ struct CourseFormSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
+                        guard let termID else { return }
                         let values = CourseFormValues(
-                            name: trimmedName, termMonth: termMonth, termYear: termYear,
-                            dueDate: selectedDueDate)
+                            name: trimmedName, termID: termID, dueDate: selectedDueDate)
                         Task {
                             await onSave(values)
                             dismiss()
                         }
                     }
-                    .disabled(trimmedName.isEmpty)
+                    .disabled(trimmedName.isEmpty || termID == nil)
+                }
+            }
+        }
+    }
+}
+
+/// Manages the Terms themselves — the only place a Term is created, edited
+/// or deleted, reached from the School screen's Terms button.
+///
+/// A list rather than a screen of its own: Terms are a handful of rows a
+/// semester, edited rarely, and giving them a top-level screen beside Work
+/// and School would overstate how often the owner touches them.
+///
+/// Each row shows how many Courses belong to the Term, because that is
+/// exactly what decides whether it can be deleted — the backend blocks
+/// deleting a Term while any Course still references it
+/// (`TermController.delete`), so the count is the answer before the attempt.
+struct TermsSheet: View {
+    @ObservedObject var viewModel: SchoolViewModel
+    @State private var editing: TermEdit?
+    @Environment(\.dismiss) private var dismiss
+
+    /// Which Term the editor is open on — a new one, or an existing row.
+    private enum TermEdit: Identifiable {
+        case new
+        case existing(Term)
+
+        var id: String {
+            switch self {
+            case .new: return "new"
+            case .existing(let term): return term.id.uuidString
+            }
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if viewModel.terms.isEmpty {
+                    VStack(spacing: 10) {
+                        Text("No Terms Yet")
+                            .font(.headline)
+                        Text("Add the semester from your school's academic calendar.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Button("Add Term") { editing = .new }
+                            .buttonStyle(.borderedProminent)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List {
+                        ForEach(viewModel.terms) { term in
+                            termRow(term)
+                        }
+                    }
+                }
+            }
+            .glassScreenBackground()
+            .navigationTitle("Terms")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add Term") { editing = .new }
+                }
+            }
+            .sheet(item: $editing) { edit in
+                switch edit {
+                case .new:
+                    TermFormSheet(title: "New Term", term: nil) { values in
+                        await viewModel.createTerm(values)
+                    }
+                case .existing(let term):
+                    TermFormSheet(title: "Edit Term", term: term) { values in
+                        await viewModel.updateTerm(term, with: values)
+                    }
+                }
+            }
+        }
+    }
+
+    private func termRow(_ term: Term) -> some View {
+        let courseCount = viewModel.courseCount(for: term)
+        return HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(term.displayName)
+                    .font(.system(size: 14, weight: .semibold))
+                Text(Self.spanCaption(term))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            Text(courseCount == 1 ? "1 COURSE" : "\(courseCount) COURSES")
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .tracking(1.0)
+                .foregroundStyle(.secondary)
+            Button("Edit") { editing = .existing(term) }
+                .buttonStyle(.pccControlChip)
+            Button("Delete") { Task { await viewModel.deleteTerm(term) } }
+                .buttonStyle(.pccControlChip)
+                .disabled(courseCount > 0)
+                .help(
+                    courseCount > 0
+                        ? "Reassign or delete this Term's Courses first"
+                        : "Delete this Term")
+        }
+        .padding(.vertical, 4)
+    }
+
+    /// A Term with no dates set reads as exactly that rather than as a blank
+    /// — those dates are what makes it selectable as the current Term, so
+    /// their absence is worth naming (`SchoolBoard.currentTerm(in:reference:)`).
+    private static func spanCaption(_ term: Term) -> String {
+        guard let startDate = term.startDate, let endDate = term.endDate else {
+            return "No dates set"
+        }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return "\(formatter.string(from: startDate)) – \(formatter.string(from: endDate))"
+    }
+}
+
+/// Shared create/edit form for a Term: year, semester, and the calendar span
+/// the school publishes.
+///
+/// The two dates share one toggle rather than having one each, because the
+/// backend rejects one without the other — half a span can neither be
+/// overlap-checked against another Term nor asked whether it contains today
+/// (`TermController.validatedSpan`).
+struct TermFormSheet: View {
+    let title: String
+    let onSave: (TermFormValues) async -> Void
+
+    @State private var year: Int
+    @State private var semester: Semester
+    @State private var hasDates: Bool
+    @State private var startDate: Date
+    @State private var endDate: Date
+    @Environment(\.dismiss) private var dismiss
+
+    init(title: String, term: Term?, onSave: @escaping (TermFormValues) async -> Void) {
+        self.title = title
+        self.onSave = onSave
+        self._year = State(initialValue: term?.year ?? Calendar.current.component(.year, from: Date()))
+        self._semester = State(initialValue: term?.semester ?? .first)
+        self._hasDates = State(initialValue: term?.startDate != nil)
+        self._startDate = State(initialValue: term?.startDate ?? Date())
+        self._endDate = State(initialValue: term?.endDate ?? Date())
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Term") {
+                    PCCMenuPicker(
+                        "Semester", selection: $semester,
+                        options: Semester.allCases.map { ($0, $0.displayName) }
+                    )
+                    Stepper("Year: \(String(year))", value: $year, in: 1900...3000)
+                }
+                .panelRows()
+                Section("Academic Calendar") {
+                    Toggle("Has dates", isOn: $hasDates)
+                    if hasDates {
+                        DatePicker("Starts", selection: $startDate, displayedComponents: .date)
+                        DatePicker("Ends", selection: $endDate, in: startDate..., displayedComponents: .date)
+                    }
+                }
+                .panelRows()
+            }
+            .glassScreenBackground()
+            .navigationTitle(title)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        let values = TermFormValues(
+                            year: year, semester: semester,
+                            startDate: hasDates ? startDate : nil,
+                            endDate: hasDates ? endDate : nil)
+                        Task {
+                            await onSave(values)
+                            dismiss()
+                        }
+                    }
                 }
             }
         }
@@ -930,8 +1147,7 @@ struct CourseFormSheet: View {
 /// chalkboard-era dashed chalk ring, so the Term badge stays a real device
 /// without depending on chalkboard texture.
 private struct TermBadge: View {
-    let month: Int
-    let year: Int
+    let term: Term
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.screenTheme) private var theme
@@ -951,20 +1167,10 @@ private struct TermBadge: View {
             .frame(width: 42, height: 42)
     }
 
-    /// e.g. "FA26" — a lecture-hall room-plate-style short code (season +
-    /// 2-digit year) standing in for the full Term caption shown beside it,
-    /// so the badge reads at a glance instead of repeating text.
+    /// e.g. "1S26" — a lecture-hall room-plate-style short code (semester +
+    /// 2-digit year) standing in for the full Term name shown beside it, so
+    /// the badge reads at a glance instead of repeating text.
     private var code: String {
-        "\(seasonCode)\(String(format: "%02d", year % 100))"
-    }
-
-    private var seasonCode: String {
-        switch month {
-        case 12, 1, 2: return "WI"
-        case 3...5: return "SP"
-        case 6...8: return "SU"
-        case 9...11: return "FA"
-        default: return "TM"
-        }
+        "\(term.semester.code)\(String(format: "%02d", term.year % 100))"
     }
 }

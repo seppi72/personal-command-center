@@ -61,8 +61,7 @@ extension AppTestSuite {
         @Test("attaches a Deadline to a Course-scoped Task, the same way as a Project-scoped Task")
         func attachesDeadlineToCourseScopedTask() async throws {
             try await withDeadlinesApp { app in
-                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026)
-                try await course.save(on: app.db)
+                let course = try await makeCourse(name: "CS 301", on: app.db)
                 let task = PCCTask(title: "Problem set", courseID: try course.requireID())
                 try await task.save(on: app.db)
                 let id = try task.requireID()
@@ -277,7 +276,7 @@ extension AppTestSuite {
         func listsCourseDeadlines() async throws {
             try await withDeadlinesApp { app in
                 let dueDate = Date(timeIntervalSince1970: 1_700_000_000)
-                try await Course(name: "CS 301", termMonth: 9, termYear: 2026, dueDate: dueDate).save(on: app.db)
+                _ = try await makeCourse(name: "CS 301", on: app.db, dueDate: dueDate)
 
                 try await app.testing().test(
                     .GET, "/v1/deadlines",
@@ -300,8 +299,7 @@ extension AppTestSuite {
             try await withDeadlinesApp { app in
                 let taskDue = Date(timeIntervalSince1970: 1_600_000_000)
                 let courseDue = Date(timeIntervalSince1970: 1_700_000_000)
-                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026, dueDate: courseDue)
-                try await course.save(on: app.db)
+                let course = try await makeCourse(name: "CS 301", on: app.db, dueDate: courseDue)
                 try await PCCTask(title: "Problem set", dueDate: taskDue, courseID: try course.requireID()).save(on: app.db)
 
                 try await app.testing().test(

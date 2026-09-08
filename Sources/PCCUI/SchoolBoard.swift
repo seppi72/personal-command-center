@@ -222,7 +222,7 @@ public enum SchoolBoard {
             loggedSeconds: loggedSeconds(
                 tasks: tasks, projects: projects, timeEntries: timeEntries, range: range),
             deadlinesInRange: deadlines,
-            activeCourses: courses.filter { SchoolTerm($0) == term }.count
+            activeCourses: courses.filter { $0.term.id == term?.id }.count
         )
     }
 
@@ -252,68 +252,34 @@ public enum SchoolBoard {
 
     // MARK: - Term
 
-    /// The Term the "This Term" range preset jumps to: the latest Term among
-    /// `courses` that has already begun as of `reference`, falling back to
-    /// the earliest Term overall when every Course is still upcoming, and
-    /// `nil` when there are no Courses at all.
+    /// The Term the "This Term" range preset jumps to: the Term among
+    /// `courses` whose published span contains `reference`, falling back to
+    /// the most recent one that has already started, and `nil` when no
+    /// Course's Term has dates set at all.
+    ///
+    /// A Term with no `startDate`/`endDate` is never chosen. Those are
+    /// optional precisely because the owner may not have filled the school's
+    /// academic calendar in yet (`docs/adr/0012-term-is-an-entity.md`), and
+    /// treating "not set yet" as "happening now" would label the screen with
+    /// a semester nothing actually says is current.
     ///
     /// Derived from the Courses rather than from the calendar, which is the
-    /// whole point of the preset — in November, the owner's Courses are still
-    /// the ones labelled September, and a preset that just meant "this
-    /// calendar month" would duplicate the Month segment beside it. Term
-    /// stays a Course label here: it resolves *to* a month-and-year window
-    /// rather than becoming a fourth range unit.
-    public static func currentTerm(in courses: [Course], reference: Date = Date()) -> SchoolTerm? {
-        let terms = courses.map(SchoolTerm.init)
-        let today = SchoolTerm.containing(reference)
-        return terms.filter { $0 <= today }.max() ?? terms.min()
-    }
-}
-
-/// One Term — the month and year a Course belongs to (`Course.termMonth`/
-/// `termYear`). A value type so the School screen can compare and order
-/// Terms without repeating the two-field comparison, and so
-/// `SchoolBoard.currentTerm(in:reference:)` has something to return.
-public struct SchoolTerm: Equatable, Comparable, Sendable {
-    public let month: Int
-    public let year: Int
-
-    public init(month: Int, year: Int) {
-        self.month = month
-        self.year = year
-    }
-
-    public init(_ course: Course) {
-        self.init(month: course.termMonth, year: course.termYear)
-    }
-
-    /// The Term a given date falls in — the calendar month and year around
-    /// it, since a Term *is* a month-and-year in this model.
-    public static func containing(_ date: Date, calendar: Calendar = .current) -> SchoolTerm {
-        SchoolTerm(
-            month: calendar.component(.month, from: date),
-            year: calendar.component(.year, from: date))
-    }
-
-    public static func < (lhs: SchoolTerm, rhs: SchoolTerm) -> Bool {
-        (lhs.year, lhs.month) < (rhs.year, rhs.month)
-    }
-
-    /// e.g. "September 2026" — the Term's owner-facing rendering, shared by
-    /// the Course cards' caption, the drill-down header and the "This Term"
-    /// preset's label. Falls back to a numeric form for an out-of-range month
-    /// rather than trapping on the symbol lookup.
-    ///
-    /// Reads `Calendar.current` directly rather than taking a `calendar:`
-    /// parameter like the arithmetic above it: this is the display name of a
-    /// month in the owner's own locale, not a calculation whose result a test
-    /// needs to pin.
-    public var label: String {
-        let symbols = Calendar.current.monthSymbols
-        guard (1...12).contains(month), symbols.indices.contains(month - 1) else {
-            return "\(month)/\(year)"
+    /// whole point of the preset — a semester runs across several calendar
+    /// months, and a preset that just meant "this calendar month" would
+    /// duplicate the Month segment beside it.
+    public static func currentTerm(in courses: [Course], reference: Date = Date()) -> Term? {
+        let dated = courses.map(\.term).filter { $0.startDate != nil && $0.endDate != nil }
+        if let containing = dated.first(where: { $0.contains(reference) }) {
+            return containing
         }
-        return "\(symbols[month - 1]) \(year)"
+        // By start date, not by `Term`'s own year-and-semester order: the
+        // school's calendar decides which semester ran most recently, and a
+        // 2nd Semester runs *before* the 1st Semester of the same labelled
+        // year at this school, so ordering by the label would pick the wrong
+        // one.
+        return dated
+            .filter { ($0.startDate ?? .distantFuture) <= reference }
+            .max { ($0.startDate ?? .distantPast) < ($1.startDate ?? .distantPast) }
     }
 }
 

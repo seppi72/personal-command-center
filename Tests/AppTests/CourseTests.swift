@@ -37,21 +37,25 @@ extension AppTestSuite {
             }
         }
 
-        @Test("creates a Course with a name, termMonth, and termYear")
+        @Test("creates a Course with a name and a Term")
         func createsACourse() async throws {
             try await withCoursesApp { app in
+                let term = try await makeTerm(on: app.db, year: 2026, semester: .first)
+                let termID = try term.requireID()
                 try await app.testing().test(
                     .POST, "/v1/courses",
                     headers: authHeaders(),
                     beforeRequest: { req async throws in
-                        try req.content.encode(SaveCourseRequest(name: "CS 301", termMonth: 9, termYear: 2026))
+                        try req.content.encode(SaveCourseRequest(name: "CS 301", termID: termID))
                     },
                     afterResponse: { res async throws in
                         #expect(res.status == .ok)
                         let body = try res.content.decode(CourseResponse.self)
                         #expect(body.name == "CS 301")
-                        #expect(body.termMonth == 9)
-                        #expect(body.termYear == 2026)
+                        #expect(body.termID == termID)
+                        // The whole Term rides along, so a client listing
+                        // Courses can label them without a second fetch.
+                        #expect(body.term.displayName == "1st Semester 2026")
                         #expect(body.dueDate == nil)
                     }
                 )
@@ -59,14 +63,33 @@ extension AppTestSuite {
                 let stored = try await Course.query(on: app.db).all()
                 #expect(stored.count == 1)
                 #expect(stored.first?.name == "CS 301")
+                #expect(stored.first?.$term.id == termID)
+            }
+        }
+
+        @Test("rejects creating a Course against a Term that doesn't exist")
+        func rejectsUnknownTerm() async throws {
+            try await withCoursesApp { app in
+                try await app.testing().test(
+                    .POST, "/v1/courses",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(SaveCourseRequest(name: "CS 301", termID: UUID()))
+                    },
+                    afterResponse: { res async in
+                        #expect(res.status == .badRequest)
+                    }
+                )
+
+                let stored = try await Course.query(on: app.db).all()
+                #expect(stored.isEmpty)
             }
         }
 
         @Test("a newly-created Course has no Deadline by default")
         func newCourseHasNoDeadline() async throws {
             try await withCoursesApp { app in
-                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026)
-                try await course.save(on: app.db)
+                let course = try await makeCourse(name: "CS 301", on: app.db)
                 #expect(course.dueDate == nil)
             }
         }
@@ -78,45 +101,8 @@ extension AppTestSuite {
                     .POST, "/v1/courses",
                     headers: authHeaders(),
                     beforeRequest: { req async throws in
-                        try req.content.encode(SaveCourseRequest(name: "   ", termMonth: 9, termYear: 2026))
-                    },
-                    afterResponse: { res async in
-                        #expect(res.status == .badRequest)
-                    }
-                )
-
-                let stored = try await Course.query(on: app.db).all()
-                #expect(stored.isEmpty)
-            }
-        }
-
-        @Test("rejects an out-of-range termMonth", arguments: [0, 13])
-        func rejectsOutOfRangeTermMonth(termMonth: Int) async throws {
-            try await withCoursesApp { app in
-                try await app.testing().test(
-                    .POST, "/v1/courses",
-                    headers: authHeaders(),
-                    beforeRequest: { req async throws in
-                        try req.content.encode(SaveCourseRequest(name: "CS 301", termMonth: termMonth, termYear: 2026))
-                    },
-                    afterResponse: { res async in
-                        #expect(res.status == .badRequest)
-                    }
-                )
-
-                let stored = try await Course.query(on: app.db).all()
-                #expect(stored.isEmpty)
-            }
-        }
-
-        @Test("rejects a non-positive termYear")
-        func rejectsNonPositiveTermYear() async throws {
-            try await withCoursesApp { app in
-                try await app.testing().test(
-                    .POST, "/v1/courses",
-                    headers: authHeaders(),
-                    beforeRequest: { req async throws in
-                        try req.content.encode(SaveCourseRequest(name: "CS 301", termMonth: 9, termYear: 0))
+                        let termID = try await makeTerm(on: app.db).requireID()
+                        try req.content.encode(SaveCourseRequest(name: "   ", termID: termID))
                     },
                     afterResponse: { res async in
                         #expect(res.status == .badRequest)
@@ -131,8 +117,8 @@ extension AppTestSuite {
         @Test("lists all Courses")
         func listsAllCourses() async throws {
             try await withCoursesApp { app in
-                try await Course(name: "CS 301", termMonth: 9, termYear: 2026).save(on: app.db)
-                try await Course(name: "MATH 210", termMonth: 1, termYear: 2027).save(on: app.db)
+                _ = try await makeCourse(name: "CS 301", on: app.db)
+                _ = try await makeCourse(name: "MATH 210", on: app.db)
 
                 try await app.testing().test(
                     .GET, "/v1/courses",
@@ -150,29 +136,29 @@ extension AppTestSuite {
         @Test("edits a Course's name and term")
         func editsACourse() async throws {
             try await withCoursesApp { app in
-                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026)
-                try await course.save(on: app.db)
+                let course = try await makeCourse(name: "CS 301", on: app.db)
                 let id = try course.requireID()
+                let otherTermID = try await makeTerm(on: app.db, year: 2027, semester: .second)
+                    .requireID()
 
                 try await app.testing().test(
                     .PUT, "/v1/courses/\(id)",
                     headers: authHeaders(),
                     beforeRequest: { req async throws in
-                        try req.content.encode(SaveCourseRequest(name: "CS 301: Renamed", termMonth: 1, termYear: 2027))
+                        try req.content.encode(SaveCourseRequest(name: "CS 301: Renamed", termID: otherTermID))
                     },
                     afterResponse: { res async throws in
                         #expect(res.status == .ok)
                         let body = try res.content.decode(CourseResponse.self)
                         #expect(body.name == "CS 301: Renamed")
-                        #expect(body.termMonth == 1)
-                        #expect(body.termYear == 2027)
+                        #expect(body.termID == otherTermID)
+                        #expect(body.term.displayName == "2nd Semester 2027")
                     }
                 )
 
                 let stored = try await Course.find(id, on: app.db)
                 #expect(stored?.name == "CS 301: Renamed")
-                #expect(stored?.termMonth == 1)
-                #expect(stored?.termYear == 2027)
+                #expect(stored?.$term.id == otherTermID)
             }
         }
 
@@ -183,7 +169,7 @@ extension AppTestSuite {
                     .PUT, "/v1/courses/\(UUID())",
                     headers: authHeaders(),
                     beforeRequest: { req async throws in
-                        try req.content.encode(SaveCourseRequest(name: "Doesn't matter", termMonth: 9, termYear: 2026))
+                        try req.content.encode(SaveCourseRequest(name: "Doesn't matter", termID: UUID()))
                     },
                     afterResponse: { res async in
                         #expect(res.status == .notFound)
@@ -195,8 +181,7 @@ extension AppTestSuite {
         @Test("deletes a Course")
         func deletesACourse() async throws {
             try await withCoursesApp { app in
-                let course = Course(name: "Throwaway", termMonth: 9, termYear: 2026)
-                try await course.save(on: app.db)
+                let course = try await makeCourse(name: "Throwaway", on: app.db)
                 let id = try course.requireID()
 
                 try await app.testing().test(
@@ -215,8 +200,7 @@ extension AppTestSuite {
         @Test("rejects deleting a Course a Time Entry still references")
         func deletingCourseWithReferencingTimeEntryFails() async throws {
             try await withCoursesApp { app in
-                let course = Course(name: "Referenced", termMonth: 9, termYear: 2026)
-                try await course.save(on: app.db)
+                let course = try await makeCourse(name: "Referenced", on: app.db)
                 let id = try course.requireID()
                 let start = Date(timeIntervalSince1970: 1_800_000_000)
                 try await TimeEntry(
@@ -239,8 +223,7 @@ extension AppTestSuite {
         @Test("rejects deleting a Course a Personal Commitment still references")
         func deletingCourseWithReferencingCommitmentFails() async throws {
             try await withCoursesApp { app in
-                let course = Course(name: "Referenced", termMonth: 9, termYear: 2026)
-                try await course.save(on: app.db)
+                let course = try await makeCourse(name: "Referenced", on: app.db)
                 let id = try course.requireID()
                 let start = Date(timeIntervalSince1970: 1_800_000_000)
                 try await PersonalCommitment(
@@ -279,8 +262,7 @@ extension AppTestSuite {
         @Test("attaches a Deadline to a Course, changes it, then removes it")
         func attachesChangesAndRemovesCourseDeadline() async throws {
             try await withCoursesApp { app in
-                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026)
-                try await course.save(on: app.db)
+                let course = try await makeCourse(name: "CS 301", on: app.db)
                 let id = try course.requireID()
 
                 let firstDueDate = Date(timeIntervalSince1970: 1_800_000_000)
@@ -329,8 +311,7 @@ extension AppTestSuite {
         @Test("rejects deleting a Course a Project still belongs to (ADR-0011)")
         func deletingCourseWithReferencingProjectFails() async throws {
             try await withCoursesApp { app in
-                let course = Course(name: "Referenced", termMonth: 9, termYear: 2026)
-                try await course.save(on: app.db)
+                let course = try await makeCourse(name: "Referenced", on: app.db)
                 let id = try course.requireID()
                 let project = Project(name: "Group assignment", courseID: id)
                 try await project.save(on: app.db)

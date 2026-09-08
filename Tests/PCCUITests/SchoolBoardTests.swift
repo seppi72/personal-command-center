@@ -19,8 +19,8 @@ struct SchoolBoardTests {
     private var beforeRange: Date { range.start.addingTimeInterval(-86_400) }
     private var afterRange: Date { range.end.addingTimeInterval(86_400) }
 
-    private func course(_ name: String, month: Int = 11, year: Int = 2023, dueDate: Date? = nil) -> Course {
-        Course(id: UUID(), name: name, termMonth: month, termYear: year, dueDate: dueDate)
+    private func course(_ name: String, term: Term? = nil, dueDate: Date? = nil) -> Course {
+        Course(id: UUID(), name: name, term: term ?? makeTerm(), dueDate: dueDate)
     }
 
     private func entry(
@@ -200,33 +200,33 @@ struct SchoolBoardTests {
     @Test("Active Courses counts the Courses in the Courses' own current Term")
     func activeCoursesTile() {
         let reference = Date(timeIntervalSince1970: 1_700_000_000)
-        let today = SchoolTerm.containing(reference)
         let tiles = SchoolBoard.tiles(
             courses: [
-                course("Thermo", month: today.month, year: today.year),
-                course("Statics", month: today.month, year: today.year),
-                course("Last term", month: today.month, year: today.year - 1),
+                course("Thermo", term: currentTerm),
+                course("Statics", term: currentTerm),
+                course("Last term", term: pastTerm),
             ],
             projects: [], tasks: [], timeEntries: [], range: range, reference: reference)
 
         #expect(tiles.activeCourses == 2)
     }
 
-    /// The bug this pins: a Term is a *label the Courses carry*, not the
+    /// The bug this pins: a Term is the Courses' *own* semester, not the
     /// calendar month the range happens to start in. Counting by calendar
-    /// month made the tile read 0 for a roster of September Courses viewed in
-    /// November, while the Courses grid directly below it listed all of them.
-    @Test("Active Courses still counts a past-Term roster when the range is a later month")
-    func activeCoursesOutsideCalendarMonth() {
-        let reference = Date(timeIntervalSince1970: 1_700_000_000)  // November
-        let today = SchoolTerm.containing(reference)
-        let enrolled = SchoolTerm(month: today.month == 1 ? 12 : today.month - 1, year: today.year)
+    /// month made the tile read 0 for a roster viewed a month later, while
+    /// the Courses grid directly below it listed all of them. The range here
+    /// sits outside the Term's span entirely and the roster still counts.
+    @Test("Active Courses still counts the roster when the range is outside the Term's span")
+    func activeCoursesOutsideRange() {
+        let reference = Date(timeIntervalSince1970: 1_700_000_000)
         let tiles = SchoolBoard.tiles(
-            courses: [
-                course("Thermo", month: enrolled.month, year: enrolled.year),
-                course("Statics", month: enrolled.month, year: enrolled.year),
-            ],
-            projects: [], tasks: [], timeEntries: [], range: range, reference: reference)
+            courses: [course("Thermo", term: currentTerm), course("Statics", term: currentTerm)],
+            projects: [], tasks: [], timeEntries: [],
+            range: (
+                start: reference.addingTimeInterval(400 * 86_400),
+                end: reference.addingTimeInterval(407 * 86_400)
+            ),
+            reference: reference)
 
         #expect(tiles.activeCourses == 2)
     }
@@ -269,32 +269,63 @@ struct SchoolBoardTests {
 
     // MARK: - Term
 
-    @Test("This Term resolves to the latest Course Term that has already begun")
-    func currentTermPastTerms() {
-        let reference = Date(timeIntervalSince1970: 1_700_000_000)  // Nov 2023
-        let today = SchoolTerm.containing(reference)
+    @Test("This Term resolves to the Term whose published span contains today")
+    func currentTermContainingToday() {
         let courses = [
-            course("Old", month: 1, year: today.year - 1),
-            course("Current", month: today.month, year: today.year),
-            course("Upcoming", month: 1, year: today.year + 5),
+            course("Old", term: pastTerm),
+            course("Current", term: currentTerm),
+            course("Upcoming", term: futureTerm),
         ]
 
-        #expect(SchoolBoard.currentTerm(in: courses, reference: reference) == today)
+        #expect(SchoolBoard.currentTerm(in: courses, reference: termReference) == currentTerm)
     }
 
-    @Test("This Term falls back to the earliest Term when every Course is still upcoming")
-    func currentTermAllUpcoming() {
-        let reference = Date(timeIntervalSince1970: 1_700_000_000)
-        let today = SchoolTerm.containing(reference)
-        let courses = [
-            course("Far", month: 6, year: today.year + 9),
-            course("Near", month: 3, year: today.year + 5),
-        ]
+    /// Between semesters no Term contains today, and the screen still has to
+    /// name one — the one just finished, not the one that hasn't started.
+    @Test("This Term falls back to the most recent Term that has already started")
+    func currentTermBetweenSemesters() {
+        let betweenSemesters = termReference.addingTimeInterval(120 * 86_400)
+        let courses = [course("Old", term: pastTerm), course("Current", term: currentTerm)]
 
+        #expect(SchoolBoard.currentTerm(in: courses, reference: betweenSemesters) == currentTerm)
+    }
+
+    /// The dates are what make a Term selectable. A Term whose academic
+    /// calendar the owner hasn't filled in yet says nothing about today, so
+    /// it is never chosen — "not set yet" must not read as "happening now"
+    /// (`docs/adr/0012-term-is-an-entity.md`).
+    @Test("This Term never selects a Term with no dates set")
+    func currentTermIgnoresUndatedTerms() {
+        let undated = makeTerm(year: 2023, semester: .second)
         #expect(
-            SchoolBoard.currentTerm(in: courses, reference: reference)
-                == SchoolTerm(month: 3, year: today.year + 5))
+            SchoolBoard.currentTerm(in: [course("Thermo", term: undated)], reference: termReference)
+                == nil)
     }
+
+    /// Three Terms with real spans: the one containing `termReference`, the
+    /// semester before it, and the one after. Dated, since an undated Term is
+    /// never selectable as the current one.
+    private let termReference = Date(timeIntervalSince1970: 1_700_000_000)  // Nov 2023
+
+    /// Stored rather than computed: each `makeTerm` call mints a fresh id,
+    /// and these tests compare Terms by identity.
+    private let currentTerm = makeTerm(
+        year: 2023, semester: .first,
+        startDate: Date(timeIntervalSince1970: 1_700_000_000 - 60 * 86_400),
+        endDate: Date(timeIntervalSince1970: 1_700_000_000 + 30 * 86_400))
+
+    /// The 2nd Semester of the same labelled year runs *earlier* in the
+    /// calendar than the 1st at this school, which is why "the most recent
+    /// Term" is decided by start date rather than by the Term's own order.
+    private let pastTerm = makeTerm(
+        year: 2023, semester: .second,
+        startDate: Date(timeIntervalSince1970: 1_700_000_000 - 240 * 86_400),
+        endDate: Date(timeIntervalSince1970: 1_700_000_000 - 120 * 86_400))
+
+    private let futureTerm = makeTerm(
+        year: 2024, semester: .first,
+        startDate: Date(timeIntervalSince1970: 1_700_000_000 + 300 * 86_400),
+        endDate: Date(timeIntervalSince1970: 1_700_000_000 + 400 * 86_400))
 
     @Test("This Term is nil with no Courses at all")
     func currentTermNoCourses() {

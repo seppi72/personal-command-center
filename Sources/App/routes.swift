@@ -11,6 +11,7 @@ func routes(_ app: Application) throws {
     try v1.register(collection: PersonalCommitmentController())
     try v1.register(collection: MirroredCalendarEventController())
     try v1.register(collection: AutomationLogController())
+    try v1.register(collection: TermController())
     try v1.register(collection: CourseController())
     try v1.register(collection: TimeEntryController())
     try v1.register(collection: WorkHoursController())

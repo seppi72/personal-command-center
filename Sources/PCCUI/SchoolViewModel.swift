@@ -22,6 +22,11 @@ import Foundation
 @MainActor
 public final class SchoolViewModel: ObservableObject {
     @Published public private(set) var courses: [Course] = []
+    /// Every Term, earliest first — what the Course form's Term picker
+    /// offers, and what the Terms sheet manages. Loaded alongside the
+    /// Courses rather than fetched when a sheet opens, so a Course card and
+    /// the picker behind it can't disagree about which Terms exist.
+    @Published public private(set) var terms: [Term] = []
     @Published public private(set) var projects: [Project] = []
     @Published public private(set) var tasks: [PCCTask] = []
     @Published public private(set) var timeEntries: [TimeEntry] = []
@@ -35,6 +40,7 @@ public final class SchoolViewModel: ObservableObject {
     @Published public private(set) var isLoading = false
 
     private let coursesClient: CoursesAPIClient
+    private let termsClient: TermsAPIClient
     private let projectsClient: ProjectsAPIClient
     private let tasksClient: TasksAPIClient
     private let timeEntriesClient: TimeEntriesAPIClient
@@ -42,12 +48,14 @@ public final class SchoolViewModel: ObservableObject {
 
     public init(
         coursesClient: CoursesAPIClient,
+        termsClient: TermsAPIClient,
         projectsClient: ProjectsAPIClient,
         tasksClient: TasksAPIClient,
         timeEntriesClient: TimeEntriesAPIClient,
         commitmentsClient: PersonalCommitmentsAPIClient
     ) {
         self.coursesClient = coursesClient
+        self.termsClient = termsClient
         self.projectsClient = projectsClient
         self.tasksClient = tasksClient
         self.timeEntriesClient = timeEntriesClient
@@ -61,12 +69,14 @@ public final class SchoolViewModel: ObservableObject {
         defer { isLoading = false }
         await run(noun: "School", verb: "load") {
             async let loadedCourses = coursesClient.listCourses()
+            async let loadedTerms = termsClient.listTerms()
             async let loadedProjects = projectsClient.listProjects()
             async let loadedTasks = tasksClient.listTasks(projectID: nil, courseID: nil)
             async let loadedEntries = timeEntriesClient.listTimeEntries(
                 taskID: nil, projectID: nil, clientID: nil, courseID: nil)
             async let loadedCommitments = commitmentsClient.listPersonalCommitments(courseID: nil)
             courses = try await loadedCourses.sorted { $0.name < $1.name }
+            terms = try await loadedTerms
             projects = try await loadedProjects
             tasks = try await loadedTasks
             timeEntries = try await loadedEntries
@@ -110,22 +120,28 @@ public final class SchoolViewModel: ObservableObject {
         selectedCourseID.flatMap { id in courses.first { $0.id == id } }
     }
 
-    /// The Term the "This Term" preset jumps to, and the label it carries —
-    /// `nil` with no Courses, which is also when the preset is hidden.
-    public var currentTerm: SchoolTerm? {
+    /// The Term the "This Term" preset jumps to, and the name it carries —
+    /// `nil` when no Course's Term has its dates filled in, which is also
+    /// when the preset is hidden.
+    public var currentTerm: Term? {
         SchoolBoard.currentTerm(in: courses)
     }
 
-    /// Points `range` at the Term's own month-and-year window. Term stays a
-    /// Course label: this resolves it to the existing `.month` unit at the
-    /// right offset rather than adding a fourth `WorkRangeUnit`, which would
-    /// also change the Work screen's stepper (issue #90).
+    /// Points `range` at the month the Term starts in. A Term now spans
+    /// several months rather than being one (`docs/adr/0012-term-is-an-entity.md`),
+    /// and `WorkDateRange` expresses only whole day/week/month windows — so
+    /// the preset lands on the semester's opening month rather than adding a
+    /// fourth `WorkRangeUnit`, which would also change the Work screen's
+    /// stepper (issue #90).
     public func selectCurrentTerm(calendar: Calendar = .current, reference: Date = Date()) {
-        guard let term = currentTerm else { return }
-        let today = SchoolTerm.containing(reference, calendar: calendar)
-        range = WorkDateRange(
-            unit: .month,
-            offset: (term.year - today.year) * 12 + (term.month - today.month))
+        guard let startDate = currentTerm?.startDate else { return }
+        func startOfMonth(_ date: Date) -> Date {
+            calendar.dateInterval(of: .month, for: date)?.start ?? date
+        }
+        let months = calendar.dateComponents(
+            [.month], from: startOfMonth(reference), to: startOfMonth(startDate)
+        ).month ?? 0
+        range = WorkDateRange(unit: .month, offset: months)
     }
 
     // MARK: - Course drill-down
@@ -189,7 +205,7 @@ public final class SchoolViewModel: ObservableObject {
     public func createCourse(_ values: CourseFormValues) async {
         await run(noun: "Course", verb: "create") {
             var created = try await coursesClient.createCourse(
-                name: values.name, termMonth: values.termMonth, termYear: values.termYear)
+                name: values.name, termID: values.termID)
             if let dueDate = values.dueDate {
                 created = try await coursesClient.setCourseDeadline(id: created.id, dueDate: dueDate)
             }
@@ -201,7 +217,7 @@ public final class SchoolViewModel: ObservableObject {
     public func updateCourse(_ course: Course, with values: CourseFormValues) async {
         await run(noun: "Course", verb: "update") {
             var updated = try await coursesClient.updateCourse(
-                id: course.id, name: values.name, termMonth: values.termMonth, termYear: values.termYear)
+                id: course.id, name: values.name, termID: values.termID)
             if values.dueDate != course.dueDate {
                 updated = try await coursesClient.setCourseDeadline(id: course.id, dueDate: values.dueDate)
             }
@@ -216,6 +232,55 @@ public final class SchoolViewModel: ObservableObject {
             courses.removeAll { $0.id == course.id }
             if selectedCourseID == course.id { selectedCourseID = nil }
         }
+    }
+
+    // MARK: - Terms
+
+    /// Creates a Term. The backend rejects a duplicate year-and-semester and
+    /// a span overlapping another Term's (`TermController`), so a failure
+    /// here surfaces its reason rather than being pre-empted client-side —
+    /// one authority on what a legal Term is, not two that can drift.
+    public func createTerm(_ values: TermFormValues) async {
+        await run(noun: "Term", verb: "create") {
+            let created = try await termsClient.createTerm(
+                year: values.year, semester: values.semester, startDate: values.startDate,
+                endDate: values.endDate)
+            terms.append(created)
+            terms.sort()
+        }
+    }
+
+    /// Updates a Term, and refreshes the copy nested in every Course that
+    /// belongs to it — a Course carries its whole Term, so leaving those
+    /// stale would show the old name and dates until the next load.
+    public func updateTerm(_ term: Term, with values: TermFormValues) async {
+        await run(noun: "Term", verb: "update") {
+            let updated = try await termsClient.updateTerm(
+                id: term.id, year: values.year, semester: values.semester,
+                startDate: values.startDate, endDate: values.endDate)
+            if let index = terms.firstIndex(where: { $0.id == updated.id }) { terms[index] = updated }
+            terms.sort()
+            for index in courses.indices where courses[index].termID == updated.id {
+                courses[index].term = updated
+            }
+        }
+    }
+
+    /// Deletes a Term. The backend blocks this while any Course still
+    /// belongs to it, and that error is what the owner sees — deleting a
+    /// Term must never take a semester of Courses with it.
+    public func deleteTerm(_ term: Term) async {
+        await run(noun: "Term", verb: "delete") {
+            try await termsClient.deleteTerm(id: term.id)
+            terms.removeAll { $0.id == term.id }
+        }
+    }
+
+    /// How many Courses belong to `term` — what the Terms sheet shows beside
+    /// each row, so it's clear before trying which Terms can still be
+    /// deleted.
+    public func courseCount(for term: Term) -> Int {
+        courses.filter { $0.termID == term.id }.count
     }
 
     // MARK: - Course Projects

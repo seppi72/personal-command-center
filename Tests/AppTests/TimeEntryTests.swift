@@ -51,8 +51,7 @@ extension AppTestSuite {
         }
 
         private func makeCourse(_ app: Application, name: String = "Course") async throws -> Course {
-            let course = Course(name: name, termMonth: 9, termYear: 2026)
-            try await course.save(on: app.db)
+            let course = try await AppTests.makeCourse(name: name, on: app.db)
             return course
         }
 

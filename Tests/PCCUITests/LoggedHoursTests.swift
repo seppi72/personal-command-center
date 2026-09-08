@@ -32,7 +32,7 @@ struct LoggedHoursTests {
     /// Project and a Task, a container-less Task, and entries against each.
     private struct Fixture {
         let client = PCCClient(id: UUID(), name: "Acme")
-        let course = Course(id: UUID(), name: "Thermo", termMonth: 11, termYear: 2023)
+        let course = Course(id: UUID(), name: "Thermo", term: makeTerm())
         let clientProject: Project
         let courseProject: Project
         let clientTask: PCCTask
