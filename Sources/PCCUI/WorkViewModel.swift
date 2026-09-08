@@ -327,6 +327,22 @@ public final class WorkViewModel: ObservableObject {
         WorkBoard.workload(days: range.days(), loggedSeconds: totalSeconds)
     }
 
+    /// Per-Client health for the Client health card, attention-first
+    /// (issue #110).
+    ///
+    /// Hours come out of `tree` rather than off the raw entries: the tree's
+    /// Client nodes already carry the transitive total for the current range,
+    /// so the card and the row beside it can't report different figures.
+    public var clientHealth: [WorkClientHealth] {
+        var secondsByClient: [UUID: Double] = [:]
+        for node in tree {
+            if case .client(let id) = node.kind { secondsByClient[id] = node.totalSeconds }
+        }
+        return WorkBoard.clientHealth(
+            clients: clients, projects: projects, tasks: tasks,
+            secondsByClient: secondsByClient)
+    }
+
     /// The caption under a tree row's name, or `nil` for rows that don't
     /// carry one (`WorkBoard.rowContext`).
     public func rowContext(for node: WorkNode) -> WorkRowContext? {

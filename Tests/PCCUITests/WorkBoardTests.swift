@@ -376,4 +376,128 @@ struct WorkBoardTests {
         #expect(progress.fraction == nil)
         #expect(progress.isEmpty)
     }
+
+    // MARK: - Client health
+
+    /// One Client with one Project, and whatever Tasks the case needs.
+    private func health(
+        clientName: String = "Northside", tasks: [PCCTask] = [], projectDueDate: Date? = nil,
+        seconds: Double = 0
+    ) -> WorkClientHealth {
+        let client = PCCClient(id: UUID(), name: clientName)
+        let project = Project(
+            id: UUID(), name: "Rebuild", dueDate: projectDueDate, clientID: client.id)
+        let scoped = tasks.map {
+            PCCTask(
+                id: $0.id, title: $0.title, isComplete: $0.isComplete, projectID: project.id,
+                dueDate: $0.dueDate)
+        }
+        return WorkBoard.clientHealth(
+            clients: [client], projects: [project], tasks: scoped,
+            secondsByClient: [client.id: seconds], calendar: calendar, reference: now)[0]
+    }
+
+    @Test("a Client reports active Projects, open and overdue Tasks, its nearest deadline and hours")
+    func clientHealthFigures() {
+        let summary = health(
+            tasks: [
+                PCCTask(id: UUID(), title: "Late", dueDate: day(-1)),
+                PCCTask(id: UUID(), title: "Soon", dueDate: day(4)),
+                PCCTask(id: UUID(), title: "Done", isComplete: true, dueDate: day(-9)),
+            ],
+            seconds: 8 * 3600)
+
+        #expect(summary.activeProjectCount == 1)
+        #expect(summary.openTaskCount == 2)
+        #expect(summary.overdueTaskCount == 1)
+        #expect(summary.nearestDueDate == day(-1))
+        #expect(summary.loggedSeconds == 8 * 3600)
+    }
+
+    @Test("a completed Task's due date never counts as the nearest deadline")
+    func clientHealthIgnoresCompletedDeadlines() {
+        let summary = health(
+            tasks: [
+                PCCTask(id: UUID(), title: "Done", isComplete: true, dueDate: day(1)),
+                PCCTask(id: UUID(), title: "Open", dueDate: day(5)),
+            ])
+
+        #expect(summary.nearestDueDate == day(5))
+        #expect(!summary.needsAttention)
+    }
+
+    @Test("a Project deadline counts even with no dated Task under it")
+    func clientHealthUsesProjectDeadlines() {
+        let summary = health(
+            tasks: [PCCTask(id: UUID(), title: "Undated")], projectDueDate: day(1))
+
+        #expect(summary.nearestDueDate == day(1))
+        #expect(summary.needsAttention)
+    }
+
+    @Test("a Project whose every Task is done is no longer active")
+    func clientHealthActiveProjects() {
+        let summary = health(
+            tasks: [PCCTask(id: UUID(), title: "Done", isComplete: true)])
+
+        #expect(summary.activeProjectCount == 0)
+        #expect(summary.openTaskCount == 0)
+    }
+
+    // The attention rule's boundaries: overdue and tomorrow fire, the day
+    // after tomorrow does not.
+    @Test("attention fires on an overdue Task")
+    func attentionOnOverdue() {
+        #expect(health(tasks: [PCCTask(id: UUID(), title: "Late", dueDate: day(-1))]).needsAttention)
+    }
+
+    @Test("attention fires on work due today and tomorrow, but not the day after")
+    func attentionDeadlineBoundary() {
+        #expect(health(tasks: [PCCTask(id: UUID(), title: "Now", dueDate: day(0, hours: 23))])
+            .needsAttention)
+        #expect(health(tasks: [PCCTask(id: UUID(), title: "Next", dueDate: day(1))]).needsAttention)
+        #expect(!health(tasks: [PCCTask(id: UUID(), title: "Later", dueDate: day(2))])
+            .needsAttention)
+    }
+
+    @Test("a Client with nothing dated and nothing late never needs attention")
+    func attentionQuietClient() {
+        #expect(!health(tasks: [PCCTask(id: UUID(), title: "Someday")]).needsAttention)
+    }
+
+    @Test("Clients needing attention sort first, the rest by name")
+    func clientHealthOrdering() {
+        let calm = PCCClient(id: UUID(), name: "Anvil")
+        let alsoCalm = PCCClient(id: UUID(), name: "Zenith")
+        let urgent = PCCClient(id: UUID(), name: "Rosabella")
+        let projects = [calm, alsoCalm, urgent].map {
+            Project(id: UUID(), name: $0.name, clientID: $0.id)
+        }
+        let late = PCCTask(
+            id: UUID(), title: "Late", projectID: projects[2].id, dueDate: day(-3))
+
+        let summaries = WorkBoard.clientHealth(
+            clients: [calm, alsoCalm, urgent], projects: projects, tasks: [late],
+            secondsByClient: [:], calendar: calendar, reference: now)
+
+        #expect(summaries.map(\.name) == ["Rosabella", "Anvil", "Zenith"])
+    }
+
+    @Test("a Course-owned Project never lands under a Client's health")
+    func clientHealthExcludesCourseWork() {
+        let client = PCCClient(id: UUID(), name: "Northside")
+        let course = Course(id: UUID(), name: "Thermo", termMonth: 11, termYear: 2023)
+        let courseProject = Project(
+            id: UUID(), name: "Problem Sets", clientID: client.id, courseID: course.id)
+        let task = PCCTask(
+            id: UUID(), title: "Set 4", projectID: courseProject.id, dueDate: day(-2))
+
+        let summaries = WorkBoard.clientHealth(
+            clients: [client], projects: [courseProject], tasks: [task],
+            secondsByClient: [:], calendar: calendar, reference: now)
+
+        #expect(summaries[0].activeProjectCount == 0)
+        #expect(summaries[0].openTaskCount == 0)
+        #expect(!summaries[0].needsAttention)
+    }
 }
