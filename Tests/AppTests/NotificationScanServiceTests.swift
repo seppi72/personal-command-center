@@ -84,8 +84,7 @@ extension AppTestSuite {
         @Test("creates a Notification for a newly-overdue Course")
         func createsNotificationForOverdueCourse() async throws {
             try await withScanApp { app in
-                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026, dueDate: past)
-                try await course.save(on: app.db)
+                let course = try await makeCourse(name: "CS 301", on: app.db, dueDate: past)
 
                 await scanService(app).scan()
 
@@ -176,8 +175,7 @@ extension AppTestSuite {
         @Test("auto-clears a Notification once its source Course is deleted")
         func autoClearsOnDeletion() async throws {
             try await withScanApp { app in
-                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026, dueDate: past)
-                try await course.save(on: app.db)
+                let course = try await makeCourse(name: "CS 301", on: app.db, dueDate: past)
                 await scanService(app).scan()
                 #expect(try await openNotifications(on: app).count == 1)
 

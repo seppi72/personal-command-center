@@ -38,8 +38,7 @@ extension AppTestSuite {
             try await withCourseTaskApp { app in
                 let project = Project(name: "Alpha")
                 try await project.save(on: app.db)
-                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026)
-                try await course.save(on: app.db)
+                let course = try await makeCourse(name: "CS 301", on: app.db)
                 let task = PCCTask(title: "Switching", projectID: try project.requireID())
                 try await task.save(on: app.db)
                 let taskID = try task.requireID()
@@ -71,8 +70,7 @@ extension AppTestSuite {
                 let projectID = try project.requireID()
                 let sprint = Sprint(name: "Sprint 1", startDate: Date(), endDate: Date().addingTimeInterval(60 * 60 * 24 * 7), projectID: projectID)
                 try await sprint.save(on: app.db)
-                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026)
-                try await course.save(on: app.db)
+                let course = try await makeCourse(name: "CS 301", on: app.db)
                 let task = PCCTask(title: "Sprinting", projectID: projectID, sprintID: try sprint.requireID())
                 try await task.save(on: app.db)
                 let taskID = try task.requireID()
@@ -98,8 +96,7 @@ extension AppTestSuite {
         @Test("assigning a Project to a Task that currently has a Course clears the Course")
         func assigningProjectClearsCourse() async throws {
             try await withCourseTaskApp { app in
-                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026)
-                try await course.save(on: app.db)
+                let course = try await makeCourse(name: "CS 301", on: app.db)
                 let project = Project(name: "Alpha")
                 try await project.save(on: app.db)
                 let task = PCCTask(title: "Switching", courseID: try course.requireID())
@@ -153,8 +150,7 @@ extension AppTestSuite {
         @Test("deleting a Course makes its Tasks Course-less rather than deleting them")
         func deletingCourseDetachesItsTasks() async throws {
             try await withCourseTaskApp { app in
-                let course = Course(name: "Doomed", termMonth: 9, termYear: 2026)
-                try await course.save(on: app.db)
+                let course = try await makeCourse(name: "Doomed", on: app.db)
                 let courseID = try course.requireID()
                 let task = PCCTask(title: "Survivor", courseID: courseID)
                 try await task.save(on: app.db)

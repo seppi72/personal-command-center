@@ -218,8 +218,7 @@ extension AppTestSuite {
             try await withProjectsApp { app in
                 let client = PCCClient(name: "Acme")
                 try await client.save(on: app.db)
-                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026)
-                try await course.save(on: app.db)
+                let course = try await makeCourse(name: "CS 301", on: app.db)
                 let project = Project(name: "Group assignment", clientID: try client.requireID())
                 try await project.save(on: app.db)
                 let id = try project.requireID()
@@ -250,8 +249,7 @@ extension AppTestSuite {
             try await withProjectsApp { app in
                 let client = PCCClient(name: "Acme")
                 try await client.save(on: app.db)
-                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026)
-                try await course.save(on: app.db)
+                let course = try await makeCourse(name: "CS 301", on: app.db)
                 let project = Project(name: "Group assignment", courseID: try course.requireID())
                 try await project.save(on: app.db)
                 let id = try project.requireID()
@@ -280,8 +278,7 @@ extension AppTestSuite {
         @Test("clearing a Project's Course leaves it parent-less rather than restoring a Client")
         func clearingCourseLeavesProjectParentless() async throws {
             try await withProjectsApp { app in
-                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026)
-                try await course.save(on: app.db)
+                let course = try await makeCourse(name: "CS 301", on: app.db)
                 let project = Project(name: "Group assignment", courseID: try course.requireID())
                 try await project.save(on: app.db)
                 let id = try project.requireID()
@@ -325,8 +322,7 @@ extension AppTestSuite {
         @Test("lists Projects scoped to one Course")
         func listsProjectsScopedToACourse() async throws {
             try await withProjectsApp { app in
-                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026)
-                try await course.save(on: app.db)
+                let course = try await makeCourse(name: "CS 301", on: app.db)
                 let courseID = try course.requireID()
                 try await Project(name: "Coursework", courseID: courseID).save(on: app.db)
                 try await Project(name: "Unrelated").save(on: app.db)
@@ -348,8 +344,7 @@ extension AppTestSuite {
             try await withProjectsApp { app in
                 let client = PCCClient(name: "Acme")
                 try await client.save(on: app.db)
-                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026)
-                try await course.save(on: app.db)
+                let course = try await makeCourse(name: "CS 301", on: app.db)
                 let project = Project(name: "Group assignment")
                 try await project.save(on: app.db)
                 let id = try project.requireID()

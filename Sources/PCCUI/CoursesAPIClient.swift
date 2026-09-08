@@ -7,8 +7,8 @@ import Foundation
 /// the seam is here for one.
 public protocol CoursesAPIClient: Sendable {
     func listCourses() async throws -> [Course]
-    func createCourse(name: String, termMonth: Int, termYear: Int) async throws -> Course
-    func updateCourse(id: UUID, name: String, termMonth: Int, termYear: Int) async throws -> Course
+    func createCourse(name: String, termID: UUID) async throws -> Course
+    func updateCourse(id: UUID, name: String, termID: UUID) async throws -> Course
     func deleteCourse(id: UUID) async throws
     /// Attaches, changes, or removes (`dueDate: nil`) a Course's Deadline.
     func setCourseDeadline(id: UUID, dueDate: Date?) async throws -> Course
@@ -36,15 +36,15 @@ public struct URLSessionCoursesAPIClient: CoursesAPIClient {
         return try await send(request)
     }
 
-    public func createCourse(name: String, termMonth: Int, termYear: Int) async throws -> Course {
+    public func createCourse(name: String, termID: UUID) async throws -> Course {
         var request = try makeRequest(path: "v1/courses", method: "POST")
-        try attach(SaveCoursePayload(name: name, termMonth: termMonth, termYear: termYear), to: &request)
+        try attach(SaveCoursePayload(name: name, termID: termID), to: &request)
         return try await send(request)
     }
 
-    public func updateCourse(id: UUID, name: String, termMonth: Int, termYear: Int) async throws -> Course {
+    public func updateCourse(id: UUID, name: String, termID: UUID) async throws -> Course {
         var request = try makeRequest(path: "v1/courses/\(id)", method: "PUT")
-        try attach(SaveCoursePayload(name: name, termMonth: termMonth, termYear: termYear), to: &request)
+        try attach(SaveCoursePayload(name: name, termID: termID), to: &request)
         return try await send(request)
     }
 
@@ -61,8 +61,7 @@ public struct URLSessionCoursesAPIClient: CoursesAPIClient {
 
     private struct SaveCoursePayload: Encodable {
         let name: String
-        let termMonth: Int
-        let termYear: Int
+        let termID: UUID
     }
 
     private struct SetCourseDeadlinePayload: Encodable {

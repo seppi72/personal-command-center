@@ -52,7 +52,7 @@ struct WorkBoardTests {
 
     @Test("completed and Course-owned Tasks never reach the queue")
     func queueExclusions() {
-        let course = Course(id: UUID(), name: "Thermo", termMonth: 11, termYear: 2023)
+        let course = Course(id: UUID(), name: "Thermo", term: makeTerm())
         let courseProject = Project(id: UUID(), name: "Problem Sets", courseID: course.id)
         let workProject = Project(id: UUID(), name: "Rebuild", clientID: UUID())
         let done = PCCTask(id: UUID(), title: "Done", isComplete: true, projectID: workProject.id)
@@ -137,7 +137,7 @@ struct WorkBoardTests {
 
     @Test("the horizon keeps work-side items, drops Course ones, and leads with overdue")
     func upcomingGrouping() {
-        let course = Course(id: UUID(), name: "Thermo", termMonth: 11, termYear: 2023)
+        let course = Course(id: UUID(), name: "Thermo", term: makeTerm())
         let courseProject = Project(id: UUID(), name: "Problem Sets", courseID: course.id)
         let workProject = Project(id: UUID(), name: "Rebuild", clientID: UUID())
         let workTask = PCCTask(id: UUID(), title: "API", projectID: workProject.id)
@@ -292,7 +292,7 @@ struct WorkBoardTests {
 
     @Test("needs-organizing counts Client-less Projects and container-less open Tasks")
     func needsOrganizingCounts() {
-        let course = Course(id: UUID(), name: "Thermo", termMonth: 11, termYear: 2023)
+        let course = Course(id: UUID(), name: "Thermo", term: makeTerm())
         let projects = [
             Project(id: UUID(), name: "Loose", clientID: nil),
             Project(id: UUID(), name: "Filed", clientID: UUID()),
@@ -580,7 +580,7 @@ struct WorkBoardTests {
     @Test("a Course-owned Project never lands under a Client's health")
     func clientHealthExcludesCourseWork() {
         let client = PCCClient(id: UUID(), name: "Northside")
-        let course = Course(id: UUID(), name: "Thermo", termMonth: 11, termYear: 2023)
+        let course = Course(id: UUID(), name: "Thermo", term: makeTerm())
         let courseProject = Project(
             id: UUID(), name: "Problem Sets", clientID: client.id, courseID: course.id)
         let task = PCCTask(

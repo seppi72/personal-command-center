@@ -427,10 +427,8 @@ extension AppTestSuite {
         @Test("assigns a Task to a Course, moves it to another, then removes it (Course-less)")
         func reassignsTaskCourse() async throws {
             try await withTasksApp { app in
-                let courseA = Course(name: "CS 301", termMonth: 9, termYear: 2026)
-                let courseB = Course(name: "MATH 210", termMonth: 9, termYear: 2026)
-                try await courseA.save(on: app.db)
-                try await courseB.save(on: app.db)
+                let courseA = try await makeCourse(name: "CS 301", on: app.db)
+                let courseB = try await makeCourse(name: "MATH 210", on: app.db)
                 let task = PCCTask(title: "Movable")
                 try await task.save(on: app.db)
                 let taskID = try task.requireID()
@@ -499,10 +497,8 @@ extension AppTestSuite {
         @Test("lists Tasks scoped to one Course")
         func listsTasksScopedToCourse() async throws {
             try await withTasksApp { app in
-                let courseA = Course(name: "CS 301", termMonth: 9, termYear: 2026)
-                let courseB = Course(name: "MATH 210", termMonth: 9, termYear: 2026)
-                try await courseA.save(on: app.db)
-                try await courseB.save(on: app.db)
+                let courseA = try await makeCourse(name: "CS 301", on: app.db)
+                let courseB = try await makeCourse(name: "MATH 210", on: app.db)
                 let courseAID = try courseA.requireID()
                 try await PCCTask(title: "In CS 301", courseID: courseAID).save(on: app.db)
                 try await PCCTask(title: "In MATH 210", courseID: try courseB.requireID()).save(on: app.db)
@@ -570,8 +566,7 @@ extension AppTestSuite {
         @Test("a Task's Kind doesn't touch its container")
         func settingKindLeavesContainerAlone() async throws {
             try await withTasksApp { app in
-                let course = Course(name: "CS 301", termMonth: 9, termYear: 2026)
-                try await course.save(on: app.db)
+                let course = try await makeCourse(name: "CS 301", on: app.db)
                 let courseID = try course.requireID()
                 let task = PCCTask(title: "Problem set", courseID: courseID)
                 try await task.save(on: app.db)

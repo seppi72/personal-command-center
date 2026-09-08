@@ -57,6 +57,8 @@ public func configure(_ app: Application) async throws {
     app.migrations.add(AddCompletedAtToPCCTask())
     app.migrations.add(AddCourseToProject())
     app.migrations.add(AddKindToPCCTask())
+    app.migrations.add(CreateTerm())
+    app.migrations.add(AddTermToCourse())
     try await app.autoMigrate()
 
     let validTokens = Set(
