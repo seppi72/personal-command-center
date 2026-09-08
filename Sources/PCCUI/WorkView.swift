@@ -614,7 +614,7 @@ private struct WorkContent: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(theme.accent(colorScheme))
             }
-            if viewModel.tree.isEmpty {
+            if clientRoots.isEmpty {
                 emptyTree
             } else {
                 VStack(spacing: 2) {
@@ -622,6 +622,9 @@ private struct WorkContent: View {
                         treeRow(row.node, depth: row.depth)
                     }
                 }
+            }
+            if let unassigned = unassignedNode {
+                needsOrganizing(unassigned)
             }
         }
         .padding(.horizontal, 22)
@@ -645,7 +648,85 @@ private struct WorkContent: View {
                 return [(node, depth)] + rows(children, depth: depth + 1)
             }
         }
-        return rows(viewModel.tree, depth: 0)
+        return rows(clientRoots, depth: 0)
+    }
+
+    /// The real Clients, without the synthetic `.unassigned` root. That node
+    /// stays in the model — selection and scoping key off its id — but it is
+    /// not a Client and no longer renders as one (issue #109).
+    private var clientRoots: [WorkNode] {
+        viewModel.tree.filter { $0.kind != .unassigned }
+    }
+
+    private var unassignedNode: WorkNode? {
+        viewModel.tree.first { $0.kind == .unassigned }
+    }
+
+    /// Work with no Client above it, in its own section below the Clients
+    /// rather than as a peer row among them (issue #109). Selecting it scopes
+    /// the screen exactly as the old peer row did, and expanding it lists the
+    /// items so they can be re-filed in place. `WorkTree.build` omits the node
+    /// entirely when nothing is unassigned, so this section is absent rather
+    /// than showing zeroes.
+    private func needsOrganizing(_ node: WorkNode) -> some View {
+        let isSelected = viewModel.selectedNodeID == node.id
+        let isExpanded = expanded.contains(node.id)
+        return VStack(alignment: .leading, spacing: 2) {
+            Divider()
+                .padding(.vertical, 6)
+            Text("Needs organizing")
+                .pccPanelLabel()
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.bottom, 2)
+            HStack(spacing: 6) {
+                Button {
+                    if isExpanded { expanded.remove(node.id) } else { expanded.insert(node.id) }
+                } label: {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 12)
+                }
+                .buttonStyle(.plain)
+                Image(systemName: node.kind.systemImage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 14)
+                Text(unassignedSummary(node))
+                    .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Text(PCCDuration.compact(node.totalSeconds))
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(node.totalSeconds > 0 ? theme.accent(colorScheme) : Color.secondary)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(rowHighlight(isSelected))
+            .contentShape(Rectangle())
+            .onTapGesture {
+                viewModel.selectedNodeID = isSelected ? nil : node.id
+            }
+            if isExpanded, let children = node.children {
+                ForEach(children, id: \.id) { child in
+                    treeRow(child, depth: 1)
+                }
+            }
+        }
+    }
+
+    /// "3 unassigned tasks · 1 unassigned project" — counts the node's direct
+    /// children only. A Task inside a Client-less Project is not itself
+    /// unassigned; the Project it hangs off is the thing to re-file.
+    private func unassignedSummary(_ node: WorkNode) -> String {
+        let children = node.children ?? []
+        let tasks = children.filter { if case .task = $0.kind { return true } else { return false } }.count
+        let projects = children.count - tasks
+        var parts: [String] = []
+        if tasks > 0 { parts.append("\(tasks) unassigned task\(tasks == 1 ? "" : "s")") }
+        if projects > 0 { parts.append("\(projects) unassigned project\(projects == 1 ? "" : "s")") }
+        return parts.joined(separator: " · ")
     }
 
     private func treeRow(_ node: WorkNode, depth: Int) -> some View {
