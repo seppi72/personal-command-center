@@ -265,6 +265,70 @@ public enum WorkBoard {
         )
     }
 
+    // MARK: - Client health
+
+    /// One summary per Client: how much work is open under it, how much of
+    /// that is late, when the next thing lands, and how many hours went to it
+    /// in the range the screen is reporting on (issue #110).
+    ///
+    /// Answers "which Client needs me today" without the owner opening each
+    /// one's Projects and Tasks by hand. Clients needing attention sort first,
+    /// then the rest by name — the list is a work queue at the top and a
+    /// directory below it.
+    ///
+    /// Hours come in as `secondsByClient` rather than being recomputed here:
+    /// `WorkTree` already owns what counts toward a Client's total for a range
+    /// (ADR-0005), and a second implementation of that rule would be free to
+    /// disagree with the tree the card sits next to.
+    ///
+    /// Course-owned Projects are excluded throughout, the same exclusion the
+    /// tree and the priority queue apply (ADR-0011).
+    public static func clientHealth(
+        clients: [PCCClient], projects: [Project], tasks: [PCCTask],
+        secondsByClient: [UUID: Double],
+        calendar: Calendar = .current, reference: Date = Date()
+    ) -> [WorkClientHealth] {
+        let dayStart = calendar.startOfDay(for: reference)
+        return clients
+            .map { client -> WorkClientHealth in
+                let scopedProjects = projects.filter {
+                    $0.clientID == client.id && $0.courseID == nil
+                }
+                let projectIDs = Set(scopedProjects.map(\.id))
+                let scopedTasks = tasks.filter { $0.projectID.map(projectIDs.contains) ?? false }
+                let open = scopedTasks.filter { !$0.isComplete }
+
+                // "Active" is a Project with open Tasks, or none at all —
+                // a Project whose every Task is done is finished work, not a
+                // live commitment, and counting it would overstate the load.
+                let activeProjects = scopedProjects.filter { project in
+                    let its = scopedTasks.filter { $0.projectID == project.id }
+                    return its.isEmpty || its.contains { !$0.isComplete }
+                }
+
+                // The nearest deadline is the earliest date still outstanding,
+                // over open Tasks *and* the Projects' own due dates — a Project
+                // deadline with no dated Task under it is still a commitment.
+                let dueDates = open.compactMap(\.dueDate) + activeProjects.compactMap(\.dueDate)
+
+                return WorkClientHealth(
+                    clientID: client.id,
+                    name: client.name,
+                    activeProjectCount: activeProjects.count,
+                    openTaskCount: open.count,
+                    overdueTaskCount: open.filter { isOverdue($0, before: dayStart) }.count,
+                    nearestDueDate: dueDates.min(),
+                    loggedSeconds: secondsByClient[client.id] ?? 0,
+                    urgency: urgency(
+                        for: dueDates.min(), calendar: calendar, reference: reference)
+                )
+            }
+            .sorted {
+                if $0.needsAttention != $1.needsAttention { return $0.needsAttention }
+                return $0.name < $1.name
+            }
+    }
+
     // MARK: - Task progress
 
     /// How far through the Tasks in scope the owner is, broken down by the
@@ -538,6 +602,72 @@ public struct WorkTaskProgress: Equatable, Sendable {
     public var fraction: Double? {
         guard total > 0 else { return nil }
         return Double(complete) / Double(total)
+    }
+}
+
+/// One Client's health on the Work screen (issue #110): the state of the
+/// relationship, not just its hours.
+public struct WorkClientHealth: Identifiable, Equatable, Sendable {
+    public let clientID: UUID
+    public let name: String
+    /// Projects with open Tasks, or with no Tasks at all — see
+    /// `WorkBoard.clientHealth`.
+    public let activeProjectCount: Int
+    public let openTaskCount: Int
+    public let overdueTaskCount: Int
+    /// The earliest outstanding due date under this Client, `nil` when nothing
+    /// under it is dated.
+    public let nearestDueDate: Date?
+    /// Hours logged against this Client in the range the screen is reporting
+    /// on, in seconds — the same figure its tree row shows.
+    public let loggedSeconds: Double
+    /// How `nearestDueDate` reads, resolved once so the row's label, its
+    /// ordering and its colour all come from one value.
+    public let urgency: WorkUrgency
+
+    public var id: UUID { clientID }
+
+    public init(
+        clientID: UUID, name: String, activeProjectCount: Int, openTaskCount: Int,
+        overdueTaskCount: Int, nearestDueDate: Date?, loggedSeconds: Double,
+        urgency: WorkUrgency
+    ) {
+        self.clientID = clientID
+        self.name = name
+        self.activeProjectCount = activeProjectCount
+        self.openTaskCount = openTaskCount
+        self.overdueTaskCount = overdueTaskCount
+        self.nearestDueDate = nearestDueDate
+        self.loggedSeconds = loggedSeconds
+        self.urgency = urgency
+    }
+
+    /// **The attention rule**: a Client needs attention when it has at least
+    /// one overdue Task, or its nearest outstanding deadline lands today or
+    /// tomorrow.
+    ///
+    /// Stated explicitly rather than left to a score so the owner can predict
+    /// the flag: it fires on work that is already late, or on work that has to
+    /// move before the end of tomorrow. A deadline further out is visible in
+    /// the row's own label without shouting — flagging everything inside a
+    /// week would flag most Clients most of the time, which is the same as
+    /// flagging none of them.
+    public var needsAttention: Bool {
+        if overdueTaskCount > 0 { return true }
+        switch urgency {
+        case .overdue, .today, .tomorrow: return true
+        case .thisWeek, .later, .undated: return false
+        }
+    }
+
+    /// The row's second line, e.g. "5 open · 2 overdue · 8h 0m". `nil` when
+    /// there is nothing to say, so a dormant Client stays quiet.
+    public var caption: String? {
+        var parts: [String] = []
+        if openTaskCount > 0 { parts.append("\(openTaskCount) open") }
+        if overdueTaskCount > 0 { parts.append("\(overdueTaskCount) overdue") }
+        if loggedSeconds > 0 { parts.append(PCCDuration.compact(loggedSeconds)) }
+        return parts.isEmpty ? nil : parts.joined(separator: "  ·  ")
     }
 }
 
