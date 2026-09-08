@@ -98,6 +98,7 @@ private struct WorkContent: View {
                     statStrip
                     activityRow
                     breakdownRow
+                    activityFeed
                     entryList
                 }
                 .padding(PCCChassis.outerMargin)
@@ -1106,6 +1107,67 @@ private struct WorkContent: View {
     }
 
     // MARK: - Time Entries
+
+    /// What actually happened in the range, newest first (issue #108) — Task
+    /// completions and logged time on one timeline.
+    ///
+    /// Sits above the Time Entries ledger rather than replacing it: the ledger
+    /// is the editable record (each row opens an edit sheet), while this reads
+    /// as the day's narrative, which is what a client update is written from.
+    private var activityFeed: some View {
+        let events = viewModel.recentActivity
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Recent Activity")
+                    .pccPanelLabel()
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(events.count)")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            if events.isEmpty {
+                Text("Nothing completed or logged in this range yet.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 12)
+            } else {
+                VStack(spacing: 2) {
+                    ForEach(events) { activityFeedRow($0) }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .glassBubble()
+            }
+        }
+    }
+
+    private func activityFeedRow(_ event: WorkActivityEvent) -> some View {
+        HStack(spacing: 12) {
+            Text(Self.timeFormatter.string(from: event.date))
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 76, alignment: .leading)
+            Image(systemName: event.kind.systemImage)
+                .font(.caption)
+                .foregroundStyle(
+                    event.kind == .taskCompleted ? theme.accent(colorScheme) : Color.secondary
+                )
+                .frame(width: 14)
+            Text(event.headline)
+                .font(.system(size: 13))
+                .lineLimit(1)
+            Spacer(minLength: 12)
+            if let context = event.context {
+                Text(context)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.vertical, 5)
+    }
 
     private var entryList: some View {
         let entries = viewModel.scopedEntries

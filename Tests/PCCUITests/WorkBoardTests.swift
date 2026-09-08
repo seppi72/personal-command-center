@@ -377,6 +377,100 @@ struct WorkBoardTests {
         #expect(progress.isEmpty)
     }
 
+    // MARK: - Recent activity
+
+    /// The whole reference day.
+    private var today: (start: Date, end: Date) {
+        let start = calendar.startOfDay(for: now)
+        return (start, calendar.date(byAdding: .day, value: 1, to: start)!)
+    }
+
+    @Test("completions and logged time merge into one feed, newest first")
+    func activityMerging() {
+        let client = PCCClient(id: UUID(), name: "Northside")
+        let project = Project(id: UUID(), name: "Payments", clientID: client.id)
+        let done = PCCTask(
+            id: UUID(), title: "API authentication", isComplete: true, projectID: project.id,
+            completedAt: day(0, hours: 14))
+        let open = PCCTask(id: UUID(), title: "Dashboard", projectID: project.id)
+        let entry = self.entry(projectID: project.id, start: day(0, hours: 9), seconds: 3600)
+
+        let feed = WorkBoard.recentActivity(
+            tasks: [done, open], timeEntries: [entry], projects: [project], clients: [client],
+            range: today)
+
+        #expect(feed.map(\.headline) == ["Completed API authentication", "Logged 1h 0m"])
+        #expect(feed.map(\.kind) == [.taskCompleted, .timeLogged])
+        #expect(feed.allSatisfy { $0.context == "Northside" })
+    }
+
+    @Test("a Task completed with no completedAt never reaches the feed")
+    func activitySkipsUnstampedCompletions() {
+        let project = Project(id: UUID(), name: "Payments", clientID: UUID())
+        let legacy = PCCTask(
+            id: UUID(), title: "Old work", isComplete: true, projectID: project.id)
+
+        let feed = WorkBoard.recentActivity(
+            tasks: [legacy], timeEntries: [], projects: [project], clients: [], range: today)
+
+        #expect(feed.isEmpty)
+    }
+
+    @Test("a running Time Entry is history yet to happen, so it stays out of the feed")
+    func activitySkipsRunningEntries() {
+        let running = entry(start: day(0, hours: 10), seconds: nil)
+
+        let feed = WorkBoard.recentActivity(
+            tasks: [], timeEntries: [running], projects: [], clients: [], range: today)
+
+        #expect(feed.isEmpty)
+    }
+
+    @Test("events outside the range are excluded at both ends")
+    func activityRange() {
+        let project = Project(id: UUID(), name: "Payments", clientID: UUID())
+        let yesterday = PCCTask(
+            id: UUID(), title: "Yesterday", isComplete: true, projectID: project.id,
+            completedAt: day(-1))
+        let tomorrow = PCCTask(
+            id: UUID(), title: "Tomorrow", isComplete: true, projectID: project.id,
+            completedAt: day(1))
+        let inRange = PCCTask(
+            id: UUID(), title: "Today", isComplete: true, projectID: project.id,
+            completedAt: day(0, hours: 8))
+
+        let feed = WorkBoard.recentActivity(
+            tasks: [yesterday, tomorrow, inRange], timeEntries: [], projects: [project],
+            clients: [], range: today)
+
+        #expect(feed.map(\.headline) == ["Completed Today"])
+    }
+
+    @Test("logged time is timestamped by when it ended, and names its Task")
+    func activityLoggedTimeContext() {
+        let task = PCCTask(id: UUID(), title: "Refactor", projectID: UUID())
+        let entry = self.entry(taskID: task.id, start: day(0, hours: 9), seconds: 5100)
+
+        let feed = WorkBoard.recentActivity(
+            tasks: [task], timeEntries: [entry], projects: [], clients: [], range: today)
+
+        #expect(feed[0].date == day(0, hours: 9).addingTimeInterval(5100))
+        #expect(feed[0].headline == "Logged 1h 25m")
+        #expect(feed[0].context == "Refactor")
+        #expect(feed[0].seconds == 5100)
+    }
+
+    @Test("an event with nothing above it carries no context rather than a placeholder")
+    func activityWithoutContext() {
+        let orphan = PCCTask(
+            id: UUID(), title: "Loose end", isComplete: true, completedAt: day(0, hours: 11))
+
+        let feed = WorkBoard.recentActivity(
+            tasks: [orphan], timeEntries: [], projects: [], clients: [], range: today)
+
+        #expect(feed[0].context == nil)
+    }
+
     // MARK: - Client health
 
     /// One Client with one Project, and whatever Tasks the case needs.
