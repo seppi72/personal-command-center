@@ -586,6 +586,7 @@ private struct WorkContent: View {
             treeBubble
             VStack(spacing: 14) {
                 completionBubble
+                clientHealthBubble
                 breakdownBubble
             }
             .frame(width: Self.sideColumnWidth)
@@ -787,6 +788,83 @@ private struct WorkContent: View {
             viewModel.selectedNodeID = isSelected ? nil : node.id
         }
         .contextMenu { contextMenu(for: node) }
+    }
+
+    /// The state of each Client relationship, not just its hours (issue #110):
+    /// active Projects, open and overdue Tasks, the nearest deadline and the
+    /// range's logged time, with the Clients needing attention at the top.
+    ///
+    /// Its own card rather than more lines inside the tree: the tree answers
+    /// "where did the time go", and stacking five figures under every Client
+    /// row there would bury the structure it exists to show.
+    @ViewBuilder
+    private var clientHealthBubble: some View {
+        if !viewModel.clientHealth.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Client health")
+                    .pccPanelLabel()
+                    .foregroundStyle(.secondary)
+                VStack(spacing: 10) {
+                    ForEach(viewModel.clientHealth) { health in
+                        clientHealthRow(health)
+                    }
+                }
+            }
+            .padding(.horizontal, 22)
+            .padding(.vertical, 20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .glassBubble()
+        }
+    }
+
+    private func clientHealthRow(_ health: WorkClientHealth) -> some View {
+        let isSelected = viewModel.selectedNodeID == "client:\(health.clientID)"
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Text(health.name)
+                    .font(.system(size: 13, weight: isSelected ? .bold : .semibold))
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                if health.needsAttention {
+                    Label("Needs attention", systemImage: "exclamationmark.triangle.fill")
+                        .labelStyle(.iconOnly)
+                        .font(.caption)
+                        .foregroundStyle(theme.signalRed(colorScheme))
+                }
+            }
+            Text(activeProjectsLine(health))
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+            if let caption = health.caption {
+                Text(caption)
+                    .font(.system(size: 11))
+                    .foregroundStyle(health.overdueTaskCount > 0
+                        ? theme.signalRed(colorScheme) : Color.secondary)
+                    .lineLimit(1)
+            }
+            if health.nearestDueDate != nil {
+                Text(health.urgency.label)
+                    .font(.system(size: 11))
+                    .foregroundStyle(health.urgency.isOverdue
+                        ? theme.signalRed(colorScheme) : Color.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(rowHighlight(isSelected))
+        .contentShape(Rectangle())
+        // Selecting here is the same selection the tree makes, so the two
+        // stay one control over one scope rather than two competing ones.
+        .onTapGesture {
+            viewModel.selectedNodeID = isSelected ? nil : "client:\(health.clientID)"
+        }
+    }
+
+    private func activeProjectsLine(_ health: WorkClientHealth) -> String {
+        let count = health.activeProjectCount
+        return count == 1 ? "1 active project" : "\(count) active projects"
     }
 
     /// A Client or Project row's completion bar: Tasks done over Tasks in
