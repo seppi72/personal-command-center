@@ -327,6 +327,18 @@ public final class WorkViewModel: ObservableObject {
         WorkBoard.workload(days: range.days(), loggedSeconds: totalSeconds)
     }
 
+    /// The Recent Activity feed for the current scope and range (issue #108):
+    /// Tasks completed and time logged, newest first.
+    ///
+    /// Scoped through `scopedTasks` and `scopedEntries`, so selecting a Client
+    /// narrows the feed to that Client's story the same way it narrows every
+    /// other panel — and so a Course-attached entry never leaks in.
+    public var recentActivity: [WorkActivityEvent] {
+        WorkBoard.recentActivity(
+            tasks: scopedTasks, timeEntries: scopedEntries, projects: projects,
+            clients: clients, range: range.resolved())
+    }
+
     /// Per-Client health for the Client health card, attention-first
     /// (issue #110).
     ///

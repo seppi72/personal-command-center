@@ -265,6 +265,73 @@ public enum WorkBoard {
         )
     }
 
+    // MARK: - Recent activity
+
+    /// What actually happened in the range, newest first (issue #108): Tasks
+    /// completed and time logged, merged into one narrative rather than the
+    /// Time Entries ledger, which shows durations but never a completion.
+    ///
+    /// Two event sources on one timeline because "what did I get done today"
+    /// is answered by neither alone — a day can be all logged hours and no
+    /// completions, or the reverse, and both read as a productive day.
+    ///
+    /// A Task completion is timestamped by `completedAt`, which is only
+    /// populated for Tasks completed after that field existed: older
+    /// completions simply don't appear, which is accepted (issue #108). A
+    /// running Time Entry is excluded for the same reason it contributes to no
+    /// total until it stops (`CONTEXT.md`) — it is the toolbar's live chip,
+    /// not history.
+    ///
+    /// Takes already-scoped lists: what "in scope" means is the tree
+    /// selection's business (`WorkViewModel`), exactly as `taskProgress` does.
+    public static func recentActivity(
+        tasks: [PCCTask], timeEntries: [TimeEntry], projects: [Project], clients: [PCCClient],
+        range: (start: Date, end: Date)
+    ) -> [WorkActivityEvent] {
+        func context(projectID: UUID?, clientID: UUID?) -> String? {
+            let project = projectID.flatMap { id in projects.first { $0.id == id } }
+            let client = (clientID ?? project?.clientID).flatMap { id in
+                clients.first { $0.id == id }
+            }
+            return client?.name ?? project?.name
+        }
+
+        let completions = tasks.compactMap { task -> WorkActivityEvent? in
+            guard task.isComplete, let at = task.completedAt,
+                at >= range.start, at < range.end
+            else { return nil }
+            return WorkActivityEvent(
+                id: "task:\(task.id)", date: at, kind: .taskCompleted,
+                headline: "Completed \(task.title)",
+                context: context(projectID: task.projectID, clientID: nil),
+                seconds: nil)
+        }
+
+        let logged = timeEntries.compactMap { entry -> WorkActivityEvent? in
+            guard let endDate = entry.endDate,
+                entry.startDate >= range.start, entry.startDate < range.end
+            else { return nil }
+            let seconds = endDate.timeIntervalSince(entry.startDate)
+            let task = entry.taskID.flatMap { id in tasks.first { $0.id == id } }
+            return WorkActivityEvent(
+                id: "entry:\(entry.id)",
+                // Timestamped by when the work *ended*, so a long entry sits
+                // in the feed where it finished rather than where it began —
+                // the same instant the completion above it would carry.
+                date: endDate, kind: .timeLogged,
+                headline: "Logged \(PCCDuration.compact(seconds))",
+                context: task?.title
+                    ?? context(projectID: entry.projectID, clientID: entry.clientID),
+                seconds: seconds)
+        }
+
+        return (completions + logged).sorted {
+            // Ties broken by headline so a completion logged at the same
+            // instant as its Time Entry doesn't reorder between rebuilds.
+            $0.date == $1.date ? $0.headline < $1.headline : $0.date > $1.date
+        }
+    }
+
     // MARK: - Client health
 
     /// One summary per Client: how much work is open under it, how much of
@@ -602,6 +669,48 @@ public struct WorkTaskProgress: Equatable, Sendable {
     public var fraction: Double? {
         guard total > 0 else { return nil }
         return Double(complete) / Double(total)
+    }
+}
+
+/// One row of the Recent Activity feed (issue #108) — a completion or a
+/// stretch of logged time, already resolved to the text its row shows.
+public struct WorkActivityEvent: Identifiable, Equatable, Sendable {
+    public enum Kind: Equatable, Sendable {
+        case taskCompleted
+        case timeLogged
+
+        /// The SF Symbol the row is marked with, on the kind rather than in
+        /// the view for the same reason `WorkNodeKind.systemImage` is.
+        public var systemImage: String {
+            switch self {
+            case .taskCompleted: return "checkmark.circle.fill"
+            case .timeLogged: return "clock"
+            }
+        }
+    }
+
+    /// Kind-prefixed, so a Task and a Time Entry can't collide on a UUID.
+    public let id: String
+    public let date: Date
+    public let kind: Kind
+    /// e.g. "Completed API authentication", "Logged 1h 25m".
+    public let headline: String
+    /// What the event belongs to — the Client where there is one, else the
+    /// Project, or for logged time the Task it was logged against. `nil` when
+    /// the event hangs off nothing.
+    public let context: String?
+    /// Set for logged time only.
+    public let seconds: Double?
+
+    public init(
+        id: String, date: Date, kind: Kind, headline: String, context: String?, seconds: Double?
+    ) {
+        self.id = id
+        self.date = date
+        self.kind = kind
+        self.headline = headline
+        self.context = context
+        self.seconds = seconds
     }
 }
 
