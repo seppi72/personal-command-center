@@ -38,10 +38,11 @@ func makeTerm(
 @discardableResult
 func makeCourse(
     name: String, on db: any Database, dueDate: Date? = nil, year: Int = 2026,
-    semester: Semester = .first
+    semester: Semester = .first, units: Double = 3, grade: Grade? = nil
 ) async throws -> Course {
     let term = try await makeTerm(on: db, year: year, semester: semester)
-    let course = Course(name: name, termID: try term.requireID(), dueDate: dueDate)
+    let course = Course(
+        name: name, termID: try term.requireID(), units: units, grade: grade, dueDate: dueDate)
     try await course.save(on: db)
     course.$term.value = term
     return course

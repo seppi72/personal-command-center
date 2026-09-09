@@ -19,8 +19,13 @@ struct SchoolBoardTests {
     private var beforeRange: Date { range.start.addingTimeInterval(-86_400) }
     private var afterRange: Date { range.end.addingTimeInterval(86_400) }
 
-    private func course(_ name: String, term: Term? = nil, dueDate: Date? = nil) -> Course {
-        Course(id: UUID(), name: name, term: term ?? makeTerm(), dueDate: dueDate)
+    private func course(
+        _ name: String, term: Term? = nil, dueDate: Date? = nil, units: Double = 3,
+        grade: Grade? = nil
+    ) -> Course {
+        Course(
+            id: UUID(), name: name, term: term ?? makeTerm(), units: units, grade: grade,
+            dueDate: dueDate)
     }
 
     private func entry(

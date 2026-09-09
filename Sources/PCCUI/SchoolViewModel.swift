@@ -31,6 +31,11 @@ public final class SchoolViewModel: ObservableObject {
     @Published public private(set) var tasks: [PCCTask] = []
     @Published public private(set) var timeEntries: [TimeEntry] = []
     @Published public private(set) var commitments: [PersonalCommitment] = []
+    /// The two academic figures, computed by the backend (issue #92) — the
+    /// one part of this screen not derived locally through `SchoolBoard`,
+    /// since the GWA rules have edge cases that deserve a single home
+    /// (`SchoolSummary`). `nil` until the first load lands.
+    @Published public private(set) var summary: SchoolSummary?
     /// Which Course the drill-down is open on, or `nil` for the whole-screen
     /// view. Kept as the id rather than the `Course` so a drill-down survives
     /// a reload that replaces the value.
@@ -45,6 +50,7 @@ public final class SchoolViewModel: ObservableObject {
     private let tasksClient: TasksAPIClient
     private let timeEntriesClient: TimeEntriesAPIClient
     private let commitmentsClient: PersonalCommitmentsAPIClient
+    private let reportingClient: SchoolReportingAPIClient
 
     public init(
         coursesClient: CoursesAPIClient,
@@ -52,7 +58,8 @@ public final class SchoolViewModel: ObservableObject {
         projectsClient: ProjectsAPIClient,
         tasksClient: TasksAPIClient,
         timeEntriesClient: TimeEntriesAPIClient,
-        commitmentsClient: PersonalCommitmentsAPIClient
+        commitmentsClient: PersonalCommitmentsAPIClient,
+        reportingClient: SchoolReportingAPIClient
     ) {
         self.coursesClient = coursesClient
         self.termsClient = termsClient
@@ -60,6 +67,7 @@ public final class SchoolViewModel: ObservableObject {
         self.tasksClient = tasksClient
         self.timeEntriesClient = timeEntriesClient
         self.commitmentsClient = commitmentsClient
+        self.reportingClient = reportingClient
     }
 
     // MARK: - Loading
@@ -67,7 +75,7 @@ public final class SchoolViewModel: ObservableObject {
     public func load() async {
         isLoading = true
         defer { isLoading = false }
-        await run(noun: "School", verb: "load") {
+        let didLoad = await run(noun: "School", verb: "load") {
             async let loadedCourses = coursesClient.listCourses()
             async let loadedTerms = termsClient.listTerms()
             async let loadedProjects = projectsClient.listProjects()
@@ -86,6 +94,28 @@ public final class SchoolViewModel: ObservableObject {
         // whole-screen view rather than showing an empty detail panel.
         if let id = selectedCourseID, !courses.contains(where: { $0.id == id }) {
             selectedCourseID = nil
+        }
+        await loadSummary(after: didLoad)
+    }
+
+    /// Fetches the GWA/Units Earned figures for the Term the Courses say is
+    /// current. Runs after the lists rather than alongside them, because
+    /// which Term to scope the per-Term GWA to is itself derived from the
+    /// Courses just loaded (`SchoolBoard.currentTerm(in:)`).
+    ///
+    /// Refetched after any Course write too: a grade or unit change moves
+    /// both figures, and a stale tile beside an edited Course card is a
+    /// figure that disagrees with the data on the same screen.
+    /// Callers pass the write's own outcome so a *failed* write doesn't
+    /// refetch: `run` clears `errorMessage` on success, and refetching after
+    /// a failure would wipe the message explaining why the write didn't
+    /// happen. Keyed to that one call's result rather than to whatever
+    /// `errorMessage` happens to hold, which could be a stale message from
+    /// some earlier failure and would then suppress every refetch after it.
+    private func loadSummary(after didSucceed: Bool) async {
+        guard didSucceed else { return }
+        await run(noun: "School figures", verb: "load") {
+            summary = try await reportingClient.fetchSchoolSummary(termID: currentTerm?.id)
         }
     }
 
@@ -203,35 +233,39 @@ public final class SchoolViewModel: ObservableObject {
     /// the backend (`CourseController.create`), so a Deadline is a separate
     /// write (mirrors `WorkViewModel.createProject`).
     public func createCourse(_ values: CourseFormValues) async {
-        await run(noun: "Course", verb: "create") {
+        let didWrite = await run(noun: "Course", verb: "create") {
             var created = try await coursesClient.createCourse(
-                name: values.name, termID: values.termID)
+                name: values.name, termID: values.termID, units: values.units, grade: values.grade)
             if let dueDate = values.dueDate {
                 created = try await coursesClient.setCourseDeadline(id: created.id, dueDate: dueDate)
             }
             courses.append(created)
             courses.sort { $0.name < $1.name }
         }
+        await loadSummary(after: didWrite)
     }
 
     public func updateCourse(_ course: Course, with values: CourseFormValues) async {
-        await run(noun: "Course", verb: "update") {
+        let didWrite = await run(noun: "Course", verb: "update") {
             var updated = try await coursesClient.updateCourse(
-                id: course.id, name: values.name, termID: values.termID)
+                id: course.id, name: values.name, termID: values.termID, units: values.units,
+                grade: values.grade)
             if values.dueDate != course.dueDate {
                 updated = try await coursesClient.setCourseDeadline(id: course.id, dueDate: values.dueDate)
             }
             if let index = courses.firstIndex(where: { $0.id == updated.id }) { courses[index] = updated }
             courses.sort { $0.name < $1.name }
         }
+        await loadSummary(after: didWrite)
     }
 
     public func deleteCourse(_ course: Course) async {
-        await run(noun: "Course", verb: "delete") {
+        let didWrite = await run(noun: "Course", verb: "delete") {
             try await coursesClient.deleteCourse(id: course.id)
             courses.removeAll { $0.id == course.id }
             if selectedCourseID == course.id { selectedCourseID = nil }
         }
+        await loadSummary(after: didWrite)
     }
 
     // MARK: - Terms
@@ -408,12 +442,18 @@ public final class SchoolViewModel: ObservableObject {
     /// `verb`, like `WorkViewModel.run(noun:verb:)` and unlike the
     /// single-noun view models: this screen mutates Courses, Projects, Tasks
     /// and Meetings, so "Couldn't create Task" has to name which.
-    private func run(noun: String, verb: String, _ operation: () async throws -> Void) async {
+    /// Returns whether the operation succeeded, so a caller with follow-up
+    /// work (`loadSummary(after:)`) can skip it on failure rather than
+    /// inspecting `errorMessage`, which may still hold an older message.
+    @discardableResult
+    private func run(noun: String, verb: String, _ operation: () async throws -> Void) async -> Bool {
         do {
             try await operation()
             errorMessage = nil
+            return true
         } catch {
             errorMessage = "Couldn't \(verb) \(noun): \(error.localizedDescription)"
+            return false
         }
     }
 }

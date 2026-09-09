@@ -9,14 +9,23 @@ import Foundation
 /// describing one, so the form picks from the Terms already created rather
 /// than spelling out a month and year of its own
 /// (`docs/adr/0012-term-is-an-entity.md`).
+/// `units` is required and `grade` is not: every Course weighs something,
+/// while a mark is what the subject doesn't have yet until the school issues
+/// one (issue #92).
 public struct CourseFormValues: Equatable, Sendable {
     public var name: String
     public var termID: UUID
+    public var units: Double
+    public var grade: Grade?
     public var dueDate: Date?
 
-    public init(name: String, termID: UUID, dueDate: Date? = nil) {
+    public init(
+        name: String, termID: UUID, units: Double, grade: Grade? = nil, dueDate: Date? = nil
+    ) {
         self.name = name
         self.termID = termID
+        self.units = units
+        self.grade = grade
         self.dueDate = dueDate
     }
 }

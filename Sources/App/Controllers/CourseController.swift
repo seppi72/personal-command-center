@@ -12,6 +12,9 @@ struct CourseResponse: Content {
     /// `$term` (`Self.query(on:)`).
     let term: TermResponse
     let dueDate: Date?
+    let units: Double
+    /// The final mark, or `nil` while the subject is ongoing (issue #92).
+    let grade: Grade?
 
     init(_ course: Course) throws {
         self.id = try course.requireID()
@@ -19,14 +22,32 @@ struct CourseResponse: Content {
         self.termID = course.$term.id
         self.term = try TermResponse(course.term)
         self.dueDate = course.dueDate
+        self.units = course.units
+        self.grade = course.grade
     }
 }
 
-/// Create and edit share this shape — a Course's name and Term are always
-/// set together, unlike its Deadline (its own endpoint, below).
+/// Create and edit share this shape — a Course's name, Term, units and mark
+/// are always set together on the one form, unlike its Deadline (its own
+/// endpoint, below).
+///
+/// `grade` omitted (or null) means the subject is ongoing, and is also how a
+/// mark is cleared — the same "missing means null" shape
+/// `SetCourseDeadlineRequest` has. `units` has no such reading: it is
+/// required on every save, since a unitless Course would silently corrupt
+/// both GWA and Units Earned.
 struct SaveCourseRequest: Content {
     let name: String
     let termID: UUID
+    let units: Double
+    let grade: Grade?
+
+    init(name: String, termID: UUID, units: Double, grade: Grade? = nil) {
+        self.name = name
+        self.termID = termID
+        self.units = units
+        self.grade = grade
+    }
 }
 
 /// `dueDate: nil` (or the key omitted entirely) clears the Course's
@@ -59,7 +80,9 @@ struct CourseController: RouteCollection {
         let term = try await Self.requireTerm(id: payload.termID, req: req)
         let course = Course(
             name: try Self.validatedName(payload.name),
-            termID: try term.requireID()
+            termID: try term.requireID(),
+            units: try Self.validatedUnits(payload.units),
+            grade: payload.grade
         )
         try await course.save(on: req.db)
         course.$term.value = term
@@ -74,6 +97,8 @@ struct CourseController: RouteCollection {
         let term = try await Self.requireTerm(id: payload.termID, req: req)
         course.name = try Self.validatedName(payload.name)
         course.$term.id = try term.requireID()
+        course.units = try Self.validatedUnits(payload.units)
+        course.grade = payload.grade
         try await course.save(on: req.db)
         course.$term.value = term
         return try CourseResponse(course)
@@ -104,6 +129,21 @@ struct CourseController: RouteCollection {
             throw Abort(.badRequest, reason: "name must not be empty")
         }
         return trimmed
+    }
+
+    /// A Course weighs something, always (issue #92) — reject zero, a
+    /// negative count, and a non-finite one. Zero is rejected rather than
+    /// stored because a zero-unit subject contributes nothing to either
+    /// figure while looking like real data, and a whole Term of them would
+    /// leave GWA undefined with nothing on screen saying why.
+    ///
+    /// Decimal rather than integer so half-unit subjects stay expressible,
+    /// so there's no whole-number check here.
+    private static func validatedUnits(_ units: Double) throws -> Double {
+        guard units.isFinite, units > 0 else {
+            throw Abort(.badRequest, reason: "units must be a positive number")
+        }
+        return units
     }
 
     /// Deleting a Course doesn't delete its Tasks — `AddCourseToPCCTask`'s

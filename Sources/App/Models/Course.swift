@@ -36,12 +36,46 @@ final class Course: Model, @unchecked Sendable {
     @OptionalField(key: "due_date")
     var dueDate: Date?
 
+    /// How much this subject weighs in the General Weighted Average
+    /// (`CONTEXT.md`). Required, never optional: a unitless Course would
+    /// silently corrupt both GWA and Units Earned, and forcing a nil branch
+    /// into every consumer only spreads the problem. Stored as a `Double`
+    /// rather than an `Int` so half-unit subjects stay expressible.
+    @Field(key: "units")
+    var units: Double
+
+    /// The single final mark the school issued for this subject, entered by
+    /// the owner (`docs/adr/0013-owner-entered-course-grade-over-computed-gradebook.md`).
+    /// `nil` means the subject is ongoing — no mark yet — which is why this
+    /// one is optional where `units` is not.
+    ///
+    /// Stored as its raw `String` rather than through Fluent's `@Enum`, the
+    /// same "plain column, translate at the edges" shape
+    /// `Account.typeRawValue` and `Term.semesterRawValue` already use.
+    @OptionalField(key: "grade")
+    var gradeRawValue: String?
+
+    /// The stored raw value as a `Grade`. A row written outside this app
+    /// with an unknown mark reads as "no mark yet" rather than trapping —
+    /// an ongoing subject is the honest reading of a value this app can't
+    /// interpret, and it keeps such a row out of both figures instead of
+    /// crashing every request that touches it.
+    var grade: Grade? {
+        get { gradeRawValue.flatMap(Grade.init(rawValue:)) }
+        set { gradeRawValue = newValue?.rawValue }
+    }
+
     init() {}
 
-    init(id: UUID? = nil, name: String, termID: Term.IDValue, dueDate: Date? = nil) {
+    init(
+        id: UUID? = nil, name: String, termID: Term.IDValue, units: Double,
+        grade: Grade? = nil, dueDate: Date? = nil
+    ) {
         self.id = id
         self.name = name
         self.$term.id = termID
+        self.units = units
+        self.gradeRawValue = grade?.rawValue
         self.dueDate = dueDate
     }
 }
