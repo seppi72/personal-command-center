@@ -18,3 +18,15 @@ func makeTerm(
         id: id, year: year, semester: semester,
         displayName: "\(semester.displayName) \(year)", startDate: startDate, endDate: endDate)
 }
+
+/// A Course with a Term and a unit count, for the suites that care about
+/// neither — `WorkBoardTests` and `LoggedHoursTests` test hours, not
+/// academics, and a Course carries required `units` since issue #92.
+/// `SchoolBoardTests` keeps its own local helper, since some of its cases do
+/// vary the marks.
+func makeCourse(
+    id: UUID = UUID(), name: String, term: Term? = nil, units: Double = 3, grade: Grade? = nil,
+    dueDate: Date? = nil
+) -> Course {
+    Course(id: id, name: name, term: term ?? makeTerm(), units: units, grade: grade, dueDate: dueDate)
+}

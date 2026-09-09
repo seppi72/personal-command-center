@@ -7,8 +7,9 @@ import Foundation
 /// the seam is here for one.
 public protocol CoursesAPIClient: Sendable {
     func listCourses() async throws -> [Course]
-    func createCourse(name: String, termID: UUID) async throws -> Course
-    func updateCourse(id: UUID, name: String, termID: UUID) async throws -> Course
+    func createCourse(name: String, termID: UUID, units: Double, grade: Grade?) async throws -> Course
+    func updateCourse(id: UUID, name: String, termID: UUID, units: Double, grade: Grade?) async throws
+        -> Course
     func deleteCourse(id: UUID) async throws
     /// Attaches, changes, or removes (`dueDate: nil`) a Course's Deadline.
     func setCourseDeadline(id: UUID, dueDate: Date?) async throws -> Course
@@ -36,15 +37,21 @@ public struct URLSessionCoursesAPIClient: CoursesAPIClient {
         return try await send(request)
     }
 
-    public func createCourse(name: String, termID: UUID) async throws -> Course {
+    public func createCourse(name: String, termID: UUID, units: Double, grade: Grade?) async throws
+        -> Course
+    {
         var request = try makeRequest(path: "v1/courses", method: "POST")
-        try attach(SaveCoursePayload(name: name, termID: termID), to: &request)
+        try attach(
+            SaveCoursePayload(name: name, termID: termID, units: units, grade: grade), to: &request)
         return try await send(request)
     }
 
-    public func updateCourse(id: UUID, name: String, termID: UUID) async throws -> Course {
+    public func updateCourse(
+        id: UUID, name: String, termID: UUID, units: Double, grade: Grade?
+    ) async throws -> Course {
         var request = try makeRequest(path: "v1/courses/\(id)", method: "PUT")
-        try attach(SaveCoursePayload(name: name, termID: termID), to: &request)
+        try attach(
+            SaveCoursePayload(name: name, termID: termID, units: units, grade: grade), to: &request)
         return try await send(request)
     }
 
@@ -62,6 +69,10 @@ public struct URLSessionCoursesAPIClient: CoursesAPIClient {
     private struct SaveCoursePayload: Encodable {
         let name: String
         let termID: UUID
+        let units: Double
+        /// Omitted from the body when `nil`, which the backend reads as "no
+        /// mark yet" and, on an edit, as clearing the mark it had.
+        let grade: Grade?
     }
 
     private struct SetCourseDeadlinePayload: Encodable {

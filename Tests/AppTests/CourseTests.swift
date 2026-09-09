@@ -28,6 +28,17 @@ extension AppTestSuite {
             ["Authorization": "Bearer test-token-one"]
         }
 
+        /// A save payload whose `grade` is an unchecked string, so a mark
+        /// off the school's ladder can be sent at all — `SaveCourseRequest`'s
+        /// own `Grade` field makes that unrepresentable, which is the point
+        /// of the type but leaves no way to test the rejection.
+        private struct RawGradeCourseRequest: Content {
+            let name: String
+            let termID: UUID
+            let units: Double
+            let grade: String
+        }
+
         @Test("rejects requests without a bearer token")
         func coursesWithoutTokenAreRejected() async throws {
             try await withCoursesApp { app in
@@ -46,7 +57,7 @@ extension AppTestSuite {
                     .POST, "/v1/courses",
                     headers: authHeaders(),
                     beforeRequest: { req async throws in
-                        try req.content.encode(SaveCourseRequest(name: "CS 301", termID: termID))
+                        try req.content.encode(SaveCourseRequest(name: "CS 301", termID: termID, units: 3))
                     },
                     afterResponse: { res async throws in
                         #expect(res.status == .ok)
@@ -74,7 +85,7 @@ extension AppTestSuite {
                     .POST, "/v1/courses",
                     headers: authHeaders(),
                     beforeRequest: { req async throws in
-                        try req.content.encode(SaveCourseRequest(name: "CS 301", termID: UUID()))
+                        try req.content.encode(SaveCourseRequest(name: "CS 301", termID: UUID(), units: 3))
                     },
                     afterResponse: { res async in
                         #expect(res.status == .badRequest)
@@ -102,7 +113,7 @@ extension AppTestSuite {
                     headers: authHeaders(),
                     beforeRequest: { req async throws in
                         let termID = try await makeTerm(on: app.db).requireID()
-                        try req.content.encode(SaveCourseRequest(name: "   ", termID: termID))
+                        try req.content.encode(SaveCourseRequest(name: "   ", termID: termID, units: 3))
                     },
                     afterResponse: { res async in
                         #expect(res.status == .badRequest)
@@ -145,7 +156,8 @@ extension AppTestSuite {
                     .PUT, "/v1/courses/\(id)",
                     headers: authHeaders(),
                     beforeRequest: { req async throws in
-                        try req.content.encode(SaveCourseRequest(name: "CS 301: Renamed", termID: otherTermID))
+                        try req.content.encode(SaveCourseRequest(
+                            name: "CS 301: Renamed", termID: otherTermID, units: 3))
                     },
                     afterResponse: { res async throws in
                         #expect(res.status == .ok)
@@ -169,12 +181,133 @@ extension AppTestSuite {
                     .PUT, "/v1/courses/\(UUID())",
                     headers: authHeaders(),
                     beforeRequest: { req async throws in
-                        try req.content.encode(SaveCourseRequest(name: "Doesn't matter", termID: UUID()))
+                        try req.content.encode(SaveCourseRequest(name: "Doesn't matter", termID: UUID(), units: 3))
                     },
                     afterResponse: { res async in
                         #expect(res.status == .notFound)
                     }
                 )
+            }
+        }
+
+        @Test("stores the units and the mark a Course is saved with")
+        func storesUnitsAndGrade() async throws {
+            try await withCoursesApp { app in
+                let termID = try await makeTerm(on: app.db, year: 2026, semester: .first).requireID()
+
+                try await app.testing().test(
+                    .POST, "/v1/courses",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(
+                            SaveCourseRequest(
+                                name: "Thermo", termID: termID, units: 1.5, grade: .oneTwentyFive))
+                    },
+                    afterResponse: { res async throws in
+                        #expect(res.status == .ok)
+                        let body = try res.content.decode(CourseResponse.self)
+                        #expect(body.units == 1.5)
+                        #expect(body.grade == .oneTwentyFive)
+                    }
+                )
+
+                let stored = try await Course.query(on: app.db).all().first
+                #expect(stored?.units == 1.5)
+                #expect(stored?.grade == .oneTwentyFive)
+            }
+        }
+
+        @Test("a Course with no mark yet reads as ongoing")
+        func newCourseHasNoGrade() async throws {
+            try await withCoursesApp { app in
+                let termID = try await makeTerm(on: app.db, year: 2026, semester: .first).requireID()
+
+                try await app.testing().test(
+                    .POST, "/v1/courses",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(
+                            SaveCourseRequest(name: "Thesis", termID: termID, units: 3))
+                    },
+                    afterResponse: { res async throws in
+                        let body = try res.content.decode(CourseResponse.self)
+                        #expect(body.grade == nil)
+                    }
+                )
+            }
+        }
+
+        @Test("editing a Course clears its mark when none is sent")
+        func editingClearsGrade() async throws {
+            try await withCoursesApp { app in
+                let course = try await makeCourse(name: "Signals", on: app.db, grade: .two)
+                let id = try course.requireID()
+                let termID = course.$term.id
+
+                try await app.testing().test(
+                    .PUT, "/v1/courses/\(id)",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        try req.content.encode(
+                            SaveCourseRequest(name: "Signals", termID: termID, units: 3))
+                    },
+                    afterResponse: { res async throws in
+                        let body = try res.content.decode(CourseResponse.self)
+                        #expect(body.grade == nil)
+                    }
+                )
+
+                let stored = try await Course.find(id, on: app.db)
+                #expect(stored?.grade == nil)
+            }
+        }
+
+        @Test("rejects a Course with zero or negative units")
+        func rejectsNonPositiveUnits() async throws {
+            try await withCoursesApp { app in
+                let termID = try await makeTerm(on: app.db, year: 2026, semester: .first).requireID()
+
+                for units in [0.0, -3.0] {
+                    try await app.testing().test(
+                        .POST, "/v1/courses",
+                        headers: authHeaders(),
+                        beforeRequest: { req async throws in
+                            try req.content.encode(
+                                SaveCourseRequest(name: "Weightless", termID: termID, units: units))
+                        },
+                        afterResponse: { res async in
+                            #expect(res.status == .badRequest)
+                        }
+                    )
+                }
+
+                let stored = try await Course.query(on: app.db).all()
+                #expect(stored.isEmpty)
+            }
+        }
+
+        @Test("rejects a mark that isn't on the school's ladder")
+        func rejectsUnknownGrade() async throws {
+            try await withCoursesApp { app in
+                let termID = try await makeTerm(on: app.db, year: 2026, semester: .first).requireID()
+
+                try await app.testing().test(
+                    .POST, "/v1/courses",
+                    headers: authHeaders(),
+                    beforeRequest: { req async throws in
+                        // "3.50" sits between two legal marks — the ladder is
+                        // discrete, so it's a bad request rather than a value
+                        // quietly rounded to a neighbour.
+                        try req.content.encode(
+                            RawGradeCourseRequest(name: "Thermo", termID: termID, units: 3, grade: "3.50"))
+                    },
+                    afterResponse: { res async in
+                        #expect(res.status == .badRequest)
+                    }
+                )
+
+                let stored = try await Course.query(on: app.db).all()
+                #expect(stored.isEmpty)
             }
         }
 

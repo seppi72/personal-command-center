@@ -17,12 +17,22 @@ public struct Course: Codable, Identifiable, Equatable, Sendable {
     public var termID: UUID
     public var term: Term
     public var dueDate: Date?
+    /// How much this subject weighs in the General Weighted Average — always
+    /// present, never optional (issue #92).
+    public var units: Double
+    /// The final mark, or `nil` while the subject is ongoing.
+    public var grade: Grade?
 
-    public init(id: UUID, name: String, term: Term, dueDate: Date? = nil) {
+    public init(
+        id: UUID, name: String, term: Term, units: Double, grade: Grade? = nil,
+        dueDate: Date? = nil
+    ) {
         self.id = id
         self.name = name
         self.termID = term.id
         self.term = term
+        self.units = units
+        self.grade = grade
         self.dueDate = dueDate
     }
 }

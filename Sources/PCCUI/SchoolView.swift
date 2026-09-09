@@ -199,14 +199,19 @@ private struct SchoolContent: View {
 
     // MARK: - Tiles
 
-    /// The four KPI figures. Only figures the model can actually produce —
-    /// GPA, Credits Earned and Study Streak are absent rather than rendered
-    /// as placeholder numbers, and stay absent until the data behind them
-    /// exists (issue #92). Tiles render zeroed rather than hidden, so the row
+    /// The six KPI figures. Only figures the model can actually produce: GWA
+    /// and Units Earned joined the row once Courses carried grades and units
+    /// (issue #92), while Study Streak still has no function here rather than
+    /// a placeholder one. Tiles render zeroed rather than hidden, so the row
     /// doesn't reflow once data arrives.
     private var tileRow: some View {
         let tiles = viewModel.tiles
         return HStack(spacing: 14) {
+            gwaTile
+            tile(
+                "Units Earned",
+                value: PCCUnits.text(viewModel.summary?.unitsEarned ?? 0),
+                caption: "All Terms", status: .nominal)
             tile(
                 "Assignments Left", value: "\(tiles.assignmentsLeft)",
                 caption: "\(tiles.assignmentsDueInRange) due \(rangeCaption)",
@@ -222,6 +227,32 @@ private struct SchoolContent: View {
                 caption: viewModel.currentTerm?.displayName ?? "No Term",
                 status: .nominal)
         }
+    }
+
+    /// General Weighted Average — the current semester's figure, with the
+    /// cumulative one beneath it: the semester is the number being steered,
+    /// the cumulative one is what matters at graduation.
+    ///
+    /// **Lower is better on this scale**, alone among this app's figures, so
+    /// its status is inverted deliberately rather than inherited: a GWA at or
+    /// under the passing mark is nominal, and one above it is the attention
+    /// case — the opposite reading of the same comparison every other tile
+    /// here makes. A Term with no marks yet is neither, and shows a dash
+    /// rather than a zero that would read as a perfect score.
+    private var gwaTile: some View {
+        let summary = viewModel.summary
+        let cumulative = SchoolSummary.formatted(summary?.cumulativeGWA)
+        return tile(
+            "GWA", value: SchoolSummary.formatted(summary?.termGWA),
+            caption: "\(cumulative) cumulative",
+            status: Self.gwaStatus(summary?.termGWA))
+    }
+
+    /// See `gwaTile` — the inversion lives here so it's one stated rule
+    /// rather than a comparison buried in a view builder.
+    private static func gwaStatus(_ gwa: Double?) -> PanelStatus {
+        guard let gwa else { return .nominal }
+        return gwa <= Grade.passingMark ? .nominal : .attention
     }
 
     /// The range in the voice a tile subtitle needs — "this week", "in March
@@ -315,6 +346,15 @@ private struct SchoolContent: View {
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .tracking(1.0)
                     .foregroundStyle(.secondary)
+                // The mark and what it weighs, the two fields the tiles above
+                // are computed from — shown on the card so a figure that
+                // looks wrong can be traced to the Course that caused it.
+                Text(
+                    "\(course.grade?.cardLabel ?? "—") · \(PCCUnits.text(course.units)) U"
+                )
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .tracking(1.0)
+                .foregroundStyle(.secondary)
                 Spacer(minLength: 4)
                 if let dueDate = course.dueDate {
                     Text(Self.dayFormatter.string(from: dueDate))
@@ -733,6 +773,7 @@ private struct SchoolContent: View {
                 title: "New Course", initialName: "",
                 initialTermID: SchoolBoard.currentTerm(in: viewModel.courses)?.id
                     ?? viewModel.terms.last?.id,
+                initialUnits: CourseFormSheet.defaultUnits, initialGrade: nil,
                 initialDueDate: nil, terms: viewModel.terms
             ) { values in
                 await viewModel.createCourse(values)
@@ -741,6 +782,7 @@ private struct SchoolContent: View {
             CourseFormSheet(
                 title: "Edit Course", initialName: course.name,
                 initialTermID: course.termID,
+                initialUnits: course.units, initialGrade: course.grade,
                 initialDueDate: course.dueDate, terms: viewModel.terms
             ) { values in
                 await viewModel.updateCourse(course, with: values)
@@ -867,14 +909,24 @@ struct CourseFormSheet: View {
 
     @State private var name: String
     @State private var termID: UUID?
+    @State private var unitsText: String
+    @State private var grade: Grade?
     @State private var hasDeadline: Bool
     @State private var dueDate: Date
     @Environment(\.dismiss) private var dismiss
+
+    /// What a new Course's units field opens on — the ordinary subject at
+    /// this school. A prefilled sensible number rather than an empty field
+    /// that blocks Save, since units are required on every Course and this
+    /// is the value most of them carry (issue #92).
+    static let defaultUnits: Double = 3
 
     init(
         title: String,
         initialName: String,
         initialTermID: UUID?,
+        initialUnits: Double,
+        initialGrade: Grade?,
         initialDueDate: Date?,
         terms: [Term],
         onSave: @escaping (CourseFormValues) async -> Void
@@ -884,8 +936,19 @@ struct CourseFormSheet: View {
         self.onSave = onSave
         self._name = State(initialValue: initialName)
         self._termID = State(initialValue: initialTermID ?? terms.last?.id)
+        self._unitsText = State(initialValue: PCCUnits.text(initialUnits))
+        self._grade = State(initialValue: initialGrade)
         self._hasDeadline = State(initialValue: initialDueDate != nil)
         self._dueDate = State(initialValue: initialDueDate ?? Date())
+    }
+
+    /// `nil` while the field holds something that isn't a positive number —
+    /// which is also what disables Save, so the backend's own rejection
+    /// (`CourseController.validatedUnits`) is a backstop rather than the
+    /// first thing the owner hits.
+    private var units: Double? {
+        guard let parsed = Double(unitsText), parsed.isFinite, parsed > 0 else { return nil }
+        return parsed
     }
 
     private var trimmedName: String {
@@ -920,6 +983,27 @@ struct CourseFormSheet: View {
                     }
                 }
                 .panelRows()
+                Section("Units") {
+                    TextField("Units", text: $unitsText)
+                        .pccField()
+                    Text("How much this subject weighs in your General Weighted Average. Half units are allowed.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .panelRows()
+                // A picker, not a numeric field: the school issues marks off
+                // a fixed ladder and nothing between them, so a typed 3.50
+                // would be a value the domain has no meaning for. "In
+                // progress" is the no-mark-yet case, and is also how a mark
+                // already entered is taken back off.
+                Section("Grade") {
+                    PCCMenuPicker(
+                        "Grade", selection: $grade,
+                        options: [(Grade?.none, "In progress")]
+                            + Grade.allCases.map { (Optional($0), $0.pickerTitle) }
+                    )
+                }
+                .panelRows()
                 Section("Deadline") {
                     Toggle("Has deadline", isOn: $hasDeadline)
                     if hasDeadline {
@@ -936,15 +1020,16 @@ struct CourseFormSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        guard let termID else { return }
+                        guard let termID, let units else { return }
                         let values = CourseFormValues(
-                            name: trimmedName, termID: termID, dueDate: selectedDueDate)
+                            name: trimmedName, termID: termID, units: units, grade: grade,
+                            dueDate: selectedDueDate)
                         Task {
                             await onSave(values)
                             dismiss()
                         }
                     }
-                    .disabled(trimmedName.isEmpty || termID == nil)
+                    .disabled(trimmedName.isEmpty || termID == nil || units == nil)
                 }
             }
         }

@@ -1,0 +1,11 @@
+# Owner-entered Course Grade over a computed gradebook
+
+A Course's Grade could be modeled two ways: entered by the owner as the single final mark the school issued (a mirror of the authority's own figure, but no record of how it was arrived at), or computed by the Command Center from logged per-assignment scores weighted against each other (a full gradebook, able to answer "what do I need on the final", but only ever an approximation of a figure the school computes by its own rules).
+
+We chose the owner-entered final mark. The school is the authority on a subject's grade; this app mirrors it, the same shape `docs/adr/0009-manual-entry-not-lms-integration-for-school.md` already gives the rest of the School domain. There is no gradebook, no per-assignment score, and no weighting of homework against exams.
+
+This is the same canonical-versus-derived question Account Balance answered in `docs/adr/0007-computed-balance-over-reconciliation.md`, and it resolves the opposite way. Balance was derived because the Transaction log already existed and is the thing the owner logs anyway — deriving cost nothing and removed a number that could disagree with the log beneath it. Here no score log exists: building a gradebook would mean inventing a whole new logging habit in order to re-derive a number the school already computes and publishes, and the derived figure would still be a guess at the school's own weighting rather than the truth. Mirroring the published mark is both less work and *more* accurate, which is exactly the reverse of the Balance trade-off.
+
+The two figures over these marks — General Weighted Average and Units Earned (`CONTEXT.md`) — are still computed fresh on every request and never stored, matching Net Worth and Work Hours. What is entered by hand is the Grade itself, not the aggregates over it.
+
+Consequences: a Grade can be stale or wrong in exactly the way the owner's typing is, with nothing in the system to cross-check it against — accepted, because the same is already true of every Transaction and Time Entry in this app. There is no "what do I need on the final" projection, and adding one later would mean adding assignment scores as a genuinely new concept rather than extending this one.
